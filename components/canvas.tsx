@@ -5,7 +5,7 @@ import type React from "react"
 import { useCanvas } from "@/hooks/use-canvas"
 import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import { Square, MousePointer2, Circle, Triangle } from "lucide-react"
+import { Square, MousePointer2, Circle, Triangle, Trash2 } from "lucide-react"
 
 interface CanvasProps {
   canvasId: string
@@ -16,13 +16,23 @@ interface CanvasProps {
 }
 
 export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, children }: CanvasProps) {
-  const { canvasRef, tool, setTool, handleMouseDown, handleMouseMove, handleMouseUp, handleWheel, viewport } =
-    useCanvas({
-      canvasId,
-      objects,
-      onObjectsChange,
-      onCursorMove,
-    })
+  const {
+    canvasRef,
+    tool,
+    setTool,
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+    handleWheel,
+    viewport,
+    selectedId,
+    deleteSelectedObject,
+  } = useCanvas({
+    canvasId,
+    objects,
+    onObjectsChange,
+    onCursorMove,
+  })
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
@@ -60,6 +70,21 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
         >
           <Triangle className="h-4 w-4" />
         </Button>
+
+        {selectedId && (
+          <>
+            <div className="w-px bg-border" />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={deleteSelectedObject}
+              title="Delete (Del/Backspace)"
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </>
+        )}
       </div>
 
       {/* Canvas */}

@@ -28,7 +28,7 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
   // Initialize presence
   useEffect(() => {
     async function initPresence() {
-      // Insert presence record (without cursor position - that's handled by broadcast)
+      console.log("[v0] Initializing presence for user:", userName, userId)
       const { data, error } = await supabase
         .from("user_presence")
         .insert({
@@ -47,6 +47,7 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
         return
       }
 
+      console.log("[v0] Presence created successfully:", data.id)
       setPresenceId(data.id)
     }
 
@@ -55,6 +56,7 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
     // Cleanup on unmount
     return () => {
       if (presenceId) {
+        console.log("[v0] Cleaning up presence:", presenceId)
         supabase.from("user_presence").delete().eq("id", presenceId).then()
       }
     }
@@ -64,8 +66,10 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
     async function loadPresence() {
       const { data } = await supabase.from("user_presence").select("*").eq("canvas_id", canvasId).neq("user_id", userId)
 
+      console.log("[v0] Loaded other users:", data?.length || 0)
       const userMap = new Map<string, UserPresence>()
       data?.forEach((user) => {
+        console.log("[v0] Other user:", user.user_name, user.user_id)
         userMap.set(user.user_id, user)
       })
       setOtherUsers(userMap)
@@ -73,10 +77,18 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
 
     loadPresence()
 
+    // Refresh presence list every 5 seconds to detect new users
+    const presenceInterval = setInterval(loadPresence, 5000)
+
+    console.log("[v0] Setting up cursor broadcast channel for canvas:", canvasId)
     const channel = supabase
-      .channel(`canvas:${canvasId}`)
+      .channel(`canvas:${canvasId}:cursors`, {
+        config: {
+          broadcast: { self: false }, // Don't receive own broadcasts
+        },
+      })
       .on("broadcast", { event: "cursor" }, ({ payload }: { payload: CursorUpdate }) => {
-        if (payload.userId === userId) return
+        console.log("[v0] Received cursor broadcast from:", payload.userName, "at", payload.x, payload.y)
 
         setOtherUsers((prev) => {
           const newMap = new Map(prev)
@@ -93,47 +105,32 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
             last_seen: new Date().toISOString(),
           })
 
+          console.log("[v0] Updated cursor for user:", payload.userName, "total users:", newMap.size)
           return newMap
         })
       })
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "user_presence",
-          filter: `canvas_id=eq.${canvasId}`,
-        },
-        (payload) => {
-          if (payload.eventType === "INSERT" && payload.new.user_id !== userId) {
-            setOtherUsers((prev) => {
-              const newMap = new Map(prev)
-              newMap.set(payload.new.user_id, payload.new as UserPresence)
-              return newMap
-            })
-          } else if (payload.eventType === "DELETE") {
-            setOtherUsers((prev) => {
-              const newMap = new Map(prev)
-              newMap.delete(payload.old.user_id)
-              return newMap
-            })
-          }
-        },
-      )
-      .subscribe()
+      .subscribe((status) => {
+        console.log("[v0] Cursor channel subscription status:", status)
+      })
 
     channelRef.current = channel
 
     return () => {
+      console.log("[v0] Cleaning up cursor broadcast channel")
+      clearInterval(presenceInterval)
       supabase.removeChannel(channel)
       channelRef.current = null
     }
-  }, [canvasId, userId, supabase])
+  }, [canvasId, userId, userName, supabase])
 
   const updateCursor = useCallback(
     (x: number, y: number) => {
-      if (!channelRef.current) return
+      if (!channelRef.current) {
+        console.warn("[v0] Cannot send cursor update: channel not ready")
+        return
+      }
 
+      console.log("[v0] Broadcasting cursor position:", x, y, "for user:", userName)
       channelRef.current.send({
         type: "broadcast",
         event: "cursor",

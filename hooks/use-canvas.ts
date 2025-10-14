@@ -19,9 +19,9 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
   const [isDragging, setIsDragging] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
-  const [tool, setTool] = useState<"select" | "rectangle">("select")
+  const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle">("select")
   const lastCursorUpdate = useRef<number>(0)
-  const CURSOR_THROTTLE_MS = 16 // ~60 updates per second for smooth cursor movement
+  const CURSOR_THROTTLE_MS = 16
 
   // Convert screen coordinates to canvas coordinates
   const screenToCanvas = useCallback(
@@ -83,12 +83,27 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       ctx.translate(obj.x + obj.width / 2, obj.y + obj.height / 2)
       ctx.rotate((obj.rotation * Math.PI) / 180)
 
+      ctx.fillStyle = obj.fill_color
+      ctx.strokeStyle = obj.stroke_color
+      ctx.lineWidth = obj.stroke_width
+
       if (obj.type === "rectangle") {
-        ctx.fillStyle = obj.fill_color
-        ctx.strokeStyle = obj.stroke_color
-        ctx.lineWidth = obj.stroke_width
         ctx.fillRect(-obj.width / 2, -obj.height / 2, obj.width, obj.height)
         ctx.strokeRect(-obj.width / 2, -obj.height / 2, obj.width, obj.height)
+      } else if (obj.type === "circle") {
+        const radius = Math.min(obj.width, obj.height) / 2
+        ctx.beginPath()
+        ctx.arc(0, 0, radius, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.stroke()
+      } else if (obj.type === "triangle") {
+        ctx.beginPath()
+        ctx.moveTo(0, -obj.height / 2) // Top point
+        ctx.lineTo(-obj.width / 2, obj.height / 2) // Bottom left
+        ctx.lineTo(obj.width / 2, obj.height / 2) // Bottom right
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
       }
 
       // Draw selection highlight
@@ -131,6 +146,48 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
           rotation: 0,
           fill_color: "#3b82f6",
           stroke_color: "#1e40af",
+          stroke_width: 2,
+        }
+        onObjectsChange([...objects, newObj])
+        setSelectedId(newObj.id)
+        setTool("select")
+        return
+      }
+
+      if (tool === "circle") {
+        // Create new circle
+        const newObj: CanvasObject = {
+          id: crypto.randomUUID(),
+          canvas_id: canvasId,
+          type: "circle",
+          x: pos.x,
+          y: pos.y,
+          width: 100,
+          height: 100,
+          rotation: 0,
+          fill_color: "#10b981",
+          stroke_color: "#059669",
+          stroke_width: 2,
+        }
+        onObjectsChange([...objects, newObj])
+        setSelectedId(newObj.id)
+        setTool("select")
+        return
+      }
+
+      if (tool === "triangle") {
+        // Create new triangle
+        const newObj: CanvasObject = {
+          id: crypto.randomUUID(),
+          canvas_id: canvasId,
+          type: "triangle",
+          x: pos.x,
+          y: pos.y,
+          width: 100,
+          height: 100,
+          rotation: 0,
+          fill_color: "#f97316",
+          stroke_color: "#ea580c",
           stroke_width: 2,
         }
         onObjectsChange([...objects, newObj])

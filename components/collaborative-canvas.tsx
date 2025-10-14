@@ -2,6 +2,7 @@
 
 import { Canvas } from "@/components/canvas"
 import { MultiplayerCursors } from "@/components/multiplayer-cursors"
+import { PresencePanel } from "@/components/presence-panel"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
 import { useMemo } from "react"
@@ -51,6 +52,7 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
 
   return (
     <div className="relative h-full w-full">
+      <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
       <Canvas canvasId={canvasId} objects={objects} onObjectsChange={syncObjects} onCursorMove={updateCursor}>
         <MultiplayerCursors users={otherUsers} />
       </Canvas>

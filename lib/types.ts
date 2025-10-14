@@ -1,7 +1,7 @@
 export interface CanvasObject {
   id: string
   canvas_id: string
-  type: "rectangle" | "circle" | "text"
+  type: "rectangle" | "circle" | "triangle" | "text"
   x: number
   y: number
   width: number

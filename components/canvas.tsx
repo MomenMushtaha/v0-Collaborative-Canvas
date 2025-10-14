@@ -5,7 +5,7 @@ import type React from "react"
 import { useCanvas } from "@/hooks/use-canvas"
 import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import { Square, MousePointer2 } from "lucide-react"
+import { Square, MousePointer2, Circle, Triangle } from "lucide-react"
 
 interface CanvasProps {
   canvasId: string
@@ -40,9 +40,25 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
           variant={tool === "rectangle" ? "default" : "ghost"}
           size="icon"
           onClick={() => setTool("rectangle")}
-          title="Rectangle (R)"
+          title="Rectangle (R) - Blue"
         >
           <Square className="h-4 w-4" />
+        </Button>
+        <Button
+          variant={tool === "circle" ? "default" : "ghost"}
+          size="icon"
+          onClick={() => setTool("circle")}
+          title="Circle (C) - Green"
+        >
+          <Circle className="h-4 w-4" />
+        </Button>
+        <Button
+          variant={tool === "triangle" ? "default" : "ghost"}
+          size="icon"
+          onClick={() => setTool("triangle")}
+          title="Triangle (T) - Orange"
+        >
+          <Triangle className="h-4 w-4" />
         </Button>
       </div>
 

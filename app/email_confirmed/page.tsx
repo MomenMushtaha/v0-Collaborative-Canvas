@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 export default function EmailConfirmedPage() {
   const router = useRouter()
@@ -30,60 +29,48 @@ export default function EmailConfirmedPage() {
     } else {
       // Success case
       setStatus("success")
-
-      // Redirect to canvas after 3 seconds
-      setTimeout(() => {
-        router.push("/canvas")
-      }, 3000)
     }
   }, [searchParams, router])
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-muted/20 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-bold">CollabCanvas</CardTitle>
-          <CardDescription>Email Confirmation</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-6 py-8">
-          {status === "loading" && (
-            <>
-              <Loader2 className="h-16 w-16 animate-spin text-primary" />
-              <div className="text-center">
-                <h2 className="text-xl font-semibold">Verifying your email...</h2>
-                <p className="text-sm text-muted-foreground mt-2">Please wait a moment</p>
-              </div>
-            </>
-          )}
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      {status === "loading" && (
+        <div className="flex flex-col items-center gap-6">
+          <Loader2 className="h-16 w-16 animate-spin text-primary" />
+          <div className="text-center">
+            <h2 className="text-xl font-semibold">Verifying your email...</h2>
+            <p className="text-sm text-muted-foreground mt-2">Please wait a moment</p>
+          </div>
+        </div>
+      )}
 
-          {status === "success" && (
-            <>
-              <CheckCircle2 className="h-16 w-16 text-green-500" />
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-green-600">Email Confirmed!</h2>
-                <p className="text-sm text-muted-foreground mt-2">Your account has been successfully verified.</p>
-                <p className="text-sm text-muted-foreground mt-1">Redirecting to canvas in 3 seconds...</p>
-              </div>
-              <Button onClick={() => router.push("/canvas")} className="w-full">
-                Go to Canvas Now
-              </Button>
-            </>
-          )}
+      {status === "success" && (
+        <div className="flex flex-col items-center gap-6 max-w-md text-center">
+          <div className="rounded-full border-4 border-green-500 p-4">
+            <CheckCircle2 className="h-12 w-12 text-green-500" strokeWidth={3} />
+          </div>
+          <h1 className="text-2xl font-semibold text-foreground">Email address confirmed</h1>
+          <p className="text-muted-foreground">
+            You have successfully confirmed your email address. Please use your email address to log in.
+          </p>
+          <Button onClick={() => router.push("/canvas")} className="bg-green-500 hover:bg-green-600 text-white px-8">
+            Return to Dashboard
+          </Button>
+        </div>
+      )}
 
-          {status === "error" && (
-            <>
-              <XCircle className="h-16 w-16 text-destructive" />
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-destructive">Confirmation Failed</h2>
-                <p className="text-sm text-muted-foreground mt-4 max-w-sm">{errorMessage}</p>
-              </div>
-              <Button onClick={() => router.push("/")} className="w-full">
-                Return to Sign In
-              </Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      {status === "error" && (
+        <div className="flex flex-col items-center gap-6 max-w-md text-center">
+          <div className="rounded-full border-4 border-destructive p-4">
+            <XCircle className="h-12 w-12 text-destructive" strokeWidth={3} />
+          </div>
+          <h1 className="text-2xl font-semibold text-foreground">Confirmation Failed</h1>
+          <p className="text-muted-foreground">{errorMessage}</p>
+          <Button onClick={() => router.push("/")} className="px-8">
+            Return to Sign In
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

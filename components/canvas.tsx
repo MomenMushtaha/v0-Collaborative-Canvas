@@ -12,10 +12,20 @@ interface CanvasProps {
   objects: CanvasObject[]
   onObjectsChange: (objects: CanvasObject[]) => void
   onCursorMove?: (x: number, y: number) => void
+  onSelectionChange?: (selectedIds: string[]) => void
+  otherUsersSelections?: Array<{ userId: string; userName: string; color: string; selectedIds: string[] }>
   children?: React.ReactNode
 }
 
-export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, children }: CanvasProps) {
+export function Canvas({
+  canvasId,
+  objects,
+  onObjectsChange,
+  onCursorMove,
+  onSelectionChange,
+  otherUsersSelections,
+  children,
+}: CanvasProps) {
   const {
     canvasRef,
     tool,
@@ -32,6 +42,8 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
     objects,
     onObjectsChange,
     onCursorMove,
+    onSelectionChange,
+    otherUsersSelections,
   })
 
   return (

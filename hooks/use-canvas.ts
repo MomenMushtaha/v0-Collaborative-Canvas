@@ -10,6 +10,8 @@ interface UseCanvasProps {
   objects: CanvasObject[]
   onObjectsChange: (objects: CanvasObject[]) => void
   onCursorMove?: (x: number, y: number) => void
+  onSelectionChange?: (selectedIds: string[]) => void
+  otherUsersSelections?: Array<{ userId: string; userName: string; color: string; selectedIds: string[] }>
 }
 
 type ResizeHandle =
@@ -23,7 +25,14 @@ type ResizeHandle =
   | "left"
   | null
 
-export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: UseCanvasProps) {
+export function useCanvas({
+  canvasId,
+  objects,
+  onObjectsChange,
+  onCursorMove,
+  onSelectionChange,
+  otherUsersSelections = [],
+}: UseCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -51,6 +60,16 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     onObjectsChange(updatedObjects)
     setSelectedIds([])
   }, [selectedIds, objects, onObjectsChange])
+
+  useEffect(() => {
+    console.log("[v0] Selection changed:", selectedIds)
+    if (onSelectionChange) {
+      console.log("[v0] Calling onSelectionChange with:", selectedIds)
+      onSelectionChange(selectedIds)
+    } else {
+      console.log("[v0] onSelectionChange is not defined")
+    }
+  }, [selectedIds, onSelectionChange])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -166,6 +185,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         ctx.save()
 
         const isSelected = selectedIds.includes(obj.id)
+        const otherUserSelection = otherUsersSelections.find((selection) => selection.selectedIds.includes(obj.id))
 
         if (obj.type === "line") {
           ctx.strokeStyle = obj.stroke_color
@@ -177,6 +197,15 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
 
           if (isSelected) {
             ctx.strokeStyle = "#3b82f6"
+            ctx.lineWidth = 4 / viewport.zoom
+            ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+            ctx.beginPath()
+            ctx.moveTo(obj.x, obj.y)
+            ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
+            ctx.stroke()
+            ctx.setLineDash([])
+          } else if (otherUserSelection) {
+            ctx.strokeStyle = otherUserSelection.color
             ctx.lineWidth = 4 / viewport.zoom
             ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
             ctx.beginPath()
@@ -214,6 +243,12 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
 
           if (isSelected) {
             ctx.strokeStyle = "#3b82f6"
+            ctx.lineWidth = 2 / viewport.zoom
+            ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+            ctx.strokeRect(-obj.width / 2 - 5, -obj.height / 2 - 5, obj.width + 10, obj.height + 10)
+            ctx.setLineDash([])
+          } else if (otherUserSelection) {
+            ctx.strokeStyle = otherUserSelection.color
             ctx.lineWidth = 2 / viewport.zoom
             ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
             ctx.strokeRect(-obj.width / 2 - 5, -obj.height / 2 - 5, obj.width + 10, obj.height + 10)
@@ -292,7 +327,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox])
+  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, otherUsersSelections])
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {

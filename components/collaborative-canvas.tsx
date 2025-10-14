@@ -35,12 +35,14 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
     userId,
   })
 
-  const { otherUsers, updateCursor } = usePresence({
+  const { otherUsers, updateCursor, updateSelection } = usePresence({
     canvasId,
     userId,
     userName,
     userColor,
   })
+
+  console.log("[v0] CollaborativeCanvas - updateSelection function:", typeof updateSelection)
 
   const onlineUsers = useMemo(() => {
     const isUserOnline = (lastSeen: string) => {
@@ -51,6 +53,17 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
 
     return otherUsers.filter((user) => isUserOnline(user.last_seen))
   }, [otherUsers])
+
+  const otherUsersSelections = useMemo(() => {
+    return onlineUsers
+      .filter((user) => user.selected_object_ids && user.selected_object_ids.length > 0)
+      .map((user) => ({
+        userId: user.user_id,
+        userName: user.user_name,
+        color: user.color,
+        selectedIds: user.selected_object_ids || [],
+      }))
+  }, [onlineUsers])
 
   if (isLoading) {
     return (
@@ -63,7 +76,17 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
   return (
     <div className="relative h-full w-full">
       <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
-      <Canvas canvasId={canvasId} objects={objects} onObjectsChange={syncObjects} onCursorMove={updateCursor}>
+      <Canvas
+        canvasId={canvasId}
+        objects={objects}
+        onObjectsChange={syncObjects}
+        onCursorMove={updateCursor}
+        onSelectionChange={(selectedIds) => {
+          console.log("[v0] Canvas onSelectionChange called with:", selectedIds)
+          updateSelection(selectedIds)
+        }}
+        otherUsersSelections={otherUsersSelections}
+      >
         <MultiplayerCursors users={onlineUsers} />
       </Canvas>
     </div>

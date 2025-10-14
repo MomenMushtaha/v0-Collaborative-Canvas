@@ -19,6 +19,13 @@ interface CursorUpdate {
   y: number
 }
 
+interface SelectionUpdate {
+  userId: string
+  userName: string
+  color: string
+  selectedObjectIds: string[]
+}
+
 export function usePresence({ canvasId, userId, userName, userColor }: UsePresenceProps) {
   const [otherUsers, setOtherUsers] = useState<Map<string, UserPresence>>(new Map())
   const supabase = createClient()
@@ -38,6 +45,7 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
           color: userColor,
           cursor_x: 0,
           cursor_y: 0,
+          selected_object_ids: [],
         })
         .select()
         .single()
@@ -102,10 +110,34 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
             color: payload.color,
             cursor_x: payload.x,
             cursor_y: payload.y,
+            selected_object_ids: existing?.selected_object_ids || [],
             last_seen: new Date().toISOString(),
           })
 
           console.log("[v0] Updated cursor for user:", payload.userName, "total users:", newMap.size)
+          return newMap
+        })
+      })
+      .on("broadcast", { event: "selection" }, ({ payload }: { payload: SelectionUpdate }) => {
+        console.log("[v0] Received selection broadcast from:", payload.userName, "selected:", payload.selectedObjectIds)
+
+        setOtherUsers((prev) => {
+          const newMap = new Map(prev)
+          const existing = newMap.get(payload.userId)
+
+          newMap.set(payload.userId, {
+            id: existing?.id || payload.userId,
+            canvas_id: canvasId,
+            user_id: payload.userId,
+            user_name: payload.userName,
+            color: payload.color,
+            cursor_x: existing?.cursor_x || 0,
+            cursor_y: existing?.cursor_y || 0,
+            selected_object_ids: payload.selectedObjectIds,
+            last_seen: new Date().toISOString(),
+          })
+
+          console.log("[v0] Updated selection for user:", payload.userName, "total users:", newMap.size)
           return newMap
         })
       })
@@ -124,7 +156,7 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
   }, [canvasId, userId, userName, supabase])
 
   const updateCursor = useCallback(
-    (x: number, y: number) => {
+    async (x: number, y: number) => {
       if (!channelRef.current) {
         console.warn("[v0] Cannot send cursor update: channel not ready")
         return
@@ -142,12 +174,69 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
           y,
         } as CursorUpdate,
       })
+
+      if (presenceId) {
+        await supabase
+          .from("user_presence")
+          .update({
+            cursor_x: x,
+            cursor_y: y,
+            last_seen: new Date().toISOString(),
+          })
+          .eq("id", presenceId)
+      }
     },
-    [userId, userName, userColor],
+    [userId, userName, userColor, presenceId, supabase],
+  )
+
+  const updateSelection = useCallback(
+    async (selectedObjectIds: string[]) => {
+      console.log("[v0] updateSelection called with:", selectedObjectIds)
+      console.log("[v0] presenceId:", presenceId)
+      console.log("[v0] channelRef.current:", channelRef.current ? "exists" : "null")
+
+      if (!channelRef.current) {
+        console.warn("[v0] Cannot send selection update: channel not ready")
+        return
+      }
+
+      console.log("[v0] Broadcasting selection:", selectedObjectIds, "for user:", userName)
+
+      channelRef.current.send({
+        type: "broadcast",
+        event: "selection",
+        payload: {
+          userId,
+          userName,
+          color: userColor,
+          selectedObjectIds,
+        } as SelectionUpdate,
+      })
+
+      if (presenceId) {
+        const { error } = await supabase
+          .from("user_presence")
+          .update({
+            selected_object_ids: selectedObjectIds,
+            last_seen: new Date().toISOString(),
+          })
+          .eq("id", presenceId)
+
+        if (error) {
+          console.error("[v0] Error updating selection in database:", error)
+        } else {
+          console.log("[v0] Successfully updated selection in database")
+        }
+      } else {
+        console.warn("[v0] presenceId is null, cannot update database")
+      }
+    },
+    [userId, userName, userColor, presenceId, supabase],
   )
 
   return {
     otherUsers: Array.from(otherUsers.values()),
     updateCursor,
+    updateSelection,
   }
 }

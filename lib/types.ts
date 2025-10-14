@@ -24,6 +24,7 @@ export interface UserPresence {
   cursor_y: number | null
   color: string
   last_seen: string
+  selected_object_ids?: string[]
 }
 
 export interface CanvasState {

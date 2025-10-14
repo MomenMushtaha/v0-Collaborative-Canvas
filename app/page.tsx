@@ -68,7 +68,26 @@ export default function HomePage() {
         ? "http://localhost:3000/auth/callback"
         : "https://v0-collaborative-canvas-mvp.vercel.app/auth/callback"
 
-    const { error } = await supabase.auth.signUp({
+    const { data: existingUser } = await supabase
+      .from("user_presence")
+      .select("user_id")
+      .eq("user_id", (await supabase.auth.getSession()).data.session?.user.id || "")
+      .single()
+
+    // Check if email is already registered by attempting to sign in
+    const { data: signInCheck } = await supabase.auth.signInWithPassword({
+      email,
+      password: "dummy-password-check",
+    })
+
+    // If sign in attempt doesn't return "Invalid login credentials", email exists
+    if (signInCheck?.user) {
+      setError("This email is already registered. Please sign in instead or use a different email.")
+      setIsLoading(false)
+      return
+    }
+
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -80,7 +99,18 @@ export default function HomePage() {
     })
 
     if (error) {
-      setError(error.message)
+      if (
+        error.message.toLowerCase().includes("already registered") ||
+        error.message.toLowerCase().includes("already exists") ||
+        error.message.toLowerCase().includes("user already registered")
+      ) {
+        setError("This email is already registered. Please sign in instead or use a different email.")
+      } else {
+        setError(error.message)
+      }
+      setIsLoading(false)
+    } else if (data.user && data.user.identities && data.user.identities.length === 0) {
+      setError("This email is already registered. Please sign in instead or use a different email.")
       setIsLoading(false)
     } else {
       setSuccess("Check your email to confirm your account!")

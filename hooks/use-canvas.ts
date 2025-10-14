@@ -41,6 +41,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
   const [linePreview, setLinePreview] = useState<{ x: number; y: number } | null>(null)
   const lastCursorUpdate = useRef<number>(0)
   const CURSOR_THROTTLE_MS = 16
+  const animationFrameRef = useRef<number>()
 
   const deleteSelectedObjects = useCallback(() => {
     if (selectedIds.length === 0) return
@@ -123,166 +124,172 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     [],
   )
 
-  // Render canvas
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const ctx = canvas.getContext("2d")
+    const ctx = canvas.getContext("2d", {
+      alpha: false,
+      desynchronized: true,
+    })
     if (!ctx) return
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    const render = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    ctx.save()
-    ctx.translate(viewport.x, viewport.y)
-    ctx.scale(viewport.zoom, viewport.zoom)
-
-    // Draw grid
-    ctx.strokeStyle = "#e5e7eb"
-    ctx.lineWidth = 1 / viewport.zoom
-    const gridSize = 50
-    const startX = Math.floor(-viewport.x / viewport.zoom / gridSize) * gridSize
-    const startY = Math.floor(-viewport.y / viewport.zoom / gridSize) * gridSize
-    const endX = startX + canvas.width / viewport.zoom + gridSize
-    const endY = startY + canvas.height / viewport.zoom + gridSize
-
-    for (let x = startX; x < endX; x += gridSize) {
-      ctx.beginPath()
-      ctx.moveTo(x, startY)
-      ctx.lineTo(x, endY)
-      ctx.stroke()
-    }
-
-    for (let y = startY; y < endY; y += gridSize) {
-      ctx.beginPath()
-      ctx.moveTo(startX, y)
-      ctx.lineTo(endX, y)
-      ctx.stroke()
-    }
-
-    // Draw objects
-    objects.forEach((obj) => {
       ctx.save()
+      ctx.translate(viewport.x, viewport.y)
+      ctx.scale(viewport.zoom, viewport.zoom)
 
-      const isSelected = selectedIds.includes(obj.id)
+      ctx.strokeStyle = "#e5e7eb"
+      ctx.lineWidth = 1 / viewport.zoom
+      const gridSize = 50
+      const startX = Math.floor(-viewport.x / viewport.zoom / gridSize) * gridSize
+      const startY = Math.floor(-viewport.y / viewport.zoom / gridSize) * gridSize
+      const endX = startX + canvas.width / viewport.zoom + gridSize
+      const endY = startY + canvas.height / viewport.zoom + gridSize
 
-      if (obj.type === "line") {
-        ctx.strokeStyle = obj.stroke_color
-        ctx.lineWidth = obj.stroke_width
-        ctx.beginPath()
-        ctx.moveTo(obj.x, obj.y)
-        ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
-        ctx.stroke()
+      ctx.beginPath()
+      for (let x = startX; x < endX; x += gridSize) {
+        ctx.moveTo(x, startY)
+        ctx.lineTo(x, endY)
+      }
+      for (let y = startY; y < endY; y += gridSize) {
+        ctx.moveTo(startX, y)
+        ctx.lineTo(endX, y)
+      }
+      ctx.stroke()
 
-        if (isSelected) {
-          ctx.strokeStyle = "#3b82f6"
-          ctx.lineWidth = 4 / viewport.zoom
-          ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+      objects.forEach((obj) => {
+        ctx.save()
+
+        const isSelected = selectedIds.includes(obj.id)
+
+        if (obj.type === "line") {
+          ctx.strokeStyle = obj.stroke_color
+          ctx.lineWidth = obj.stroke_width
           ctx.beginPath()
           ctx.moveTo(obj.x, obj.y)
           ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
           ctx.stroke()
-          ctx.setLineDash([])
+
+          if (isSelected) {
+            ctx.strokeStyle = "#3b82f6"
+            ctx.lineWidth = 4 / viewport.zoom
+            ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+            ctx.beginPath()
+            ctx.moveTo(obj.x, obj.y)
+            ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
+            ctx.stroke()
+            ctx.setLineDash([])
+          }
+        } else {
+          ctx.translate(obj.x + obj.width / 2, obj.y + obj.height / 2)
+          ctx.rotate((obj.rotation * Math.PI) / 180)
+
+          ctx.fillStyle = obj.fill_color
+          ctx.strokeStyle = obj.stroke_color
+          ctx.lineWidth = obj.stroke_width
+
+          if (obj.type === "rectangle") {
+            ctx.fillRect(-obj.width / 2, -obj.height / 2, obj.width, obj.height)
+            ctx.strokeRect(-obj.width / 2, -obj.height / 2, obj.width, obj.height)
+          } else if (obj.type === "circle") {
+            const radius = Math.min(obj.width, obj.height) / 2
+            ctx.beginPath()
+            ctx.arc(0, 0, radius, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          } else if (obj.type === "triangle") {
+            ctx.beginPath()
+            ctx.moveTo(0, -obj.height / 2)
+            ctx.lineTo(-obj.width / 2, obj.height / 2)
+            ctx.lineTo(obj.width / 2, obj.height / 2)
+            ctx.closePath()
+            ctx.fill()
+            ctx.stroke()
+          }
+
+          if (isSelected) {
+            ctx.strokeStyle = "#3b82f6"
+            ctx.lineWidth = 2 / viewport.zoom
+            ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+            ctx.strokeRect(-obj.width / 2 - 5, -obj.height / 2 - 5, obj.width + 10, obj.height + 10)
+            ctx.setLineDash([])
+          }
         }
-      } else {
-        ctx.translate(obj.x + obj.width / 2, obj.y + obj.height / 2)
-        ctx.rotate((obj.rotation * Math.PI) / 180)
 
-        ctx.fillStyle = obj.fill_color
-        ctx.strokeStyle = obj.stroke_color
-        ctx.lineWidth = obj.stroke_width
+        ctx.restore()
 
-        if (obj.type === "rectangle") {
-          ctx.fillRect(-obj.width / 2, -obj.height / 2, obj.width, obj.height)
-          ctx.strokeRect(-obj.width / 2, -obj.height / 2, obj.width, obj.height)
-        } else if (obj.type === "circle") {
-          const radius = Math.min(obj.width, obj.height) / 2
-          ctx.beginPath()
-          ctx.arc(0, 0, radius, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.stroke()
-        } else if (obj.type === "triangle") {
-          ctx.beginPath()
-          ctx.moveTo(0, -obj.height / 2)
-          ctx.lineTo(-obj.width / 2, obj.height / 2)
-          ctx.lineTo(obj.width / 2, obj.height / 2)
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
-        }
+        if (isSelected && selectedIds.length === 1 && obj.type !== "line") {
+          const handleSize = 8 / viewport.zoom
+          const x1 = obj.x
+          const y1 = obj.y
+          const x2 = obj.x + obj.width
+          const y2 = obj.y + obj.height
+          const centerX = obj.x + obj.width / 2
+          const centerY = obj.y + obj.height / 2
 
-        if (isSelected) {
+          ctx.fillStyle = "#ffffff"
           ctx.strokeStyle = "#3b82f6"
           ctx.lineWidth = 2 / viewport.zoom
-          ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
-          ctx.strokeRect(-obj.width / 2 - 5, -obj.height / 2 - 5, obj.width + 10, obj.height + 10)
-          ctx.setLineDash([])
+
+          const handles = [
+            { x: x1, y: y1 },
+            { x: x2, y: y1 },
+            { x: x1, y: y2 },
+            { x: x2, y: y2 },
+            { x: centerX, y: y1 },
+            { x: x2, y: centerY },
+            { x: centerX, y: y2 },
+            { x: x1, y: centerY },
+          ]
+
+          handles.forEach((handle) => {
+            ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize)
+            ctx.strokeRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize)
+          })
         }
+      })
+
+      if (selectionBox) {
+        ctx.strokeStyle = "#3b82f6"
+        ctx.lineWidth = 2 / viewport.zoom
+        ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+        ctx.fillStyle = "rgba(59, 130, 246, 0.1)"
+        ctx.fillRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height)
+        ctx.strokeRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height)
+        ctx.setLineDash([])
+      }
+
+      if (lineStart && linePreview) {
+        ctx.strokeStyle = "#a855f7"
+        ctx.lineWidth = 3
+        ctx.setLineDash([5, 5])
+        ctx.beginPath()
+        ctx.moveTo(lineStart.x, lineStart.y)
+        ctx.lineTo(linePreview.x, linePreview.y)
+        ctx.stroke()
+        ctx.setLineDash([])
       }
 
       ctx.restore()
+    }
 
-      if (isSelected && selectedIds.length === 1 && obj.type !== "line") {
-        const handleSize = 8 / viewport.zoom
-        const x1 = obj.x
-        const y1 = obj.y
-        const x2 = obj.x + obj.width
-        const y2 = obj.y + obj.height
-        const centerX = obj.x + obj.width / 2
-        const centerY = obj.y + obj.height / 2
-
-        ctx.fillStyle = "#ffffff"
-        ctx.strokeStyle = "#3b82f6"
-        ctx.lineWidth = 2 / viewport.zoom
-
-        const corners = [
-          { x: x1, y: y1 },
-          { x: x2, y: y1 },
-          { x: x1, y: y2 },
-          { x: x2, y: y2 },
-        ]
-
-        corners.forEach((corner) => {
-          ctx.fillRect(corner.x - handleSize / 2, corner.y - handleSize / 2, handleSize, handleSize)
-          ctx.strokeRect(corner.x - handleSize / 2, corner.y - handleSize / 2, handleSize, handleSize)
-        })
-
-        const edges = [
-          { x: centerX, y: y1 },
-          { x: x2, y: centerY },
-          { x: centerX, y: y2 },
-          { x: x1, y: centerY },
-        ]
-
-        edges.forEach((edge) => {
-          ctx.fillRect(edge.x - handleSize / 2, edge.y - handleSize / 2, handleSize, handleSize)
-          ctx.strokeRect(edge.x - handleSize / 2, edge.y - handleSize / 2, handleSize, handleSize)
-        })
+    const scheduleRender = () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
       }
-    })
-
-    if (selectionBox) {
-      ctx.strokeStyle = "#3b82f6"
-      ctx.lineWidth = 2 / viewport.zoom
-      ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
-      ctx.fillStyle = "rgba(59, 130, 246, 0.1)"
-      ctx.fillRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height)
-      ctx.strokeRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height)
-      ctx.setLineDash([])
+      animationFrameRef.current = requestAnimationFrame(render)
     }
 
-    if (lineStart && linePreview) {
-      ctx.strokeStyle = "#a855f7"
-      ctx.lineWidth = 3
-      ctx.setLineDash([5, 5])
-      ctx.beginPath()
-      ctx.moveTo(lineStart.x, lineStart.y)
-      ctx.lineTo(linePreview.x, linePreview.y)
-      ctx.stroke()
-      ctx.setLineDash([])
-    }
+    scheduleRender()
 
-    ctx.restore()
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+    }
   }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox])
 
   const handleMouseDown = useCallback(

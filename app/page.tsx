@@ -17,6 +17,7 @@ export default function HomePage() {
   const [name, setName] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
   const router = useRouter()
   const supabase = createClient()
 
@@ -41,6 +42,7 @@ export default function HomePage() {
     e.preventDefault()
     setIsLoading(true)
     setError("")
+    setSuccess("")
 
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -59,6 +61,7 @@ export default function HomePage() {
     e.preventDefault()
     setIsLoading(true)
     setError("")
+    setSuccess("")
 
     const redirectUrl =
       window.location.hostname === "localhost"
@@ -80,7 +83,7 @@ export default function HomePage() {
       setError(error.message)
       setIsLoading(false)
     } else {
-      setError("Check your email to confirm your account!")
+      setSuccess("Check your email to confirm your account!")
       setIsLoading(false)
     }
   }
@@ -164,6 +167,7 @@ export default function HomePage() {
                   />
                 </div>
                 {error && <p className="text-sm text-destructive">{error}</p>}
+                {success && <p className="text-sm text-green-600">{success}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? "Signing up..." : "Sign Up"}
                 </Button>

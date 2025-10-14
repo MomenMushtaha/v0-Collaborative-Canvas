@@ -136,6 +136,8 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
 
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = "#ffffff"
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
 
       ctx.save()
       ctx.translate(viewport.x, viewport.y)

@@ -34,14 +34,14 @@ export default function CanvasPage() {
 
   if (isLoading || !user) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-white">
         <div className="text-muted-foreground">Loading...</div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col bg-white">
       <Toolbar userName={user.name} onSignOut={handleSignOut} />
       <div className="flex-1">
         <CollaborativeCanvas canvasId="default" userId={user.id} userName={user.name} />

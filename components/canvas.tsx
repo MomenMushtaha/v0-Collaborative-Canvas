@@ -35,7 +35,7 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
   })
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-muted/20">
+    <div className="relative h-full w-full overflow-hidden bg-white">
       {/* Toolbar */}
       <div className="absolute left-4 top-4 z-10 flex gap-2 rounded-lg border bg-card p-2 shadow-lg">
         <Button

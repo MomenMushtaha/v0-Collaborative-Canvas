@@ -68,7 +68,9 @@ export default function HomePage() {
         data: {
           name: name,
         },
-        emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/auth/confirm`,
+        emailRedirectTo:
+          process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
+          "https://v0-collaborative-canvas-mvp.vercel.app/auth/confirm",
       },
     })
 

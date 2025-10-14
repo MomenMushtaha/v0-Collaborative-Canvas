@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import { createClient } from "@/lib/supabase/client"
 import { CollaborativeCanvas } from "@/components/collaborative-canvas"
 import { Toolbar } from "@/components/toolbar"
 
@@ -10,7 +10,7 @@ export default function CanvasPage() {
   const [user, setUser] = useState<{ id: string; name: string } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
-  const supabase = getSupabaseBrowserClient()
+  const supabase = createClient()
 
   useEffect(() => {
     // Check authentication

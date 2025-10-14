@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import { createClient } from "@/lib/supabase/client"
 import type { UserPresence } from "@/lib/types"
 
 interface UsePresenceProps {
@@ -13,7 +13,7 @@ interface UsePresenceProps {
 
 export function usePresence({ canvasId, userId, userName, userColor }: UsePresenceProps) {
   const [otherUsers, setOtherUsers] = useState<UserPresence[]>([])
-  const supabase = getSupabaseBrowserClient()
+  const supabase = createClient()
   const [presenceId, setPresenceId] = useState<string | null>(null)
 
   // Initialize presence

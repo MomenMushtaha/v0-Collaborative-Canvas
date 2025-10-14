@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CheckCircle2, Loader2, XCircle } from "lucide-react"
@@ -12,7 +12,7 @@ export default function ConfirmPage() {
   const [errorMessage, setErrorMessage] = useState("")
   const router = useRouter()
   const searchParams = useSearchParams()
-  const supabase = getSupabaseBrowserClient()
+  const supabase = createClient()
 
   useEffect(() => {
     const error = searchParams.get("error")

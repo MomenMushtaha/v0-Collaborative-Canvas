@@ -67,7 +67,7 @@ export default function HomePage() {
         data: {
           name: name,
         },
-        emailRedirectTo: "https://v0-collaborative-canvas-mvp.vercel.app/email_confirmed",
+        emailRedirectTo: "https://v0-collaborative-canvas-mvp.vercel.app/auth/callback",
       },
     })
 

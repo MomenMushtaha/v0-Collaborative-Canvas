@@ -16,12 +16,13 @@ interface CanvasProps {
 }
 
 export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, children }: CanvasProps) {
-  const { canvasRef, tool, setTool, handleMouseDown, handleMouseMove, handleMouseUp, handleWheel } = useCanvas({
-    canvasId,
-    objects,
-    onObjectsChange,
-    onCursorMove,
-  })
+  const { canvasRef, tool, setTool, handleMouseDown, handleMouseMove, handleMouseUp, handleWheel, viewport } =
+    useCanvas({
+      canvasId,
+      objects,
+      onObjectsChange,
+      onCursorMove,
+    })
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
@@ -59,7 +60,13 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
       />
 
       {/* Multiplayer cursors overlay */}
-      {children}
+      <div className="pointer-events-none absolute inset-0">
+        {children && (
+          <div style={{ transform: `translate(${-viewport.x}px, ${-viewport.y}px) scale(${viewport.zoom})` }}>
+            {children}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

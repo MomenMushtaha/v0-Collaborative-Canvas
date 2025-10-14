@@ -5,27 +5,21 @@ import { MousePointer2 } from "lucide-react"
 
 interface MultiplayerCursorsProps {
   users: UserPresence[]
-  viewportX: number
-  viewportY: number
-  zoom: number
 }
 
-export function MultiplayerCursors({ users, viewportX, viewportY, zoom }: MultiplayerCursorsProps) {
+export function MultiplayerCursors({ users }: MultiplayerCursorsProps) {
   return (
-    <div className="pointer-events-none absolute inset-0">
+    <>
       {users.map((user) => {
         if (user.cursor_x === null || user.cursor_y === null) return null
-
-        const screenX = user.cursor_x * zoom + viewportX
-        const screenY = user.cursor_y * zoom + viewportY
 
         return (
           <div
             key={user.id}
             className="absolute"
             style={{
-              left: `${screenX}px`,
-              top: `${screenY}px`,
+              left: `${user.cursor_x}px`,
+              top: `${user.cursor_y}px`,
               transform: "translate(-2px, -2px)",
             }}
           >
@@ -39,6 +33,6 @@ export function MultiplayerCursors({ users, viewportX, viewportY, zoom }: Multip
           </div>
         )
       })}
-    </div>
+    </>
   )
 }

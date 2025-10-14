@@ -4,7 +4,6 @@ import { Canvas } from "@/components/canvas"
 import { MultiplayerCursors } from "@/components/multiplayer-cursors"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
-import { useCanvas } from "@/hooks/use-canvas"
 import { useMemo } from "react"
 
 interface CollaborativeCanvasProps {
@@ -42,13 +41,6 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
     userColor,
   })
 
-  const { canvasRef, viewport } = useCanvas({
-    canvasId,
-    objects,
-    onObjectsChange: syncObjects,
-    onCursorMove: updateCursor,
-  })
-
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -58,8 +50,10 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
   }
 
   return (
-    <Canvas canvasId={canvasId} objects={objects} onObjectsChange={syncObjects} onCursorMove={updateCursor}>
-      <MultiplayerCursors users={otherUsers} viewportX={viewport.x} viewportY={viewport.y} zoom={viewport.zoom} />
-    </Canvas>
+    <div className="relative h-full w-full">
+      <Canvas canvasId={canvasId} objects={objects} onObjectsChange={syncObjects} onCursorMove={updateCursor}>
+        <MultiplayerCursors users={otherUsers} />
+      </Canvas>
+    </div>
   )
 }

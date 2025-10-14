@@ -35,11 +35,9 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
 
     if (!error) {
-      // Redirect to email confirmed page on success
-      return NextResponse.redirect(`${origin}/email_confirmed`)
+      return NextResponse.redirect(`${origin}/canvas`)
     }
   }
 
-  // If there's an error or no code, redirect to email_confirmed with error params
   return NextResponse.redirect(`${origin}/email_confirmed${requestUrl.search}`)
 }

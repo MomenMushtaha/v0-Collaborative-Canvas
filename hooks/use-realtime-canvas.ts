@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import { createClient } from "@/lib/supabase/client"
 import type { CanvasObject } from "@/lib/types"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 
@@ -13,7 +13,7 @@ interface UseRealtimeCanvasProps {
 export function useRealtimeCanvas({ canvasId, userId }: UseRealtimeCanvasProps) {
   const [objects, setObjects] = useState<CanvasObject[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const supabase = getSupabaseBrowserClient()
+  const supabase = createClient()
 
   // Load initial objects from database
   useEffect(() => {

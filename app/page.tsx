@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -18,13 +18,13 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
-  const supabase = getSupabaseBrowserClient()
+  const supabase = createClient()
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const error = params.get("error")
+    const errorParam = params.get("error")
 
-    if (error) {
+    if (errorParam) {
       router.push(`/email_confirmed${window.location.search}${window.location.hash}`)
       return
     }
@@ -67,7 +67,7 @@ export default function HomePage() {
         data: {
           name: name,
         },
-        emailRedirectTo: "https://v0-collaborative-canvas-mvp.vercel.app/auth/callback",
+        emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/auth/callback`,
       },
     })
 

@@ -21,6 +21,15 @@ export default function HomePage() {
   const supabase = getSupabaseBrowserClient()
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const error = params.get("error")
+
+    if (error) {
+      // Redirect to confirmation page with error parameters
+      router.push(`/auth/confirm${window.location.search}${window.location.hash}`)
+      return
+    }
+
     // Check if user is already logged in
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
@@ -59,7 +68,7 @@ export default function HomePage() {
         data: {
           name: name,
         },
-        emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || window.location.origin,
+        emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/auth/confirm`,
       },
     })
 

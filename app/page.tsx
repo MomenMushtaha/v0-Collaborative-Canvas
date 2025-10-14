@@ -25,8 +25,7 @@ export default function HomePage() {
     const error = params.get("error")
 
     if (error) {
-      // Redirect to confirmation page with error parameters
-      router.push(`/auth/confirm${window.location.search}${window.location.hash}`)
+      router.push(`/email_confirmed${window.location.search}${window.location.hash}`)
       return
     }
 
@@ -68,9 +67,7 @@ export default function HomePage() {
         data: {
           name: name,
         },
-        emailRedirectTo:
-          process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-          "https://v0-collaborative-canvas-mvp.vercel.app/auth/confirm",
+        emailRedirectTo: "https://v0-collaborative-canvas-mvp.vercel.app/email_confirmed",
       },
     })
 

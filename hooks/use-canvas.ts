@@ -26,27 +26,30 @@ type ResizeHandle =
 export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: UseCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
+  const [isSelecting, setIsSelecting] = useState(false)
+  const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const [resizeHandle, setResizeHandle] = useState<ResizeHandle>(null)
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, objX: 0, objY: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [dragOffsets, setDragOffsets] = useState<Map<string, { x: number; y: number }>>(new Map())
   const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line">("select")
   const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null)
   const [linePreview, setLinePreview] = useState<{ x: number; y: number } | null>(null)
   const lastCursorUpdate = useRef<number>(0)
   const CURSOR_THROTTLE_MS = 16
 
-  const deleteSelectedObject = useCallback(() => {
-    if (!selectedId) return
+  const deleteSelectedObjects = useCallback(() => {
+    if (selectedIds.length === 0) return
 
-    console.log("[v0] Deleting object:", selectedId)
-    const updatedObjects = objects.filter((obj) => obj.id !== selectedId)
+    console.log("[v0] Deleting objects:", selectedIds)
+    const updatedObjects = objects.filter((obj) => !selectedIds.includes(obj.id))
     onObjectsChange(updatedObjects)
-    setSelectedId(null)
-  }, [selectedId, objects, onObjectsChange])
+    setSelectedIds([])
+  }, [selectedIds, objects, onObjectsChange])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -54,13 +57,13 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         if (e.key === "Backspace") {
           e.preventDefault()
         }
-        deleteSelectedObject()
+        deleteSelectedObjects()
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [deleteSelectedObject])
+  }, [deleteSelectedObjects])
 
   const screenToCanvas = useCallback(
     (screenX: number, screenY: number) => {
@@ -78,7 +81,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
 
   const getResizeHandleAtPosition = useCallback(
     (pos: { x: number; y: number }, obj: CanvasObject): ResizeHandle => {
-      if (obj.type === "line") return null // Lines don't have resize handles
+      if (obj.type === "line") return null
 
       const handleSize = 8 / viewport.zoom
       const x1 = obj.x
@@ -88,13 +91,11 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       const centerX = obj.x + obj.width / 2
       const centerY = obj.y + obj.height / 2
 
-      // Check corner handles
       if (Math.abs(pos.x - x1) < handleSize && Math.abs(pos.y - y1) < handleSize) return "top-left"
       if (Math.abs(pos.x - x2) < handleSize && Math.abs(pos.y - y1) < handleSize) return "top-right"
       if (Math.abs(pos.x - x1) < handleSize && Math.abs(pos.y - y2) < handleSize) return "bottom-left"
       if (Math.abs(pos.x - x2) < handleSize && Math.abs(pos.y - y2) < handleSize) return "bottom-right"
 
-      // Check edge handles
       if (Math.abs(pos.x - centerX) < handleSize && Math.abs(pos.y - y1) < handleSize) return "top"
       if (Math.abs(pos.x - x2) < handleSize && Math.abs(pos.y - centerY) < handleSize) return "right"
       if (Math.abs(pos.x - centerX) < handleSize && Math.abs(pos.y - y2) < handleSize) return "bottom"
@@ -103,6 +104,23 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       return null
     },
     [viewport.zoom],
+  )
+
+  const isObjectInSelectionBox = useCallback(
+    (obj: CanvasObject, box: { x: number; y: number; width: number; height: number }) => {
+      const boxX1 = Math.min(box.x, box.x + box.width)
+      const boxY1 = Math.min(box.y, box.y + box.height)
+      const boxX2 = Math.max(box.x, box.x + box.width)
+      const boxY2 = Math.max(box.y, box.y + box.height)
+
+      const objX1 = obj.x
+      const objY1 = obj.y
+      const objX2 = obj.x + obj.width
+      const objY2 = obj.y + obj.height
+
+      return objX1 < boxX2 && objX2 > boxX1 && objY1 < boxY2 && objY2 > boxY1
+    },
+    [],
   )
 
   // Render canvas
@@ -146,6 +164,8 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     objects.forEach((obj) => {
       ctx.save()
 
+      const isSelected = selectedIds.includes(obj.id)
+
       if (obj.type === "line") {
         ctx.strokeStyle = obj.stroke_color
         ctx.lineWidth = obj.stroke_width
@@ -154,7 +174,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
         ctx.stroke()
 
-        if (obj.id === selectedId) {
+        if (isSelected) {
           ctx.strokeStyle = "#3b82f6"
           ctx.lineWidth = 4 / viewport.zoom
           ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
@@ -191,7 +211,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
           ctx.stroke()
         }
 
-        if (obj.id === selectedId) {
+        if (isSelected) {
           ctx.strokeStyle = "#3b82f6"
           ctx.lineWidth = 2 / viewport.zoom
           ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
@@ -202,7 +222,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
 
       ctx.restore()
 
-      if (obj.id === selectedId && obj.type !== "line") {
+      if (isSelected && selectedIds.length === 1 && obj.type !== "line") {
         const handleSize = 8 / viewport.zoom
         const x1 = obj.x
         const y1 = obj.y
@@ -215,7 +235,6 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         ctx.strokeStyle = "#3b82f6"
         ctx.lineWidth = 2 / viewport.zoom
 
-        // Corner handles
         const corners = [
           { x: x1, y: y1 },
           { x: x2, y: y1 },
@@ -228,7 +247,6 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
           ctx.strokeRect(corner.x - handleSize / 2, corner.y - handleSize / 2, handleSize, handleSize)
         })
 
-        // Edge handles
         const edges = [
           { x: centerX, y: y1 },
           { x: x2, y: centerY },
@@ -243,6 +261,16 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       }
     })
 
+    if (selectionBox) {
+      ctx.strokeStyle = "#3b82f6"
+      ctx.lineWidth = 2 / viewport.zoom
+      ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+      ctx.fillStyle = "rgba(59, 130, 246, 0.1)"
+      ctx.fillRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height)
+      ctx.strokeRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height)
+      ctx.setLineDash([])
+    }
+
     if (lineStart && linePreview) {
       ctx.strokeStyle = "#a855f7"
       ctx.lineWidth = 3
@@ -255,15 +283,13 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     }
 
     ctx.restore()
-  }, [objects, viewport, selectedId, lineStart, linePreview])
+  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox])
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = screenToCanvas(e.clientX, e.clientY)
 
-      console.log("[v0] Mouse down - tool:", tool, "lineStart:", lineStart)
-
-      if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      if (e.button === 1 || (e.button === 0 && e.altKey)) {
         setIsPanning(true)
         setDragStart({ x: e.clientX, y: e.clientY })
         return
@@ -271,10 +297,8 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
 
       if (tool === "line") {
         if (!lineStart) {
-          console.log("[v0] Setting line start:", pos)
           setLineStart(pos)
         } else {
-          console.log("[v0] Creating line from", lineStart, "to", pos)
           const newObj: CanvasObject = {
             id: crypto.randomUUID(),
             canvas_id: canvasId,
@@ -289,11 +313,10 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
             stroke_width: 3,
           }
           onObjectsChange([...objects, newObj])
-          setSelectedId(newObj.id)
+          setSelectedIds([newObj.id])
           setLineStart(null)
           setLinePreview(null)
           setTool("select")
-          console.log("[v0] Line created:", newObj)
         }
         return
       }
@@ -313,7 +336,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
           stroke_width: 2,
         }
         onObjectsChange([...objects, newObj])
-        setSelectedId(newObj.id)
+        setSelectedIds([newObj.id])
         setTool("select")
         return
       }
@@ -333,7 +356,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
           stroke_width: 2,
         }
         onObjectsChange([...objects, newObj])
-        setSelectedId(newObj.id)
+        setSelectedIds([newObj.id])
         setTool("select")
         return
       }
@@ -353,13 +376,13 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
           stroke_width: 2,
         }
         onObjectsChange([...objects, newObj])
-        setSelectedId(newObj.id)
+        setSelectedIds([newObj.id])
         setTool("select")
         return
       }
 
-      if (selectedId && tool === "select") {
-        const selectedObj = objects.find((o) => o.id === selectedId)
+      if (selectedIds.length === 1 && tool === "select") {
+        const selectedObj = objects.find((o) => o.id === selectedIds[0])
         if (selectedObj) {
           const handle = getResizeHandleAtPosition(pos, selectedObj)
           if (handle) {
@@ -410,11 +433,37 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       })
 
       if (clickedObj) {
-        setSelectedId(clickedObj.id)
-        setIsDragging(true)
-        setDragStart({ x: pos.x - clickedObj.x, y: pos.y - clickedObj.y })
+        if (e.shiftKey) {
+          if (selectedIds.includes(clickedObj.id)) {
+            setSelectedIds(selectedIds.filter((id) => id !== clickedObj.id))
+          } else {
+            setSelectedIds([...selectedIds, clickedObj.id])
+          }
+        } else {
+          if (selectedIds.includes(clickedObj.id)) {
+            setIsDragging(true)
+            const offsets = new Map<string, { x: number; y: number }>()
+            selectedIds.forEach((id) => {
+              const obj = objects.find((o) => o.id === id)
+              if (obj) {
+                offsets.set(id, { x: pos.x - obj.x, y: pos.y - obj.y })
+              }
+            })
+            setDragOffsets(offsets)
+          } else {
+            setSelectedIds([clickedObj.id])
+            setIsDragging(true)
+            const offsets = new Map<string, { x: number; y: number }>()
+            offsets.set(clickedObj.id, { x: pos.x - clickedObj.x, y: pos.y - clickedObj.y })
+            setDragOffsets(offsets)
+          }
+        }
       } else {
-        setSelectedId(null)
+        if (!e.shiftKey) {
+          setSelectedIds([])
+        }
+        setIsSelecting(true)
+        setSelectionBox({ x: pos.x, y: pos.y, width: 0, height: 0 })
       }
     },
     [
@@ -425,7 +474,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       canvasId,
       lineStart,
       viewport.zoom,
-      selectedId,
+      selectedIds,
       getResizeHandleAtPosition,
     ],
   )
@@ -456,8 +505,17 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         return
       }
 
-      if (isResizing && selectedId && resizeHandle) {
-        const obj = objects.find((o) => o.id === selectedId)
+      if (isSelecting && selectionBox) {
+        setSelectionBox({
+          ...selectionBox,
+          width: pos.x - selectionBox.x,
+          height: pos.y - selectionBox.y,
+        })
+        return
+      }
+
+      if (isResizing && selectedIds.length === 1 && resizeHandle) {
+        const obj = objects.find((o) => o.id === selectedIds[0])
         if (obj) {
           const dx = pos.x - resizeStart.x
           const dy = pos.y - resizeStart.y
@@ -504,7 +562,6 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
               break
           }
 
-          // Prevent negative dimensions
           if (newWidth < 10) {
             newWidth = 10
             newX = resizeStart.objX
@@ -515,7 +572,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
           }
 
           const updatedObjects = objects.map((o) =>
-            o.id === selectedId
+            o.id === selectedIds[0]
               ? {
                   ...o,
                   x: newX,
@@ -530,20 +587,21 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         return
       }
 
-      if (isDragging && selectedId) {
-        const obj = objects.find((o) => o.id === selectedId)
-        if (obj) {
-          const updatedObjects = objects.map((o) =>
-            o.id === selectedId
-              ? {
-                  ...o,
-                  x: pos.x - dragStart.x,
-                  y: pos.y - dragStart.y,
-                }
-              : o,
-          )
-          onObjectsChange(updatedObjects)
-        }
+      if (isDragging && selectedIds.length > 0) {
+        const updatedObjects = objects.map((o) => {
+          if (selectedIds.includes(o.id)) {
+            const offset = dragOffsets.get(o.id)
+            if (offset) {
+              return {
+                ...o,
+                x: pos.x - offset.x,
+                y: pos.y - offset.y,
+              }
+            }
+          }
+          return o
+        })
+        onObjectsChange(updatedObjects)
       }
     },
     [
@@ -551,11 +609,14 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       isPanning,
       isDragging,
       isResizing,
-      selectedId,
+      isSelecting,
+      selectedIds,
       resizeHandle,
       resizeStart,
+      selectionBox,
       objects,
       dragStart,
+      dragOffsets,
       onObjectsChange,
       onCursorMove,
       tool,
@@ -564,11 +625,18 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
   )
 
   const handleMouseUp = useCallback(() => {
+    if (isSelecting && selectionBox) {
+      const selectedObjects = objects.filter((obj) => isObjectInSelectionBox(obj, selectionBox))
+      setSelectedIds(selectedObjects.map((obj) => obj.id))
+      setSelectionBox(null)
+    }
+
     setIsDragging(false)
     setIsPanning(false)
     setIsResizing(false)
+    setIsSelecting(false)
     setResizeHandle(null)
-  }, [])
+  }, [isSelecting, selectionBox, objects, isObjectInSelectionBox])
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault()
@@ -582,13 +650,13 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
   return {
     canvasRef,
     viewport,
-    selectedId,
+    selectedIds,
     tool,
     setTool,
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
     handleWheel,
-    deleteSelectedObject,
+    deleteSelectedObject: deleteSelectedObjects,
   }
 }

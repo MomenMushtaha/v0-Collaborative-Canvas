@@ -25,7 +25,7 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
     handleMouseUp,
     handleWheel,
     viewport,
-    selectedId,
+    selectedIds,
     deleteSelectedObject,
   } = useCanvas({
     canvasId,
@@ -82,14 +82,14 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
           <Minus className="h-4 w-4" />
         </Button>
 
-        {selectedId && (
+        {selectedIds.length > 0 && (
           <>
             <div className="w-px bg-border" />
             <Button
               variant="ghost"
               size="icon"
               onClick={deleteSelectedObject}
-              title="Delete (Del/Backspace)"
+              title={`Delete ${selectedIds.length} object${selectedIds.length > 1 ? "s" : ""} (Del/Backspace)`}
               className="text-destructive hover:text-destructive"
             >
               <Trash2 className="h-4 w-4" />

@@ -78,7 +78,12 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
       {/* Multiplayer cursors overlay */}
       <div className="pointer-events-none absolute inset-0">
         {children && (
-          <div style={{ transform: `translate(${-viewport.x}px, ${-viewport.y}px) scale(${viewport.zoom})` }}>
+          <div
+            style={{
+              transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+              transformOrigin: "0 0",
+            }}
+          >
             {children}
           </div>
         )}

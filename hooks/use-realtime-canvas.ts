@@ -13,7 +13,6 @@ interface UseRealtimeCanvasProps {
 export function useRealtimeCanvas({ canvasId, userId }: UseRealtimeCanvasProps) {
   const [objects, setObjects] = useState<CanvasObject[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [realtimeError, setRealtimeError] = useState<string | null>(null)
   const supabase = createClient()
 
   // Load initial objects from database
@@ -35,70 +34,48 @@ export function useRealtimeCanvas({ canvasId, userId }: UseRealtimeCanvasProps) 
     loadObjects()
   }, [canvasId, supabase])
 
-  // Subscribe to real-time changes
   useEffect(() => {
-    console.log("[v0] Setting up real-time subscription for canvas:", canvasId)
+    console.log("[v0] Setting up broadcast subscription for canvas:", canvasId)
 
     const channel: RealtimeChannel = supabase
-      .channel(`canvas:${canvasId}`, {
-        config: {
-          broadcast: { self: false },
-          presence: { key: userId },
-        },
+      .channel(`canvas:${canvasId}`)
+      .on("broadcast", { event: "object_created" }, ({ payload }) => {
+        console.log("[v0] Object created:", payload)
+        setObjects((prev) => {
+          // Avoid duplicates
+          if (prev.some((obj) => obj.id === payload.id)) return prev
+          return [...prev, payload as CanvasObject]
+        })
       })
-      .on(
-        "postgres_changes",
-        {
-          event: "*", // Listen to all events (INSERT, UPDATE, DELETE)
-          schema: "public",
-          table: "canvas_objects",
-          filter: `canvas_id=eq.${canvasId}`,
-        },
-        (payload) => {
-          console.log("[v0] Real-time event received:", payload.eventType, payload)
-
-          if (payload.eventType === "INSERT") {
-            setObjects((prev) => [...prev, payload.new as CanvasObject])
-          } else if (payload.eventType === "UPDATE") {
-            setObjects((prev) => prev.map((obj) => (obj.id === payload.new.id ? (payload.new as CanvasObject) : obj)))
-          } else if (payload.eventType === "DELETE") {
-            setObjects((prev) => prev.filter((obj) => obj.id !== payload.old.id))
-          }
-        },
-      )
-      .subscribe((status, err) => {
-        console.log("[v0] Real-time subscription status:", status)
-
+      .on("broadcast", { event: "object_updated" }, ({ payload }) => {
+        console.log("[v0] Object updated:", payload)
+        setObjects((prev) => prev.map((obj) => (obj.id === payload.id ? (payload as CanvasObject) : obj)))
+      })
+      .on("broadcast", { event: "object_deleted" }, ({ payload }) => {
+        console.log("[v0] Object deleted:", payload)
+        setObjects((prev) => prev.filter((obj) => obj.id !== payload.id))
+      })
+      .subscribe((status) => {
+        console.log("[v0] Broadcast subscription status:", status)
         if (status === "SUBSCRIBED") {
-          console.log("[v0] Successfully subscribed to real-time updates")
-          setRealtimeError(null)
-        } else if (status === "CHANNEL_ERROR") {
-          const errorMsg = "Realtime not enabled. Please enable replication in Supabase dashboard."
-          console.error("[v0]", errorMsg, err)
-          setRealtimeError(errorMsg)
-        } else if (status === "TIMED_OUT") {
-          console.error("[v0] Real-time subscription timed out")
-          setRealtimeError("Connection timed out. Retrying...")
-        } else if (status === "CLOSED") {
-          console.log("[v0] Real-time subscription closed")
+          console.log("[v0] Successfully subscribed to broadcast updates")
         }
       })
 
     return () => {
-      console.log("[v0] Cleaning up real-time subscription")
+      console.log("[v0] Cleaning up broadcast subscription")
       supabase.removeChannel(channel)
     }
-  }, [canvasId, supabase, userId])
+  }, [canvasId, supabase])
 
-  // Sync objects to database
   const syncObjects = useCallback(
     async (updatedObjects: CanvasObject[]) => {
       console.log("[v0] Syncing", updatedObjects.length, "objects to database")
-      setObjects(updatedObjects)
 
       const existingIds = new Set(objects.map((o) => o.id))
       const updatedIds = new Set(updatedObjects.map((o) => o.id))
 
+      // Handle new objects
       const newObjects = updatedObjects.filter((o) => !existingIds.has(o.id))
       if (newObjects.length > 0) {
         console.log("[v0] Inserting", newObjects.length, "new objects")
@@ -108,10 +85,22 @@ export function useRealtimeCanvas({ canvasId, userId }: UseRealtimeCanvasProps) 
             created_by: userId,
           })),
         )
-        if (error) console.error("[v0] Error inserting objects:", error)
-        else console.log("[v0] Successfully inserted new objects")
+        if (error) {
+          console.error("[v0] Error inserting objects:", error)
+        } else {
+          console.log("[v0] Successfully inserted new objects")
+          // Broadcast to other clients
+          for (const obj of newObjects) {
+            await supabase.channel(`canvas:${canvasId}`).send({
+              type: "broadcast",
+              event: "object_created",
+              payload: obj,
+            })
+          }
+        }
       }
 
+      // Handle updated objects
       const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
       for (const obj of toUpdate) {
         const existing = objects.find((o) => o.id === obj.id)
@@ -132,26 +121,49 @@ export function useRealtimeCanvas({ canvasId, userId }: UseRealtimeCanvasProps) 
             })
             .eq("id", obj.id)
 
-          if (error) console.error("[v0] Error updating object:", error)
-          else console.log("[v0] Successfully updated object")
+          if (error) {
+            console.error("[v0] Error updating object:", error)
+          } else {
+            console.log("[v0] Successfully updated object")
+            // Broadcast to other clients
+            await supabase.channel(`canvas:${canvasId}`).send({
+              type: "broadcast",
+              event: "object_updated",
+              payload: obj,
+            })
+          }
         }
       }
 
+      // Handle deleted objects
       const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
       if (deletedIds.length > 0) {
         console.log("[v0] Deleting", deletedIds.length, "objects")
         const { error } = await supabase.from("canvas_objects").delete().in("id", deletedIds)
-        if (error) console.error("[v0] Error deleting objects:", error)
-        else console.log("[v0] Successfully deleted objects")
+        if (error) {
+          console.error("[v0] Error deleting objects:", error)
+        } else {
+          console.log("[v0] Successfully deleted objects")
+          // Broadcast to other clients
+          for (const id of deletedIds) {
+            await supabase.channel(`canvas:${canvasId}`).send({
+              type: "broadcast",
+              event: "object_deleted",
+              payload: { id },
+            })
+          }
+        }
       }
+
+      // Update local state
+      setObjects(updatedObjects)
     },
-    [objects, supabase, userId],
+    [objects, supabase, userId, canvasId],
   )
 
   return {
     objects,
     isLoading,
     syncObjects,
-    realtimeError,
   }
 }

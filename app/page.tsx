@@ -60,6 +60,11 @@ export default function HomePage() {
     setIsLoading(true)
     setError("")
 
+    const redirectUrl =
+      window.location.hostname === "localhost"
+        ? "http://localhost:3000/auth/callback"
+        : "https://v0-collaborative-canvas-mvp.vercel.app/auth/callback"
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -67,7 +72,7 @@ export default function HomePage() {
         data: {
           name: name,
         },
-        emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/auth/callback`,
+        emailRedirectTo: redirectUrl,
       },
     })
 

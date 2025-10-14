@@ -42,6 +42,16 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
     userColor,
   })
 
+  const onlineUsers = useMemo(() => {
+    const isUserOnline = (lastSeen: string) => {
+      const lastSeenTime = new Date(lastSeen).getTime()
+      const now = Date.now()
+      return now - lastSeenTime < 10000 // 10 seconds
+    }
+
+    return otherUsers.filter((user) => isUserOnline(user.last_seen))
+  }, [otherUsers])
+
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -54,7 +64,7 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
     <div className="relative h-full w-full">
       <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
       <Canvas canvasId={canvasId} objects={objects} onObjectsChange={syncObjects} onCursorMove={updateCursor}>
-        <MultiplayerCursors users={otherUsers} />
+        <MultiplayerCursors users={onlineUsers} />
       </Canvas>
     </div>
   )

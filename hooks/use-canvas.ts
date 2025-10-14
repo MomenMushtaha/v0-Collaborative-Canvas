@@ -20,6 +20,8 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
   const [isPanning, setIsPanning] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [tool, setTool] = useState<"select" | "rectangle">("select")
+  const lastCursorUpdate = useRef<number>(0)
+  const CURSOR_THROTTLE_MS = 16 // ~60 updates per second for smooth cursor movement
 
   // Convert screen coordinates to canvas coordinates
   const screenToCanvas = useCallback(
@@ -165,8 +167,11 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = screenToCanvas(e.clientX, e.clientY)
 
-      // Notify cursor position for multiplayer
-      onCursorMove?.(pos.x, pos.y)
+      const now = Date.now()
+      if (onCursorMove && now - lastCursorUpdate.current >= CURSOR_THROTTLE_MS) {
+        onCursorMove(pos.x, pos.y)
+        lastCursorUpdate.current = now
+      }
 
       if (isPanning) {
         const dx = e.clientX - dragStart.x

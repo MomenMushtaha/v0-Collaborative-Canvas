@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { UserPresence } from "@/lib/types"
 
@@ -11,15 +11,24 @@ interface UsePresenceProps {
   userColor: string
 }
 
+interface CursorUpdate {
+  userId: string
+  userName: string
+  color: string
+  x: number
+  y: number
+}
+
 export function usePresence({ canvasId, userId, userName, userColor }: UsePresenceProps) {
-  const [otherUsers, setOtherUsers] = useState<UserPresence[]>([])
+  const [otherUsers, setOtherUsers] = useState<Map<string, UserPresence>>(new Map())
   const supabase = createClient()
   const [presenceId, setPresenceId] = useState<string | null>(null)
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // Initialize presence
   useEffect(() => {
     async function initPresence() {
-      // Insert presence record
+      // Insert presence record (without cursor position - that's handled by broadcast)
       const { data, error } = await supabase
         .from("user_presence")
         .insert({
@@ -27,8 +36,8 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
           user_id: userId,
           user_name: userName,
           color: userColor,
-          cursor_x: null,
-          cursor_y: null,
+          cursor_x: 0,
+          cursor_y: 0,
         })
         .select()
         .single()
@@ -51,18 +60,42 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
     }
   }, [canvasId, userId, userName, userColor, supabase])
 
-  // Subscribe to other users' presence
   useEffect(() => {
     async function loadPresence() {
       const { data } = await supabase.from("user_presence").select("*").eq("canvas_id", canvasId).neq("user_id", userId)
 
-      setOtherUsers(data || [])
+      const userMap = new Map<string, UserPresence>()
+      data?.forEach((user) => {
+        userMap.set(user.user_id, user)
+      })
+      setOtherUsers(userMap)
     }
 
     loadPresence()
 
     const channel = supabase
-      .channel(`presence:${canvasId}`)
+      .channel(`canvas:${canvasId}`)
+      .on("broadcast", { event: "cursor" }, ({ payload }: { payload: CursorUpdate }) => {
+        if (payload.userId === userId) return
+
+        setOtherUsers((prev) => {
+          const newMap = new Map(prev)
+          const existing = newMap.get(payload.userId)
+
+          newMap.set(payload.userId, {
+            id: existing?.id || payload.userId,
+            canvas_id: canvasId,
+            user_id: payload.userId,
+            user_name: payload.userName,
+            color: payload.color,
+            cursor_x: payload.x,
+            cursor_y: payload.y,
+            last_seen: new Date().toISOString(),
+          })
+
+          return newMap
+        })
+      })
       .on(
         "postgres_changes",
         {
@@ -73,42 +106,51 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
         },
         (payload) => {
           if (payload.eventType === "INSERT" && payload.new.user_id !== userId) {
-            setOtherUsers((prev) => [...prev, payload.new as UserPresence])
-          } else if (payload.eventType === "UPDATE" && payload.new.user_id !== userId) {
-            setOtherUsers((prev) =>
-              prev.map((user) => (user.id === payload.new.id ? (payload.new as UserPresence) : user)),
-            )
+            setOtherUsers((prev) => {
+              const newMap = new Map(prev)
+              newMap.set(payload.new.user_id, payload.new as UserPresence)
+              return newMap
+            })
           } else if (payload.eventType === "DELETE") {
-            setOtherUsers((prev) => prev.filter((user) => user.id !== payload.old.id))
+            setOtherUsers((prev) => {
+              const newMap = new Map(prev)
+              newMap.delete(payload.old.user_id)
+              return newMap
+            })
           }
         },
       )
       .subscribe()
 
+    channelRef.current = channel
+
     return () => {
       supabase.removeChannel(channel)
+      channelRef.current = null
     }
   }, [canvasId, userId, supabase])
 
-  // Update cursor position
   const updateCursor = useCallback(
-    async (x: number, y: number) => {
-      if (!presenceId) return
+    (x: number, y: number) => {
+      if (!channelRef.current) return
 
-      await supabase
-        .from("user_presence")
-        .update({
-          cursor_x: x,
-          cursor_y: y,
-          last_seen: new Date().toISOString(),
-        })
-        .eq("id", presenceId)
+      channelRef.current.send({
+        type: "broadcast",
+        event: "cursor",
+        payload: {
+          userId,
+          userName,
+          color: userColor,
+          x,
+          y,
+        } as CursorUpdate,
+      })
     },
-    [presenceId, supabase],
+    [userId, userName, userColor],
   )
 
   return {
-    otherUsers,
+    otherUsers: Array.from(otherUsers.values()),
     updateCursor,
   }
 }

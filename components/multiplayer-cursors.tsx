@@ -22,7 +22,7 @@ export function MultiplayerCursors({ users, viewportX, viewportY, zoom }: Multip
         return (
           <div
             key={user.id}
-            className="absolute transition-transform duration-100"
+            className="absolute"
             style={{
               left: `${screenX}px`,
               top: `${screenY}px`,

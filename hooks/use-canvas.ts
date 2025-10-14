@@ -12,12 +12,26 @@ interface UseCanvasProps {
   onCursorMove?: (x: number, y: number) => void
 }
 
+type ResizeHandle =
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right"
+  | "top"
+  | "right"
+  | "bottom"
+  | "left"
+  | null
+
 export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: UseCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
+  const [isResizing, setIsResizing] = useState(false)
+  const [resizeHandle, setResizeHandle] = useState<ResizeHandle>(null)
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, objX: 0, objY: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line">("select")
   const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null)
@@ -37,7 +51,6 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Delete" || e.key === "Backspace") {
-        // Prevent default backspace navigation
         if (e.key === "Backspace") {
           e.preventDefault()
         }
@@ -49,7 +62,6 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [deleteSelectedObject])
 
-  // Convert screen coordinates to canvas coordinates
   const screenToCanvas = useCallback(
     (screenX: number, screenY: number) => {
       const canvas = canvasRef.current
@@ -64,6 +76,35 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     [viewport],
   )
 
+  const getResizeHandleAtPosition = useCallback(
+    (pos: { x: number; y: number }, obj: CanvasObject): ResizeHandle => {
+      if (obj.type === "line") return null // Lines don't have resize handles
+
+      const handleSize = 8 / viewport.zoom
+      const x1 = obj.x
+      const y1 = obj.y
+      const x2 = obj.x + obj.width
+      const y2 = obj.y + obj.height
+      const centerX = obj.x + obj.width / 2
+      const centerY = obj.y + obj.height / 2
+
+      // Check corner handles
+      if (Math.abs(pos.x - x1) < handleSize && Math.abs(pos.y - y1) < handleSize) return "top-left"
+      if (Math.abs(pos.x - x2) < handleSize && Math.abs(pos.y - y1) < handleSize) return "top-right"
+      if (Math.abs(pos.x - x1) < handleSize && Math.abs(pos.y - y2) < handleSize) return "bottom-left"
+      if (Math.abs(pos.x - x2) < handleSize && Math.abs(pos.y - y2) < handleSize) return "bottom-right"
+
+      // Check edge handles
+      if (Math.abs(pos.x - centerX) < handleSize && Math.abs(pos.y - y1) < handleSize) return "top"
+      if (Math.abs(pos.x - x2) < handleSize && Math.abs(pos.y - centerY) < handleSize) return "right"
+      if (Math.abs(pos.x - centerX) < handleSize && Math.abs(pos.y - y2) < handleSize) return "bottom"
+      if (Math.abs(pos.x - x1) < handleSize && Math.abs(pos.y - centerY) < handleSize) return "left"
+
+      return null
+    },
+    [viewport.zoom],
+  )
+
   // Render canvas
   useEffect(() => {
     const canvas = canvasRef.current
@@ -72,10 +113,8 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Apply viewport transform
     ctx.save()
     ctx.translate(viewport.x, viewport.y)
     ctx.scale(viewport.zoom, viewport.zoom)
@@ -162,6 +201,46 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       }
 
       ctx.restore()
+
+      if (obj.id === selectedId && obj.type !== "line") {
+        const handleSize = 8 / viewport.zoom
+        const x1 = obj.x
+        const y1 = obj.y
+        const x2 = obj.x + obj.width
+        const y2 = obj.y + obj.height
+        const centerX = obj.x + obj.width / 2
+        const centerY = obj.y + obj.height / 2
+
+        ctx.fillStyle = "#ffffff"
+        ctx.strokeStyle = "#3b82f6"
+        ctx.lineWidth = 2 / viewport.zoom
+
+        // Corner handles
+        const corners = [
+          { x: x1, y: y1 },
+          { x: x2, y: y1 },
+          { x: x1, y: y2 },
+          { x: x2, y: y2 },
+        ]
+
+        corners.forEach((corner) => {
+          ctx.fillRect(corner.x - handleSize / 2, corner.y - handleSize / 2, handleSize, handleSize)
+          ctx.strokeRect(corner.x - handleSize / 2, corner.y - handleSize / 2, handleSize, handleSize)
+        })
+
+        // Edge handles
+        const edges = [
+          { x: centerX, y: y1 },
+          { x: x2, y: centerY },
+          { x: centerX, y: y2 },
+          { x: x1, y: centerY },
+        ]
+
+        edges.forEach((edge) => {
+          ctx.fillRect(edge.x - handleSize / 2, edge.y - handleSize / 2, handleSize, handleSize)
+          ctx.strokeRect(edge.x - handleSize / 2, edge.y - handleSize / 2, handleSize, handleSize)
+        })
+      }
     })
 
     if (lineStart && linePreview) {
@@ -178,10 +257,11 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     ctx.restore()
   }, [objects, viewport, selectedId, lineStart, linePreview])
 
-  // Handle mouse down
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = screenToCanvas(e.clientX, e.clientY)
+
+      console.log("[v0] Mouse down - tool:", tool, "lineStart:", lineStart)
 
       if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
         setIsPanning(true)
@@ -191,8 +271,10 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
 
       if (tool === "line") {
         if (!lineStart) {
+          console.log("[v0] Setting line start:", pos)
           setLineStart(pos)
         } else {
+          console.log("[v0] Creating line from", lineStart, "to", pos)
           const newObj: CanvasObject = {
             id: crypto.randomUUID(),
             canvas_id: canvasId,
@@ -211,6 +293,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
           setLineStart(null)
           setLinePreview(null)
           setTool("select")
+          console.log("[v0] Line created:", newObj)
         }
         return
       }
@@ -275,6 +358,26 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         return
       }
 
+      if (selectedId && tool === "select") {
+        const selectedObj = objects.find((o) => o.id === selectedId)
+        if (selectedObj) {
+          const handle = getResizeHandleAtPosition(pos, selectedObj)
+          if (handle) {
+            setIsResizing(true)
+            setResizeHandle(handle)
+            setResizeStart({
+              x: pos.x,
+              y: pos.y,
+              width: selectedObj.width,
+              height: selectedObj.height,
+              objX: selectedObj.x,
+              objY: selectedObj.y,
+            })
+            return
+          }
+        }
+      }
+
       const clickedObj = [...objects].reverse().find((obj) => {
         if (obj.type === "line") {
           const x1 = obj.x
@@ -314,10 +417,19 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         setSelectedId(null)
       }
     },
-    [screenToCanvas, tool, objects, onObjectsChange, canvasId, lineStart, viewport.zoom],
+    [
+      screenToCanvas,
+      tool,
+      objects,
+      onObjectsChange,
+      canvasId,
+      lineStart,
+      viewport.zoom,
+      selectedId,
+      getResizeHandleAtPosition,
+    ],
   )
 
-  // Handle mouse move
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = screenToCanvas(e.clientX, e.clientY)
@@ -344,6 +456,80 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         return
       }
 
+      if (isResizing && selectedId && resizeHandle) {
+        const obj = objects.find((o) => o.id === selectedId)
+        if (obj) {
+          const dx = pos.x - resizeStart.x
+          const dy = pos.y - resizeStart.y
+
+          let newX = resizeStart.objX
+          let newY = resizeStart.objY
+          let newWidth = resizeStart.width
+          let newHeight = resizeStart.height
+
+          switch (resizeHandle) {
+            case "top-left":
+              newX = resizeStart.objX + dx
+              newY = resizeStart.objY + dy
+              newWidth = resizeStart.width - dx
+              newHeight = resizeStart.height - dy
+              break
+            case "top-right":
+              newY = resizeStart.objY + dy
+              newWidth = resizeStart.width + dx
+              newHeight = resizeStart.height - dy
+              break
+            case "bottom-left":
+              newX = resizeStart.objX + dx
+              newWidth = resizeStart.width - dx
+              newHeight = resizeStart.height + dy
+              break
+            case "bottom-right":
+              newWidth = resizeStart.width + dx
+              newHeight = resizeStart.height + dy
+              break
+            case "top":
+              newY = resizeStart.objY + dy
+              newHeight = resizeStart.height - dy
+              break
+            case "right":
+              newWidth = resizeStart.width + dx
+              break
+            case "bottom":
+              newHeight = resizeStart.height + dy
+              break
+            case "left":
+              newX = resizeStart.objX + dx
+              newWidth = resizeStart.width - dx
+              break
+          }
+
+          // Prevent negative dimensions
+          if (newWidth < 10) {
+            newWidth = 10
+            newX = resizeStart.objX
+          }
+          if (newHeight < 10) {
+            newHeight = 10
+            newY = resizeStart.objY
+          }
+
+          const updatedObjects = objects.map((o) =>
+            o.id === selectedId
+              ? {
+                  ...o,
+                  x: newX,
+                  y: newY,
+                  width: newWidth,
+                  height: newHeight,
+                }
+              : o,
+          )
+          onObjectsChange(updatedObjects)
+        }
+        return
+      }
+
       if (isDragging && selectedId) {
         const obj = objects.find((o) => o.id === selectedId)
         if (obj) {
@@ -364,7 +550,10 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       screenToCanvas,
       isPanning,
       isDragging,
+      isResizing,
       selectedId,
+      resizeHandle,
+      resizeStart,
       objects,
       dragStart,
       onObjectsChange,
@@ -374,13 +563,13 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     ],
   )
 
-  // Handle mouse up
   const handleMouseUp = useCallback(() => {
     setIsDragging(false)
     setIsPanning(false)
+    setIsResizing(false)
+    setResizeHandle(null)
   }, [])
 
-  // Handle wheel for zoom
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault()
     const delta = e.deltaY > 0 ? 0.9 : 1.1

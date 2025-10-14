@@ -5,7 +5,7 @@ import type React from "react"
 import { useCanvas } from "@/hooks/use-canvas"
 import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import { Square, MousePointer2, Circle, Triangle, Trash2 } from "lucide-react"
+import { Square, MousePointer2, Circle, Triangle, Trash2, Minus } from "lucide-react"
 
 interface CanvasProps {
   canvasId: string
@@ -69,6 +69,17 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
           title="Triangle (T) - Orange"
         >
           <Triangle className="h-4 w-4" />
+        </Button>
+        <Button
+          variant={tool === "line" ? "default" : "ghost"}
+          size="icon"
+          onClick={() => {
+            console.log("[v0] Line button clicked")
+            setTool("line")
+          }}
+          title="Line (L) - Purple"
+        >
+          <Minus className="h-4 w-4" />
         </Button>
 
         {selectedId && (

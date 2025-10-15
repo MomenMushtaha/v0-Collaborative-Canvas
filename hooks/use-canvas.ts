@@ -10,8 +10,6 @@ interface UseCanvasProps {
   objects: CanvasObject[]
   onObjectsChange: (objects: CanvasObject[]) => void
   onCursorMove?: (x: number, y: number) => void
-  onSelectionChange?: (selectedIds: string[]) => void
-  otherUsersSelections?: Array<{ userId: string; userName: string; color: string; selectedIds: string[] }>
 }
 
 type ResizeHandle =
@@ -25,14 +23,7 @@ type ResizeHandle =
   | "left"
   | null
 
-export function useCanvas({
-  canvasId,
-  objects,
-  onObjectsChange,
-  onCursorMove,
-  onSelectionChange,
-  otherUsersSelections = [],
-}: UseCanvasProps) {
+export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: UseCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -60,18 +51,6 @@ export function useCanvas({
     onObjectsChange(updatedObjects)
     setSelectedIds([])
   }, [selectedIds, objects, onObjectsChange])
-
-  useEffect(() => {
-    console.log("[v0] useCanvas - selectedIds changed:", selectedIds)
-    console.log("[v0] useCanvas - onSelectionChange exists:", !!onSelectionChange)
-
-    if (onSelectionChange) {
-      console.log("[v0] useCanvas - calling onSelectionChange with:", selectedIds)
-      onSelectionChange(selectedIds)
-    } else {
-      console.warn("[v0] useCanvas - onSelectionChange is undefined!")
-    }
-  }, [selectedIds, onSelectionChange])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -156,13 +135,7 @@ export function useCanvas({
     if (!ctx) return
 
     const render = () => {
-      if (otherUsersSelections.length > 0) {
-        console.log("[v0] RENDER - otherUsersSelections:", JSON.stringify(otherUsersSelections))
-      }
-
       ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.fillStyle = "#ffffff"
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
 
       ctx.save()
       ctx.translate(viewport.x, viewport.y)
@@ -191,18 +164,6 @@ export function useCanvas({
         ctx.save()
 
         const isSelected = selectedIds.includes(obj.id)
-        const otherUserSelection = otherUsersSelections.find((selection) => selection.selectedIds.includes(obj.id))
-
-        if (otherUserSelection) {
-          console.log(
-            "[v0] RENDER - Found other user selection for object:",
-            obj.id,
-            "user:",
-            otherUserSelection.userName,
-            "color:",
-            otherUserSelection.color,
-          )
-        }
 
         if (obj.type === "line") {
           ctx.strokeStyle = obj.stroke_color
@@ -214,16 +175,6 @@ export function useCanvas({
 
           if (isSelected) {
             ctx.strokeStyle = "#3b82f6"
-            ctx.lineWidth = 4 / viewport.zoom
-            ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
-            ctx.beginPath()
-            ctx.moveTo(obj.x, obj.y)
-            ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
-            ctx.stroke()
-            ctx.setLineDash([])
-          } else if (otherUserSelection) {
-            console.log("[v0] RENDER - Drawing other user selection highlight for line:", obj.id)
-            ctx.strokeStyle = otherUserSelection.color
             ctx.lineWidth = 4 / viewport.zoom
             ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
             ctx.beginPath()
@@ -261,13 +212,6 @@ export function useCanvas({
 
           if (isSelected) {
             ctx.strokeStyle = "#3b82f6"
-            ctx.lineWidth = 2 / viewport.zoom
-            ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
-            ctx.strokeRect(-obj.width / 2 - 5, -obj.height / 2 - 5, obj.width + 10, obj.height + 10)
-            ctx.setLineDash([])
-          } else if (otherUserSelection) {
-            console.log("[v0] RENDER - Drawing other user selection highlight for shape:", obj.id, "type:", obj.type)
-            ctx.strokeStyle = otherUserSelection.color
             ctx.lineWidth = 2 / viewport.zoom
             ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
             ctx.strokeRect(-obj.width / 2 - 5, -obj.height / 2 - 5, obj.width + 10, obj.height + 10)
@@ -346,7 +290,7 @@ export function useCanvas({
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, otherUsersSelections])
+  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox])
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -701,12 +645,15 @@ export function useCanvas({
     setResizeHandle(null)
   }, [isSelecting, selectionBox, objects, isObjectInSelectionBox])
 
+  const MIN_ZOOM = 1 // 100% minimum - no zooming out
+  const MAX_ZOOM = 3 // Updated from 2 to 3 (300% maximum - allows zooming in up to 3x)
+
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault()
     const delta = e.deltaY > 0 ? 0.9 : 1.1
     setViewport((prev) => ({
       ...prev,
-      zoom: Math.max(0.1, Math.min(5, prev.zoom * delta)),
+      zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * delta)),
     }))
   }, [])
 

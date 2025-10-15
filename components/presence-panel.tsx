@@ -11,11 +11,11 @@ interface PresencePanelProps {
 }
 
 export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
-  // Consider a user online if their last_seen is within the last 5 minutes
+  // Consider a user online if their last_seen is within the last 10 seconds
   const isUserOnline = (lastSeen: string) => {
     const lastSeenTime = new Date(lastSeen).getTime()
     const now = Date.now()
-    return now - lastSeenTime < 300000 // 5 minutes
+    return now - lastSeenTime < 10000 // 10 seconds
   }
 
   const onlineUsers = otherUsers.filter((user) => isUserOnline(user.last_seen))

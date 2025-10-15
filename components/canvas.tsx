@@ -12,20 +12,10 @@ interface CanvasProps {
   objects: CanvasObject[]
   onObjectsChange: (objects: CanvasObject[]) => void
   onCursorMove?: (x: number, y: number) => void
-  onSelectionChange?: (selectedIds: string[]) => void
-  otherUsersSelections?: Array<{ userId: string; userName: string; color: string; selectedIds: string[] }>
   children?: React.ReactNode
 }
 
-export function Canvas({
-  canvasId,
-  objects,
-  onObjectsChange,
-  onCursorMove,
-  onSelectionChange,
-  otherUsersSelections,
-  children,
-}: CanvasProps) {
+export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, children }: CanvasProps) {
   const {
     canvasRef,
     tool,
@@ -42,12 +32,10 @@ export function Canvas({
     objects,
     onObjectsChange,
     onCursorMove,
-    onSelectionChange,
-    otherUsersSelections,
   })
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-white">
+    <div className="relative h-full w-full overflow-hidden bg-muted/20">
       {/* Toolbar */}
       <div className="absolute left-4 top-4 z-10 flex gap-2 rounded-lg border bg-card p-2 shadow-lg">
         <Button
@@ -108,6 +96,11 @@ export function Canvas({
             </Button>
           </>
         )}
+      </div>
+
+      <div className="absolute bottom-4 right-4 z-10 rounded-lg border bg-card px-3 py-2 text-sm shadow-lg">
+        <span className="text-muted-foreground">Zoom: </span>
+        <span className="font-medium">{Math.round(viewport.zoom * 100)}%</span>
       </div>
 
       {/* Canvas */}

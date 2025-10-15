@@ -199,6 +199,26 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
     }
   }, [canvasId, userId, userName, supabase])
 
+  useEffect(() => {
+    if (!presenceId) return
+
+    const heartbeat = async () => {
+      await supabase
+        .from("user_presence")
+        .update({
+          last_seen: new Date().toISOString(),
+        })
+        .eq("id", presenceId)
+    }
+
+    // Send heartbeat every 30 seconds to keep user marked as online
+    const heartbeatInterval = setInterval(heartbeat, 30000)
+
+    return () => {
+      clearInterval(heartbeatInterval)
+    }
+  }, [presenceId, supabase])
+
   const updateCursor = useCallback(
     async (x: number, y: number) => {
       if (!channelRef.current) {

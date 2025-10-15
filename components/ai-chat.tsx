@@ -10,6 +10,7 @@ import type { CanvasObject } from "@/lib/types"
 
 interface AiChatProps {
   currentObjects: CanvasObject[]
+  selectedObjectIds: string[]
   onOperations: (operations: any[], queueItemId: string) => void
   userId: string
   userName: string
@@ -27,7 +28,7 @@ interface OperationProgress {
   operation: string
 }
 
-export function AiChat({ currentObjects, onOperations, userId, userName, canvasId }: AiChatProps) {
+export function AiChat({ currentObjects, selectedObjectIds, onOperations, userId, userName, canvasId }: AiChatProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -73,6 +74,7 @@ export function AiChat({ currentObjects, onOperations, userId, userName, canvasI
             fill_color: obj.fill_color,
             stroke_color: obj.stroke_color,
           })),
+          selectedObjectIds,
         }),
       })
 
@@ -119,7 +121,7 @@ export function AiChat({ currentObjects, onOperations, userId, userName, canvasI
     return (
       <button
         onClick={() => setIsExpanded(true)}
-        className="fixed bottom-6 right-6 flex items-center gap-2 rounded-full bg-gradient-to-r from-purple-600 to-blue-600 px-6 py-3 text-white shadow-lg transition-all hover:shadow-xl hover:scale-105"
+        className="fixed bottom-6 right-6 flex items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-cyan-600 px-6 py-3 text-white shadow-lg transition-all hover:shadow-xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
       >
         <Sparkles className="h-5 w-5" />
         <span className="font-medium">AI Assistant</span>
@@ -128,25 +130,30 @@ export function AiChat({ currentObjects, onOperations, userId, userName, canvasI
   }
 
   return (
-    <div className="fixed bottom-6 right-6 flex w-96 flex-col rounded-lg border bg-background shadow-2xl">
+    <div className="fixed bottom-6 right-6 flex w-96 flex-col rounded-lg border border-border bg-background shadow-2xl overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b bg-gradient-to-r from-purple-600 to-blue-600 px-4 py-3 text-white">
+      <div className="flex items-center justify-between bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-3.5 text-white rounded-t-lg">
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5" />
-          <span className="font-semibold">AI Canvas Assistant</span>
+          <span className="font-semibold text-base">AI Canvas Assistant</span>
         </div>
-        <button onClick={() => setIsExpanded(false)} className="text-white/80 hover:text-white">
+        <button
+          onClick={() => setIsExpanded(false)}
+          className="text-white/80 hover:text-white transition-colors hover:bg-white/10 rounded-full w-6 h-6 flex items-center justify-center"
+        >
           ✕
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex h-96 flex-col gap-3 overflow-y-auto p-4">
+      <div className="flex h-96 flex-col gap-3 overflow-y-auto p-4 bg-muted/30">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
-            <Sparkles className="h-12 w-12 mb-3 text-purple-500" />
-            <p className="text-sm">Ask me to create shapes, arrange objects, or build layouts!</p>
-            <p className="text-xs mt-2 text-muted-foreground/60">
+          <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground px-4">
+            <div className="bg-gradient-to-br from-blue-500 to-cyan-500 p-3 rounded-full mb-4">
+              <Sparkles className="h-8 w-8 text-white" />
+            </div>
+            <p className="text-sm font-medium mb-2">Ask me to create shapes, arrange objects, or build layouts!</p>
+            <p className="text-xs text-muted-foreground/70 leading-relaxed">
               Try: "Create a blue rectangle" or "Move the last shape to the center"
             </p>
           </div>
@@ -154,8 +161,10 @@ export function AiChat({ currentObjects, onOperations, userId, userName, canvasI
         {messages.map((message, index) => (
           <div key={index} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 text-sm ${
-                message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
+              className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm leading-relaxed ${
+                message.role === "user"
+                  ? "bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-sm"
+                  : "bg-background border border-border shadow-sm"
               }`}
             >
               {message.content}
@@ -164,10 +173,10 @@ export function AiChat({ currentObjects, onOperations, userId, userName, canvasI
         ))}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="flex flex-col gap-2 rounded-lg bg-muted px-4 py-3 text-sm min-w-[200px]">
+            <div className="flex flex-col gap-2 rounded-lg bg-background border border-border px-4 py-3 text-sm min-w-[200px] shadow-sm">
               <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Thinking...</span>
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                <span className="font-medium">Thinking...</span>
               </div>
               {operationProgress && (
                 <div className="flex flex-col gap-1 mt-1">
@@ -175,9 +184,9 @@ export function AiChat({ currentObjects, onOperations, userId, userName, canvasI
                     Step {operationProgress.current} of {operationProgress.total}
                   </div>
                   <div className="text-xs font-medium">{operationProgress.operation}</div>
-                  <div className="w-full bg-background rounded-full h-1.5 mt-1">
+                  <div className="w-full bg-muted rounded-full h-1.5 mt-1 overflow-hidden">
                     <div
-                      className="bg-primary h-1.5 rounded-full transition-all duration-300"
+                      className="bg-gradient-to-r from-blue-600 to-cyan-600 h-1.5 rounded-full transition-all duration-300"
                       style={{ width: `${(operationProgress.current / operationProgress.total) * 100}%` }}
                     />
                   </div>
@@ -190,20 +199,25 @@ export function AiChat({ currentObjects, onOperations, userId, userName, canvasI
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="border-t p-4">
+      <form onSubmit={handleSubmit} className="border-t border-border p-4 bg-background">
         <div className="flex gap-2">
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask me to create or modify shapes..."
             disabled={isLoading}
-            className="flex-1"
+            className="flex-1 focus-visible:ring-blue-600"
             onKeyDown={(e) => {
               // Stop propagation to prevent canvas keyboard shortcuts
               e.stopPropagation()
             }}
           />
-          <Button type="submit" size="icon" disabled={isLoading || !input.trim()}>
+          <Button
+            type="submit"
+            size="icon"
+            disabled={isLoading || !input.trim()}
+            className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 transition-all"
+          >
             <Send className="h-4 w-4" />
           </Button>
         </div>

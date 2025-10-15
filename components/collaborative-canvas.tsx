@@ -5,7 +5,7 @@ import { MultiplayerCursors } from "@/components/multiplayer-cursors"
 import { PresencePanel } from "@/components/presence-panel"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
-import { useMemo, useEffect } from "react"
+import { useMemo, useEffect, useState } from "react"
 import type { CanvasObject } from "@/lib/types"
 import { useAIQueue } from "@/hooks/use-ai-queue"
 import { AIStatusIndicator } from "@/components/ai-status-indicator"
@@ -30,6 +30,8 @@ interface CollaborativeCanvasProps {
   userName: string
   aiOperations?: any[]
   onAiOperationsProcessed?: () => void
+  onObjectsChange?: (objects: CanvasObject[]) => void
+  onSelectionChange?: (selectedIds: string[]) => void
 }
 
 export function CollaborativeCanvas({
@@ -38,8 +40,11 @@ export function CollaborativeCanvas({
   userName,
   aiOperations = [],
   onAiOperationsProcessed,
+  onObjectsChange,
+  onSelectionChange,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
+  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
 
   const { objects, isLoading, syncObjects } = useRealtimeCanvas({
     canvasId,
@@ -104,6 +109,15 @@ export function CollaborativeCanvas({
     }
   }, [aiOperations])
 
+  useEffect(() => {
+    onObjectsChange?.(objects)
+  }, [objects, onObjectsChange])
+
+  const handleSelectionChange = (selectedIds: string[]) => {
+    setSelectedObjectIds(selectedIds)
+    onSelectionChange?.(selectedIds)
+  }
+
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -116,7 +130,13 @@ export function CollaborativeCanvas({
     <div className="relative h-full w-full">
       <AIStatusIndicator isAIWorking={isAIWorking} currentOperation={currentOperation} queueLength={queue.length} />
       <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
-      <Canvas canvasId={canvasId} objects={objects} onObjectsChange={syncObjects} onCursorMove={updateCursor}>
+      <Canvas
+        canvasId={canvasId}
+        objects={objects}
+        onObjectsChange={syncObjects}
+        onCursorMove={updateCursor}
+        onSelectionChange={handleSelectionChange}
+      >
         <MultiplayerCursors users={otherUsers} />
       </Canvas>
     </div>

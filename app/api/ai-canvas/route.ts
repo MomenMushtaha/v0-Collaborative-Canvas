@@ -20,10 +20,11 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { message, currentObjects, canvasId, userId, userName } = body
+    const { message, currentObjects, selectedObjectIds, canvasId, userId, userName } = body
 
     console.log("[v0] Message:", message)
     console.log("[v0] Current objects count:", currentObjects?.length || 0)
+    console.log("[v0] Selected objects count:", selectedObjectIds?.length || 0)
     console.log("[v0] Canvas ID:", canvasId)
     console.log("[v0] User:", userName)
 
@@ -135,7 +136,8 @@ export async function POST(request: Request) {
             properties: {
               shapeIndex: {
                 type: "number",
-                description: "Index of the shape to move (0-based, use -1 for last shape)",
+                description:
+                  "Index of the shape to move (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
               },
               x: {
                 type: "number",
@@ -168,7 +170,8 @@ export async function POST(request: Request) {
             properties: {
               shapeIndex: {
                 type: "number",
-                description: "Index of the shape to resize (0-based, use -1 for last shape)",
+                description:
+                  "Index of the shape to resize (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
               },
               width: {
                 type: "number",
@@ -197,7 +200,8 @@ export async function POST(request: Request) {
             properties: {
               shapeIndex: {
                 type: "number",
-                description: "Index of the shape to rotate (0-based, use -1 for last shape)",
+                description:
+                  "Index of the shape to rotate (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
               },
               degrees: {
                 type: "number",
@@ -222,7 +226,7 @@ export async function POST(request: Request) {
             properties: {
               shapeIndex: {
                 type: "number",
-                description: "Index of the shape to delete (0-based)",
+                description: "Index of the shape to delete (0-based, or 'selected' for currently selected shape)",
               },
               all: {
                 type: "boolean",
@@ -268,6 +272,7 @@ export async function POST(request: Request) {
     const canvasContext =
       currentObjects?.map((obj: any, idx: number) => ({
         index: idx,
+        id: obj.id,
         type: obj.type,
         color: obj.fill_color,
         x: Math.round(obj.x),
@@ -276,6 +281,9 @@ export async function POST(request: Request) {
         height: Math.round(obj.height),
         rotation: obj.rotation,
       })) || []
+
+    const selectedObjects = canvasContext.filter((obj: any) => selectedObjectIds?.includes(obj.id))
+    const selectedIndices = selectedObjects.map((obj: any) => obj.index)
 
     const canvasStats = {
       totalShapes: currentObjects?.length || 0,
@@ -307,6 +315,18 @@ Total shapes: ${canvasStats.totalShapes}
 ${canvasStats.totalShapes > 0 ? `Shape types: ${JSON.stringify(canvasStats.shapeTypes)}` : ""}
 ${canvasStats.totalShapes > 0 ? `Colors used: ${JSON.stringify(canvasStats.colorGroups)}` : ""}
 
+${
+  selectedObjects.length > 0
+    ? `
+⭐ CURRENTLY SELECTED SHAPES (${selectedObjects.length}):
+${JSON.stringify(selectedObjects, null, 2)}
+Selected indices: ${JSON.stringify(selectedIndices)}
+
+IMPORTANT: When the user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
+`
+    : "No shapes are currently selected.\n"
+}
+
 OBJECTS ON CANVAS (${currentObjects?.length || 0} total):
 ${JSON.stringify(canvasContext, null, 2)}
 
@@ -320,11 +340,18 @@ AVAILABLE FUNCTIONS:
 7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
 
 SHAPE IDENTIFICATION RULES:
+- **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
 - Use index numbers: 0 = first shape, 1 = second, -1 = last shape
 - When user says "the blue rectangle", find the shape by matching type AND color
 - When user says "the circle", find the first shape of that type
 - When user says "the last shape" or "the latest", use index -1
 - If multiple shapes match, operate on the first match or ask for clarification
+
+SELECTION CONTEXT EXAMPLES:
+- "make it bigger" → resize the selected shape (index ${selectedIndices[0] ?? "none"})
+- "move the selected shape left" → move shape at index ${selectedIndices[0] ?? "none"}
+- "change the color to red" → modify the selected shape
+- "rotate it 45 degrees" → rotate the selected shape
 
 COLOR REFERENCE (use hex codes):
 - red: #ef4444, blue: #3b82f6, green: #22c55e, yellow: #eab308
@@ -350,10 +377,12 @@ BEST PRACTICES:
 3. When moving/resizing shapes, verify the shape exists first
 4. Be conversational and explain what you're doing
 5. If a request is ambiguous, make a reasonable assumption and explain it
+6. **ALWAYS check if there's a selected shape before assuming which shape to operate on**
 
 Examples:
 - "Create a blue square" → createShape(rectangle, center position, 100x100, blue)
 - "Move the circle left" → moveShape(find circle index, deltaX: -100)
+- "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
 - "How many shapes?" → getCanvasState(query: "count")
 - "Delete all red shapes" → Find all red shapes and delete each one`
 
@@ -509,7 +538,7 @@ Examples:
             },
           })
         } else if (functionName === "moveShape") {
-          const validation = validateMoveShape(args, currentObjects)
+          const validation = validateMoveShape(args, currentObjects, selectedIndices)
           if (!validation.valid) {
             validationErrors.push(`moveShape: ${validation.error}`)
             console.warn("[v0] Validation error:", validation.error)
@@ -518,14 +547,14 @@ Examples:
 
           operations.push({
             type: "move",
-            shapeIndex: args.shapeIndex ?? -1,
+            shapeIndex: args.shapeIndex === "selected" ? selectedIndices[0] : (args.shapeIndex ?? -1),
             x: args.x,
             y: args.y,
             deltaX: args.deltaX,
             deltaY: args.deltaY,
           })
         } else if (functionName === "resizeShape") {
-          const validation = validateResizeShape(args, currentObjects)
+          const validation = validateResizeShape(args, currentObjects, selectedIndices)
           if (!validation.valid) {
             validationErrors.push(`resizeShape: ${validation.error}`)
             console.warn("[v0] Validation error:", validation.error)
@@ -534,13 +563,13 @@ Examples:
 
           operations.push({
             type: "resize",
-            shapeIndex: args.shapeIndex ?? -1,
+            shapeIndex: args.shapeIndex === "selected" ? selectedIndices[0] : (args.shapeIndex ?? -1),
             width: args.width,
             height: args.height,
             scale: args.scale,
           })
         } else if (functionName === "rotateShape") {
-          const validation = validateRotateShape(args, currentObjects)
+          const validation = validateRotateShape(args, currentObjects, selectedIndices)
           if (!validation.valid) {
             validationErrors.push(`rotateShape: ${validation.error}`)
             console.warn("[v0] Validation error:", validation.error)
@@ -549,12 +578,12 @@ Examples:
 
           operations.push({
             type: "rotate",
-            shapeIndex: args.shapeIndex ?? -1,
+            shapeIndex: args.shapeIndex === "selected" ? selectedIndices[0] : (args.shapeIndex ?? -1),
             degrees: args.degrees ?? 0,
             absolute: args.absolute ?? false,
           })
         } else if (functionName === "deleteShape") {
-          const validation = validateDeleteShape(args, currentObjects)
+          const validation = validateDeleteShape(args, currentObjects, selectedIndices)
           if (!validation.valid) {
             validationErrors.push(`deleteShape: ${validation.error}`)
             console.warn("[v0] Validation error:", validation.error)
@@ -563,7 +592,7 @@ Examples:
 
           operations.push({
             type: "delete",
-            shapeIndex: args.shapeIndex,
+            shapeIndex: args.shapeIndex === "selected" ? selectedIndices[0] : args.shapeIndex,
             all: args.all ?? false,
           })
         } else if (functionName === "arrangeShapes") {
@@ -659,8 +688,17 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
   return { valid: true }
 }
 
-function validateMoveShape(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
-  if (typeof args.shapeIndex !== "number") {
+function validateMoveShape(
+  args: any,
+  currentObjects: any[],
+  selectedIndices: number[],
+): { valid: boolean; error?: string } {
+  if (args.shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    args.shapeIndex = selectedIndices[0]
+  } else if (typeof args.shapeIndex !== "number") {
     return { valid: false, error: "shapeIndex must be a number." }
   }
 
@@ -699,8 +737,17 @@ function validateMoveShape(args: any, currentObjects: any[]): { valid: boolean; 
   return { valid: true }
 }
 
-function validateResizeShape(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
-  if (typeof args.shapeIndex !== "number") {
+function validateResizeShape(
+  args: any,
+  currentObjects: any[],
+  selectedIndices: number[],
+): { valid: boolean; error?: string } {
+  if (args.shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    args.shapeIndex = selectedIndices[0]
+  } else if (typeof args.shapeIndex !== "number") {
     return { valid: false, error: "shapeIndex must be a number." }
   }
 
@@ -732,8 +779,17 @@ function validateResizeShape(args: any, currentObjects: any[]): { valid: boolean
   return { valid: true }
 }
 
-function validateRotateShape(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
-  if (typeof args.shapeIndex !== "number") {
+function validateRotateShape(
+  args: any,
+  currentObjects: any[],
+  selectedIndices: number[],
+): { valid: boolean; error?: string } {
+  if (args.shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    args.shapeIndex = selectedIndices[0]
+  } else if (typeof args.shapeIndex !== "number") {
     return { valid: false, error: "shapeIndex must be a number." }
   }
 
@@ -753,12 +809,21 @@ function validateRotateShape(args: any, currentObjects: any[]): { valid: boolean
   return { valid: true }
 }
 
-function validateDeleteShape(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
+function validateDeleteShape(
+  args: any,
+  currentObjects: any[],
+  selectedIndices: number[],
+): { valid: boolean; error?: string } {
   if (args.all === true) {
     return { valid: true }
   }
 
-  if (typeof args.shapeIndex !== "number") {
+  if (args.shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    args.shapeIndex = selectedIndices[0]
+  } else if (typeof args.shapeIndex !== "number") {
     return { valid: false, error: "shapeIndex must be a number, or set all: true to delete all shapes." }
   }
 

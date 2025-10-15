@@ -1,7 +1,6 @@
 "use client"
 
-import type React from "react"
-
+import { useEffect } from "react"
 import { useCanvas } from "@/hooks/use-canvas"
 import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -12,10 +11,11 @@ interface CanvasProps {
   objects: CanvasObject[]
   onObjectsChange: (objects: CanvasObject[]) => void
   onCursorMove?: (x: number, y: number) => void
-  children?: React.ReactNode
+  onSelectionChange?: (selectedIds: string[]) => void
+  children?: any
 }
 
-export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, children }: CanvasProps) {
+export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSelectionChange, children }: CanvasProps) {
   const {
     canvasRef,
     tool,
@@ -33,6 +33,10 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, child
     onObjectsChange,
     onCursorMove,
   })
+
+  useEffect(() => {
+    onSelectionChange?.(selectedIds)
+  }, [selectedIds, onSelectionChange])
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">

@@ -13,6 +13,7 @@ export default function CanvasPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [aiOperations, setAiOperations] = useState<any[]>([])
   const [currentObjects, setCurrentObjects] = useState<CanvasObject[]>([])
+  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
   const router = useRouter()
   const supabase = createClient()
 
@@ -59,10 +60,13 @@ export default function CanvasPage() {
           userName={user.name}
           aiOperations={aiOperations}
           onAiOperationsProcessed={() => setAiOperations([])}
+          onObjectsChange={setCurrentObjects}
+          onSelectionChange={setSelectedObjectIds}
         />
       </div>
       <AiChat
         currentObjects={currentObjects}
+        selectedObjectIds={selectedObjectIds}
         onOperations={handleOperations}
         userId={user.id}
         userName={user.name}

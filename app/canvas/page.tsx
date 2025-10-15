@@ -36,8 +36,8 @@ export default function CanvasPage() {
     router.push("/")
   }
 
-  const handleOperations = (operations: any[]) => {
-    console.log("[v0] AI operations received:", operations)
+  const handleOperations = (operations: any[], queueItemId: string) => {
+    console.log("[v0] AI operations received:", operations, "Queue ID:", queueItemId)
     setAiOperations(operations)
   }
 
@@ -61,7 +61,13 @@ export default function CanvasPage() {
           onAiOperationsProcessed={() => setAiOperations([])}
         />
       </div>
-      <AiChat currentObjects={currentObjects} onOperations={handleOperations} />
+      <AiChat
+        currentObjects={currentObjects}
+        onOperations={handleOperations}
+        userId={user.id}
+        userName={user.name}
+        canvasId="default"
+      />
     </div>
   )
 }

@@ -7,6 +7,8 @@ import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
 import { useMemo, useEffect } from "react"
 import type { CanvasObject } from "@/lib/types"
+import { useAIQueue } from "@/hooks/use-ai-queue"
+import { AIStatusIndicator } from "@/components/ai-status-indicator"
 
 // Generate a random color for each user
 function generateUserColor() {
@@ -51,105 +53,54 @@ export function CollaborativeCanvas({
     userColor,
   })
 
+  const { queue, isAIWorking, currentOperation, updateQueueItem } = useAIQueue({
+    canvasId,
+    userId,
+  })
+
   useEffect(() => {
     if (aiOperations.length > 0) {
       console.log("[v0] Processing AI operations:", aiOperations)
 
-      let updatedObjects = [...objects]
+      // Process operations sequentially with delays
+      const processOperationsSequentially = async () => {
+        let updatedObjects = [...objects]
+        const failedOperations: string[] = []
 
-      for (const operation of aiOperations) {
-        switch (operation.type) {
-          case "create":
-            updatedObjects.push(operation.object)
-            break
+        for (let i = 0; i < aiOperations.length; i++) {
+          const operation = aiOperations[i]
+          console.log(`[v0] Processing operation ${i + 1}/${aiOperations.length}:`, operation.type)
 
-          case "move":
-            const moveIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-            if (moveIndex >= 0 && moveIndex < updatedObjects.length) {
-              const obj = updatedObjects[moveIndex]
-              updatedObjects[moveIndex] = {
-                ...obj,
-                x: operation.x !== undefined ? operation.x : obj.x + (operation.deltaX || 0),
-                y: operation.y !== undefined ? operation.y : obj.y + (operation.deltaY || 0),
-              }
-            }
-            break
-
-          case "resize":
-            const resizeIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-            if (resizeIndex >= 0 && resizeIndex < updatedObjects.length) {
-              const obj = updatedObjects[resizeIndex]
-              const scale = operation.scale || 1
-              updatedObjects[resizeIndex] = {
-                ...obj,
-                width: operation.width !== undefined ? operation.width : obj.width * scale,
-                height: operation.height !== undefined ? operation.height : obj.height * scale,
-              }
-            }
-            break
-
-          case "rotate":
-            const rotateIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-            if (rotateIndex >= 0 && rotateIndex < updatedObjects.length) {
-              const obj = updatedObjects[rotateIndex]
-              updatedObjects[rotateIndex] = {
-                ...obj,
-                rotation: operation.absolute ? operation.degrees : obj.rotation + operation.degrees,
-              }
-            }
-            break
-
-          case "delete":
-            if (operation.all) {
-              updatedObjects = []
+          try {
+            const result = applyOperation(updatedObjects, operation)
+            if (result.error) {
+              failedOperations.push(`${operation.type}: ${result.error}`)
+              console.warn(`[v0] Operation failed:`, result.error)
             } else {
-              const deleteIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-              if (deleteIndex >= 0 && deleteIndex < updatedObjects.length) {
-                updatedObjects.splice(deleteIndex, 1)
-              }
+              updatedObjects = result.objects
+              // Sync after each successful operation for visual feedback
+              syncObjects(updatedObjects)
             }
-            break
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Unknown error"
+            failedOperations.push(`${operation.type}: ${errorMsg}`)
+            console.error(`[v0] Operation error:`, error)
+          }
 
-          case "arrange":
-            updatedObjects = handleArrange(updatedObjects, operation)
-            break
-
-          case "distribute":
-            updatedObjects = handleDistribute(updatedObjects, operation)
-            break
-
-          case "align":
-            updatedObjects = handleAlign(updatedObjects, operation)
-            break
-
-          case "createLoginForm":
-            updatedObjects = createLoginForm(updatedObjects, operation)
-            break
-
-          case "createDashboard":
-            updatedObjects = createDashboard(updatedObjects, operation)
-            break
-
-          case "createNavBar":
-            updatedObjects = createNavBar(updatedObjects, operation)
-            break
-
-          case "createCard":
-            updatedObjects = createCard(updatedObjects, operation)
-            break
-
-          case "createButton":
-            updatedObjects = createButton(updatedObjects, operation)
-            break
-
-          case "createForm":
-            updatedObjects = createForm(updatedObjects, operation)
-            break
+          // Add delay between operations (except for the last one)
+          if (i < aiOperations.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 150))
+          }
         }
+
+        if (failedOperations.length > 0) {
+          console.warn("[v0] Some operations failed:", failedOperations)
+        }
+
+        onAiOperationsProcessed?.()
       }
 
-      syncObjects(updatedObjects)
-      onAiOperationsProcessed?.()
+      processOperationsSequentially()
     }
   }, [aiOperations])
 
@@ -163,6 +114,7 @@ export function CollaborativeCanvas({
 
   return (
     <div className="relative h-full w-full">
+      <AIStatusIndicator isAIWorking={isAIWorking} currentOperation={currentOperation} queueLength={queue.length} />
       <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
       <Canvas canvasId={canvasId} objects={objects} onObjectsChange={syncObjects} onCursorMove={updateCursor}>
         <MultiplayerCursors users={otherUsers} />
@@ -171,11 +123,184 @@ export function CollaborativeCanvas({
   )
 }
 
-function handleArrange(objects: CanvasObject[], operation: any): CanvasObject[] {
+function applyOperation(objects: CanvasObject[], operation: any): { objects: CanvasObject[]; error?: string } {
+  let updatedObjects = [...objects]
+
+  try {
+    switch (operation.type) {
+      case "create":
+        updatedObjects.push({
+          ...operation.object,
+          fill_color: operation.object.fill_color || operation.object.color || "#3b82f6",
+          stroke_color: operation.object.stroke_color || operation.object.color || "#1e40af",
+          stroke_width: operation.object.stroke_width || 2,
+        })
+        break
+
+      case "move": {
+        const moveIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
+        if (moveIndex < 0 || moveIndex >= updatedObjects.length) {
+          return {
+            objects,
+            error: `Cannot move shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+          }
+        }
+        const obj = updatedObjects[moveIndex]
+        const newX = operation.x !== undefined ? operation.x : obj.x + (operation.deltaX || 0)
+        const newY = operation.y !== undefined ? operation.y : obj.y + (operation.deltaY || 0)
+
+        if (newX < 0 || newX > 2000 || newY < 0 || newY > 2000) {
+          return { objects, error: `Cannot move shape outside canvas bounds (0-2000).` }
+        }
+
+        updatedObjects[moveIndex] = { ...obj, x: newX, y: newY }
+        console.log("[v0] Moved shape", moveIndex, "to", newX, newY)
+        break
+      }
+
+      case "resize": {
+        const resizeIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
+        if (resizeIndex < 0 || resizeIndex >= updatedObjects.length) {
+          return {
+            objects,
+            error: `Cannot resize shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+          }
+        }
+        const obj = updatedObjects[resizeIndex]
+        const scale = operation.scale || 1
+        const newWidth = operation.width !== undefined ? operation.width : obj.width * scale
+        const newHeight = operation.height !== undefined ? operation.height : obj.height * scale
+
+        if (newWidth <= 0 || newHeight <= 0) {
+          return { objects, error: `Cannot resize shape to zero or negative dimensions.` }
+        }
+        if (newWidth > 2000 || newHeight > 2000) {
+          return { objects, error: `Cannot resize shape larger than 2000 pixels.` }
+        }
+
+        updatedObjects[resizeIndex] = { ...obj, width: newWidth, height: newHeight }
+        console.log("[v0] Resized shape", resizeIndex, "to", newWidth, "x", newHeight)
+        break
+      }
+
+      case "rotate": {
+        const rotateIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
+        if (rotateIndex < 0 || rotateIndex >= updatedObjects.length) {
+          return {
+            objects,
+            error: `Cannot rotate shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+          }
+        }
+        const obj = updatedObjects[rotateIndex]
+        updatedObjects[rotateIndex] = {
+          ...obj,
+          rotation: operation.absolute ? operation.degrees : obj.rotation + operation.degrees,
+        }
+        console.log("[v0] Rotated shape", rotateIndex, "to", updatedObjects[rotateIndex].rotation, "degrees")
+        break
+      }
+
+      case "delete": {
+        if (operation.all) {
+          console.log("[v0] Deleting all shapes")
+          updatedObjects = []
+        } else {
+          const deleteIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
+          if (deleteIndex < 0 || deleteIndex >= updatedObjects.length) {
+            return {
+              objects,
+              error: `Cannot delete shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+            }
+          }
+          console.log("[v0] Deleting shape", deleteIndex)
+          updatedObjects.splice(deleteIndex, 1)
+        }
+        break
+      }
+
+      case "arrange": {
+        console.log("[v0] Arranging shapes with pattern:", operation.pattern)
+        const arrangeOp = {
+          ...operation,
+          spacing: operation.spacing || 100,
+          centerX: operation.centerX || 1000,
+          centerY: operation.centerY || 1000,
+          columns: operation.columns || Math.ceil(Math.sqrt(updatedObjects.length)),
+        }
+        const result = handleArrange(updatedObjects, arrangeOp)
+        if (result.error) {
+          return { objects, error: result.error }
+        }
+        updatedObjects = result.objects
+        break
+      }
+
+      case "distribute": {
+        updatedObjects = handleDistribute(updatedObjects, operation)
+        break
+      }
+
+      case "align": {
+        updatedObjects = handleAlign(updatedObjects, operation)
+        break
+      }
+
+      case "createLoginForm": {
+        updatedObjects = createLoginForm(updatedObjects, operation)
+        break
+      }
+
+      case "createDashboard": {
+        updatedObjects = createDashboard(updatedObjects, operation)
+        break
+      }
+
+      case "createNavBar": {
+        updatedObjects = createNavBar(updatedObjects, operation)
+        break
+      }
+
+      case "createCard": {
+        updatedObjects = createCard(updatedObjects, operation)
+        break
+      }
+
+      case "createButton": {
+        updatedObjects = createButton(updatedObjects, operation)
+        break
+      }
+
+      case "createForm": {
+        updatedObjects = createForm(updatedObjects, operation)
+        break
+      }
+
+      default:
+        return { objects, error: `Unknown operation type: ${operation.type}` }
+    }
+
+    return { objects: updatedObjects }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Unknown error"
+    console.error("[v0] Operation error:", errorMsg)
+    return { objects, error: errorMsg }
+  }
+}
+
+function handleArrange(objects: CanvasObject[], operation: any): { objects: CanvasObject[]; error?: string } {
   const indices = operation.shapeIndices || objects.map((_: any, i: number) => i)
+
+  for (const idx of indices) {
+    if (idx < 0 || idx >= objects.length) {
+      return { objects, error: `Invalid shape index ${idx} in arrange operation.` }
+    }
+  }
+
   const shapesToArrange = indices.map((i: number) => objects[i]).filter(Boolean)
 
-  if (shapesToArrange.length === 0) return objects
+  if (shapesToArrange.length === 0) {
+    return { objects, error: "No shapes to arrange." }
+  }
 
   const { pattern, spacing, centerX, centerY, columns } = operation
   const updatedObjects = [...objects]
@@ -238,9 +363,12 @@ function handleArrange(objects: CanvasObject[], operation: any): CanvasObject[] 
       })
       break
     }
+
+    default:
+      return { objects, error: `Unknown arrange pattern: ${pattern}` }
   }
 
-  return updatedObjects
+  return { objects: updatedObjects }
 }
 
 function handleDistribute(objects: CanvasObject[], operation: any): CanvasObject[] {

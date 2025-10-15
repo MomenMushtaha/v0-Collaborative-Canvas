@@ -10,7 +10,10 @@ import type { CanvasObject } from "@/lib/types"
 
 interface AiChatProps {
   currentObjects: CanvasObject[]
-  onOperations: (operations: any[]) => void
+  onOperations: (operations: any[], queueItemId: string) => void
+  userId: string
+  userName: string
+  canvasId: string
 }
 
 interface Message {
@@ -18,11 +21,18 @@ interface Message {
   content: string
 }
 
-export function AiChat({ currentObjects, onOperations }: AiChatProps) {
+interface OperationProgress {
+  current: number
+  total: number
+  operation: string
+}
+
+export function AiChat({ currentObjects, onOperations, userId, userName, canvasId }: AiChatProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
+  const [operationProgress, setOperationProgress] = useState<OperationProgress | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -41,6 +51,7 @@ export function AiChat({ currentObjects, onOperations }: AiChatProps) {
     setInput("")
     setMessages((prev) => [...prev, { role: "user", content: userMessage }])
     setIsLoading(true)
+    setOperationProgress(null)
 
     try {
       console.log("[v0] Sending AI request:", userMessage)
@@ -49,6 +60,9 @@ export function AiChat({ currentObjects, onOperations }: AiChatProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMessage,
+          canvasId,
+          userId,
+          userName,
           currentObjects: currentObjects.map((obj) => ({
             type: obj.type,
             x: obj.x,
@@ -56,7 +70,8 @@ export function AiChat({ currentObjects, onOperations }: AiChatProps) {
             width: obj.width,
             height: obj.height,
             rotation: obj.rotation,
-            color: obj.color,
+            fill_color: obj.fill_color,
+            stroke_color: obj.stroke_color,
           })),
         }),
       })
@@ -72,11 +87,17 @@ export function AiChat({ currentObjects, onOperations }: AiChatProps) {
       const data = await response.json()
       console.log("[v0] AI response data:", data)
 
-      setMessages((prev) => [...prev, { role: "assistant", content: data.message }])
+      let assistantMessage = data.message
+      if (data.validationErrors && data.validationErrors.length > 0) {
+        console.warn("[v0] Validation errors:", data.validationErrors)
+        assistantMessage += `\n\nNote: ${data.validationErrors.join(", ")}`
+      }
+
+      setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage }])
 
       if (data.operations && data.operations.length > 0) {
         console.log("[v0] AI operations:", data.operations)
-        onOperations(data.operations)
+        onOperations(data.operations, data.queueItemId)
       }
     } catch (error) {
       console.error("[v0] AI chat error:", error)
@@ -85,11 +106,12 @@ export function AiChat({ currentObjects, onOperations }: AiChatProps) {
         ...prev,
         {
           role: "assistant",
-          content: `Sorry, I encountered an error: ${errorMessage}. Please try again.`,
+          content: `Sorry, I encountered an error: ${errorMessage}. Please try again or rephrase your request.`,
         },
       ])
     } finally {
       setIsLoading(false)
+      setTimeout(() => setOperationProgress(null), 1000)
     }
   }
 
@@ -142,9 +164,25 @@ export function AiChat({ currentObjects, onOperations }: AiChatProps) {
         ))}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2 text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Thinking...</span>
+            <div className="flex flex-col gap-2 rounded-lg bg-muted px-4 py-3 text-sm min-w-[200px]">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Thinking...</span>
+              </div>
+              {operationProgress && (
+                <div className="flex flex-col gap-1 mt-1">
+                  <div className="text-xs text-muted-foreground">
+                    Step {operationProgress.current} of {operationProgress.total}
+                  </div>
+                  <div className="text-xs font-medium">{operationProgress.operation}</div>
+                  <div className="w-full bg-background rounded-full h-1.5 mt-1">
+                    <div
+                      className="bg-primary h-1.5 rounded-full transition-all duration-300"
+                      style={{ width: `${(operationProgress.current / operationProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

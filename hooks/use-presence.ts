@@ -75,12 +75,39 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
       const { data } = await supabase.from("user_presence").select("*").eq("canvas_id", canvasId).neq("user_id", userId)
 
       console.log("[v0] Loaded other users:", data?.length || 0)
-      const userMap = new Map<string, UserPresence>()
-      data?.forEach((user) => {
-        console.log("[v0] Other user:", user.user_name, user.user_id)
-        userMap.set(user.user_id, user)
+
+      setOtherUsers((prev) => {
+        const userMap = new Map(prev)
+
+        data?.forEach((user) => {
+          console.log("[v0] Other user:", user.user_name, user.user_id)
+          const existing = userMap.get(user.user_id)
+
+          userMap.set(user.user_id, {
+            id: user.id,
+            canvas_id: user.canvas_id,
+            user_id: user.user_id,
+            user_name: user.user_name,
+            color: user.color,
+            // Preserve existing cursor position from broadcasts, fallback to database only if no existing data
+            cursor_x: existing?.cursor_x ?? user.cursor_x,
+            cursor_y: existing?.cursor_y ?? user.cursor_y,
+            last_seen: user.last_seen,
+            // ALWAYS preserve existing selected_object_ids from broadcasts, never use database value
+            selected_object_ids: existing?.selected_object_ids ?? [],
+          })
+        })
+
+        // Remove users that are no longer in the database (disconnected)
+        const currentUserIds = new Set(data?.map((u) => u.user_id) || [])
+        for (const [uid] of userMap) {
+          if (!currentUserIds.has(uid)) {
+            userMap.delete(uid)
+          }
+        }
+
+        return userMap
       })
-      setOtherUsers(userMap)
     }
 
     loadPresence()
@@ -92,7 +119,7 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
     const channel = supabase
       .channel(`canvas:${canvasId}:cursors`, {
         config: {
-          broadcast: { self: false }, // Don't receive own broadcasts
+          broadcast: { self: false },
         },
       })
       .on("broadcast", { event: "cursor" }, ({ payload }: { payload: CursorUpdate }) => {
@@ -137,7 +164,7 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
             last_seen: new Date().toISOString(),
           })
 
-          console.log("[v0] Updated selection for user:", payload.userName, "total users:", newMap.size)
+          console.log("[v0] Updated selection for user:", payload.userName, "selected IDs:", payload.selectedObjectIds)
           return newMap
         })
       })
@@ -191,18 +218,12 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
 
   const updateSelection = useCallback(
     async (selectedObjectIds: string[]) => {
-      console.log("[v0] updateSelection START - selectedObjectIds:", selectedObjectIds)
-      console.log("[v0] updateSelection - userId:", userId)
-      console.log("[v0] updateSelection - userName:", userName)
-      console.log("[v0] updateSelection - presenceId:", presenceId)
-      console.log("[v0] updateSelection - channelRef exists:", !!channelRef.current)
+      console.log("[v0] Broadcasting selection:", selectedObjectIds, "for user:", userName)
 
       if (!channelRef.current) {
-        console.error("[v0] updateSelection FAILED - channel not ready")
+        console.error("[v0] Cannot send selection update: channel not ready")
         return
       }
-
-      console.log("[v0] updateSelection - broadcasting to channel...")
 
       try {
         const broadcastResult = await channelRef.current.send({
@@ -216,13 +237,12 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
           } as SelectionUpdate,
         })
 
-        console.log("[v0] updateSelection - broadcast result:", broadcastResult)
+        console.log("[v0] Selection broadcast sent:", broadcastResult)
       } catch (error) {
-        console.error("[v0] updateSelection - broadcast error:", error)
+        console.error("[v0] Selection broadcast error:", error)
       }
 
       if (presenceId) {
-        console.log("[v0] updateSelection - updating database...")
         const { error } = await supabase
           .from("user_presence")
           .update({
@@ -232,15 +252,11 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
           .eq("id", presenceId)
 
         if (error) {
-          console.error("[v0] updateSelection - database error:", error)
+          console.error("[v0] Selection database update error:", error)
         } else {
-          console.log("[v0] updateSelection - database updated successfully")
+          console.log("[v0] Selection persisted to database")
         }
-      } else {
-        console.warn("[v0] updateSelection - presenceId is null, skipping database update")
       }
-
-      console.log("[v0] updateSelection END")
     },
     [userId, userName, userColor, presenceId, supabase],
   )

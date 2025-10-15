@@ -156,6 +156,10 @@ export function useCanvas({
     if (!ctx) return
 
     const render = () => {
+      if (otherUsersSelections.length > 0) {
+        console.log("[v0] RENDER - otherUsersSelections:", JSON.stringify(otherUsersSelections))
+      }
+
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.fillStyle = "#ffffff"
       ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -189,6 +193,17 @@ export function useCanvas({
         const isSelected = selectedIds.includes(obj.id)
         const otherUserSelection = otherUsersSelections.find((selection) => selection.selectedIds.includes(obj.id))
 
+        if (otherUserSelection) {
+          console.log(
+            "[v0] RENDER - Found other user selection for object:",
+            obj.id,
+            "user:",
+            otherUserSelection.userName,
+            "color:",
+            otherUserSelection.color,
+          )
+        }
+
         if (obj.type === "line") {
           ctx.strokeStyle = obj.stroke_color
           ctx.lineWidth = obj.stroke_width
@@ -207,6 +222,7 @@ export function useCanvas({
             ctx.stroke()
             ctx.setLineDash([])
           } else if (otherUserSelection) {
+            console.log("[v0] RENDER - Drawing other user selection highlight for line:", obj.id)
             ctx.strokeStyle = otherUserSelection.color
             ctx.lineWidth = 4 / viewport.zoom
             ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
@@ -250,6 +266,7 @@ export function useCanvas({
             ctx.strokeRect(-obj.width / 2 - 5, -obj.height / 2 - 5, obj.width + 10, obj.height + 10)
             ctx.setLineDash([])
           } else if (otherUserSelection) {
+            console.log("[v0] RENDER - Drawing other user selection highlight for shape:", obj.id, "type:", obj.type)
             ctx.strokeStyle = otherUserSelection.color
             ctx.lineWidth = 2 / viewport.zoom
             ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])

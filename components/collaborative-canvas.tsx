@@ -54,10 +54,14 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
     const isUserOnline = (lastSeen: string) => {
       const lastSeenTime = new Date(lastSeen).getTime()
       const now = Date.now()
-      return now - lastSeenTime < 10000 // 10 seconds
+      return now - lastSeenTime < 300000 // 5 minutes
     }
 
     return otherUsers.filter((user) => isUserOnline(user.last_seen))
+  }, [otherUsers])
+
+  const usersWithCursors = useMemo(() => {
+    return otherUsers.filter((user) => user.cursor_x !== null && user.cursor_y !== null)
   }, [otherUsers])
 
   const otherUsersSelections = useMemo(() => {
@@ -92,7 +96,7 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
         onSelectionChange={handleSelectionChange}
         otherUsersSelections={otherUsersSelections}
       >
-        <MultiplayerCursors users={onlineUsers} />
+        <MultiplayerCursors users={usersWithCursors} />
       </Canvas>
     </div>
   )

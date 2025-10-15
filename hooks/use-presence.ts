@@ -83,18 +83,35 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
           console.log("[v0] Other user:", user.user_name, user.user_id)
           const existing = userMap.get(user.user_id)
 
+          console.log(
+            "[v0] Existing user data:",
+            existing
+              ? {
+                  hasSelection: !!existing.selected_object_ids,
+                  selectionLength: existing.selected_object_ids?.length || 0,
+                  selection: existing.selected_object_ids,
+                }
+              : "no existing data",
+          )
+          console.log("[v0] Database user data:", {
+            hasSelection: !!user.selected_object_ids,
+            selectionLength: user.selected_object_ids?.length || 0,
+            selection: user.selected_object_ids,
+          })
+
+          const preservedSelection = existing?.selected_object_ids ?? []
+          console.log("[v0] Preserved selection for", user.user_name, ":", preservedSelection)
+
           userMap.set(user.user_id, {
             id: user.id,
             canvas_id: user.canvas_id,
             user_id: user.user_id,
             user_name: user.user_name,
             color: user.color,
-            // Preserve existing cursor position from broadcasts, fallback to database only if no existing data
             cursor_x: existing?.cursor_x ?? user.cursor_x,
             cursor_y: existing?.cursor_y ?? user.cursor_y,
             last_seen: user.last_seen,
-            // ALWAYS preserve existing selected_object_ids from broadcasts, never use database value
-            selected_object_ids: existing?.selected_object_ids ?? [],
+            selected_object_ids: preservedSelection,
           })
         })
 

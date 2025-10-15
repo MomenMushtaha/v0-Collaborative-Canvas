@@ -44,7 +44,8 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
 
   const handleSelectionChange = useCallback(
     (selectedIds: string[]) => {
-      console.log("[v0] handleSelectionChange called with:", selectedIds)
+      console.log("[v0] CollaborativeCanvas - handleSelectionChange called with:", selectedIds)
+      console.log("[v0] CollaborativeCanvas - updateSelection function exists:", !!updateSelection)
       updateSelection(selectedIds)
     },
     [updateSelection],
@@ -57,7 +58,9 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
       return now - lastSeenTime < 300000 // 5 minutes
     }
 
-    return otherUsers.filter((user) => isUserOnline(user.last_seen))
+    const online = otherUsers.filter((user) => isUserOnline(user.last_seen))
+    console.log("[v0] CollaborativeCanvas - online users count:", online.length)
+    return online
   }, [otherUsers])
 
   const usersWithCursors = useMemo(() => {
@@ -65,7 +68,12 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
   }, [otherUsers])
 
   const otherUsersSelections = useMemo(() => {
-    return onlineUsers
+    console.log("[v0] CollaborativeCanvas - Computing otherUsersSelections from onlineUsers:", onlineUsers.length)
+    onlineUsers.forEach((user) => {
+      console.log("[v0] CollaborativeCanvas - User:", user.user_name, "selected_object_ids:", user.selected_object_ids)
+    })
+
+    const selections = onlineUsers
       .filter((user) => user.selected_object_ids && user.selected_object_ids.length > 0)
       .map((user) => ({
         userId: user.user_id,
@@ -73,9 +81,12 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
         color: user.color,
         selectedIds: user.selected_object_ids || [],
       }))
+
+    console.log("[v0] CollaborativeCanvas - Computed otherUsersSelections:", selections)
+    return selections
   }, [onlineUsers])
 
-  console.log("[v0] Other users selections:", otherUsersSelections)
+  console.log("[v0] CollaborativeCanvas - Final otherUsersSelections being passed to Canvas:", otherUsersSelections)
 
   if (isLoading) {
     return (

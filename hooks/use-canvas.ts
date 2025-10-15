@@ -62,12 +62,14 @@ export function useCanvas({
   }, [selectedIds, objects, onObjectsChange])
 
   useEffect(() => {
-    console.log("[v0] Selection changed:", selectedIds)
+    console.log("[v0] useCanvas - selectedIds changed:", selectedIds)
+    console.log("[v0] useCanvas - onSelectionChange exists:", !!onSelectionChange)
+
     if (onSelectionChange) {
-      console.log("[v0] Calling onSelectionChange with:", selectedIds)
+      console.log("[v0] useCanvas - calling onSelectionChange with:", selectedIds)
       onSelectionChange(selectedIds)
     } else {
-      console.log("[v0] onSelectionChange is not defined")
+      console.warn("[v0] useCanvas - onSelectionChange is undefined!")
     }
   }, [selectedIds, onSelectionChange])
 

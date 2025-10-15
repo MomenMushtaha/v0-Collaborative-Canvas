@@ -5,7 +5,7 @@ import { MultiplayerCursors } from "@/components/multiplayer-cursors"
 import { PresencePanel } from "@/components/presence-panel"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
-import { useMemo } from "react"
+import { useMemo, useCallback } from "react"
 
 interface CollaborativeCanvasProps {
   canvasId: string
@@ -42,7 +42,13 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
     userColor,
   })
 
-  console.log("[v0] CollaborativeCanvas - updateSelection function:", typeof updateSelection)
+  const handleSelectionChange = useCallback(
+    (selectedIds: string[]) => {
+      console.log("[v0] handleSelectionChange called with:", selectedIds)
+      updateSelection(selectedIds)
+    },
+    [updateSelection],
+  )
 
   const onlineUsers = useMemo(() => {
     const isUserOnline = (lastSeen: string) => {
@@ -65,6 +71,8 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
       }))
   }, [onlineUsers])
 
+  console.log("[v0] Other users selections:", otherUsersSelections)
+
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -81,10 +89,7 @@ export function CollaborativeCanvas({ canvasId, userId, userName }: Collaborativ
         objects={objects}
         onObjectsChange={syncObjects}
         onCursorMove={updateCursor}
-        onSelectionChange={(selectedIds) => {
-          console.log("[v0] Canvas onSelectionChange called with:", selectedIds)
-          updateSelection(selectedIds)
-        }}
+        onSelectionChange={handleSelectionChange}
         otherUsersSelections={otherUsersSelections}
       >
         <MultiplayerCursors users={onlineUsers} />

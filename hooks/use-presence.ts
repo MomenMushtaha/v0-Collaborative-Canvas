@@ -191,29 +191,38 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
 
   const updateSelection = useCallback(
     async (selectedObjectIds: string[]) => {
-      console.log("[v0] updateSelection called with:", selectedObjectIds)
-      console.log("[v0] presenceId:", presenceId)
-      console.log("[v0] channelRef.current:", channelRef.current ? "exists" : "null")
+      console.log("[v0] updateSelection START - selectedObjectIds:", selectedObjectIds)
+      console.log("[v0] updateSelection - userId:", userId)
+      console.log("[v0] updateSelection - userName:", userName)
+      console.log("[v0] updateSelection - presenceId:", presenceId)
+      console.log("[v0] updateSelection - channelRef exists:", !!channelRef.current)
 
       if (!channelRef.current) {
-        console.warn("[v0] Cannot send selection update: channel not ready")
+        console.error("[v0] updateSelection FAILED - channel not ready")
         return
       }
 
-      console.log("[v0] Broadcasting selection:", selectedObjectIds, "for user:", userName)
+      console.log("[v0] updateSelection - broadcasting to channel...")
 
-      channelRef.current.send({
-        type: "broadcast",
-        event: "selection",
-        payload: {
-          userId,
-          userName,
-          color: userColor,
-          selectedObjectIds,
-        } as SelectionUpdate,
-      })
+      try {
+        const broadcastResult = await channelRef.current.send({
+          type: "broadcast",
+          event: "selection",
+          payload: {
+            userId,
+            userName,
+            color: userColor,
+            selectedObjectIds,
+          } as SelectionUpdate,
+        })
+
+        console.log("[v0] updateSelection - broadcast result:", broadcastResult)
+      } catch (error) {
+        console.error("[v0] updateSelection - broadcast error:", error)
+      }
 
       if (presenceId) {
+        console.log("[v0] updateSelection - updating database...")
         const { error } = await supabase
           .from("user_presence")
           .update({
@@ -223,13 +232,15 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
           .eq("id", presenceId)
 
         if (error) {
-          console.error("[v0] Error updating selection in database:", error)
+          console.error("[v0] updateSelection - database error:", error)
         } else {
-          console.log("[v0] Successfully updated selection in database")
+          console.log("[v0] updateSelection - database updated successfully")
         }
       } else {
-        console.warn("[v0] presenceId is null, cannot update database")
+        console.warn("[v0] updateSelection - presenceId is null, skipping database update")
       }
+
+      console.log("[v0] updateSelection END")
     },
     [userId, userName, userColor, presenceId, supabase],
   )

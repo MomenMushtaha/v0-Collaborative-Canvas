@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useCanvas } from "@/hooks/use-canvas"
 import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -39,6 +39,30 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
 
   const textInputRef = useRef<HTMLTextAreaElement>(null)
   const [textValue, setTextValue] = useState("")
+  const [canvasMetrics, setCanvasMetrics] = useState({
+    offsetX: 0,
+    offsetY: 0,
+    scaleX: 1,
+    scaleY: 1,
+  })
+
+  const updateCanvasMetrics = useCallback(() => {
+    const canvasEl = canvasRef.current
+    if (!canvasEl) return
+
+    const rect = canvasEl.getBoundingClientRect()
+    const parentRect = canvasEl.parentElement?.getBoundingClientRect()
+
+    const scaleX = rect.width && canvasEl.width ? rect.width / canvasEl.width : 1
+    const scaleY = rect.height && canvasEl.height ? rect.height / canvasEl.height : 1
+
+    setCanvasMetrics({
+      offsetX: parentRect ? rect.left - parentRect.left : 0,
+      offsetY: parentRect ? rect.top - parentRect.top : 0,
+      scaleX: Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1,
+      scaleY: Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1,
+    })
+  }, [canvasRef])
 
   useEffect(() => {
     if (editingTextId) {
@@ -49,15 +73,75 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
           textInputRef.current?.focus()
           textInputRef.current?.select()
         }, 0)
+        updateCanvasMetrics()
       }
     }
-  }, [editingTextId, objects])
+  }, [editingTextId, objects, updateCanvasMetrics])
+
+  useEffect(() => {
+    updateCanvasMetrics()
+
+    const handleResize = () => updateCanvasMetrics()
+    window.addEventListener("resize", handleResize)
+
+    return () => {
+      window.removeEventListener("resize", handleResize)
+    }
+  }, [updateCanvasMetrics])
+
+  useEffect(() => {
+    const canvasEl = canvasRef.current
+    if (!canvasEl || typeof ResizeObserver === "undefined") return
+
+    const observer = new ResizeObserver(() => updateCanvasMetrics())
+    observer.observe(canvasEl)
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [canvasRef, updateCanvasMetrics])
 
   useEffect(() => {
     onSelectionChange?.(selectedIds)
   }, [selectedIds, onSelectionChange])
 
   const editingTextObject = editingTextId ? objects.find((o) => o.id === editingTextId) : null
+  const { x: viewportX, y: viewportY, zoom: viewportZoom } = viewport
+
+  const textAreaStyle: CSSProperties | undefined = useMemo(() => {
+    if (!editingTextObject) return undefined
+
+    const scaledZoomX = viewportZoom * canvasMetrics.scaleX
+    const scaledZoomY = viewportZoom * canvasMetrics.scaleY
+    const scaledFontSize = (editingTextObject.font_size || 16) * scaledZoomY
+    const paddingTop = Math.max(
+      0,
+      (editingTextObject.height * scaledZoomY - scaledFontSize * 1.2) / 2,
+    )
+
+    return {
+      left: `${
+        canvasMetrics.offsetX +
+        (viewportX + editingTextObject.x * viewportZoom) * canvasMetrics.scaleX
+      }px`,
+      top: `${
+        canvasMetrics.offsetY +
+        (viewportY + editingTextObject.y * viewportZoom) * canvasMetrics.scaleY
+      }px`,
+      width: `${editingTextObject.width * scaledZoomX}px`,
+      height: `${editingTextObject.height * scaledZoomY}px`,
+      fontSize: `${scaledFontSize}px`,
+      fontFamily: editingTextObject.font_family || "Arial",
+      paddingTop: `${paddingTop}px`,
+      lineHeight: "1.2",
+      color: editingTextObject.fill_color,
+      caretColor: editingTextObject.fill_color,
+      paddingLeft: 0,
+      paddingRight: 0,
+      margin: 0,
+      boxSizing: "border-box",
+    }
+  }, [canvasMetrics, editingTextObject, viewportX, viewportY, viewportZoom])
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
@@ -167,22 +251,7 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
             saveTextEdit(editingTextId, textValue)
           }}
           className="absolute z-20 resize-none border-2 border-blue-500 bg-white/90 text-center text-black outline-none overflow-hidden"
-          style={{
-            left: `${viewport.x + editingTextObject.x * viewport.zoom}px`,
-            top: `${viewport.y + editingTextObject.y * viewport.zoom}px`,
-            width: `${editingTextObject.width * viewport.zoom}px`,
-            height: `${editingTextObject.height * viewport.zoom}px`,
-            fontSize: `${(editingTextObject.font_size || 16) * viewport.zoom}px`,
-            fontFamily: editingTextObject.font_family || "Arial",
-            paddingTop: `${(editingTextObject.height * viewport.zoom - (editingTextObject.font_size || 16) * viewport.zoom * 1.2) / 2}px`,
-            lineHeight: "1.2",
-            color: editingTextObject.fill_color,
-            caretColor: editingTextObject.fill_color,
-            paddingLeft: 0,
-            paddingRight: 0,
-            margin: 0,
-            boxSizing: "border-box",
-          }}
+          style={textAreaStyle}
         />
       )}
 

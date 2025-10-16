@@ -63,9 +63,12 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
     if (!canvasRef.current || !editingTextObject) return null
 
     const rect = canvasRef.current.getBoundingClientRect()
+    const scaledLeft = (viewport.x + editingTextObject.x) * viewport.zoom
+    const scaledTop = (viewport.y + editingTextObject.y) * viewport.zoom
+
     return {
-      left: rect.left + viewport.x + editingTextObject.x * viewport.zoom,
-      top: rect.top + viewport.y + editingTextObject.y * viewport.zoom,
+      left: rect.left + scaledLeft,
+      top: rect.top + scaledTop,
       width: editingTextObject.width * viewport.zoom,
       height: editingTextObject.height * viewport.zoom,
     }

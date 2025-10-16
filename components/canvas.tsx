@@ -38,6 +38,7 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
   })
 
   const textInputRef = useRef<HTMLTextAreaElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [textValue, setTextValue] = useState("")
 
   useEffect(() => {
@@ -59,8 +60,13 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
 
   const editingTextObject = editingTextId ? objects.find((o) => o.id === editingTextId) : null
 
+  const canvasRect = canvasRef.current?.getBoundingClientRect()
+  const containerRect = containerRef.current?.getBoundingClientRect()
+  const canvasOffsetLeft = canvasRect && containerRect ? canvasRect.left - containerRect.left : 0
+  const canvasOffsetTop = canvasRect && containerRect ? canvasRect.top - containerRect.top : 0
+
   return (
-    <div className="relative h-full w-full overflow-hidden bg-muted/20">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-muted/20">
       {/* Toolbar */}
       <div className="absolute left-4 top-4 z-10 flex gap-2 rounded-lg border bg-card p-2 shadow-lg">
         <Button
@@ -168,8 +174,8 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
           }}
           className="absolute z-20 resize-none border-2 border-blue-500 bg-white/90 text-center text-black outline-none overflow-hidden"
           style={{
-            left: `${viewport.x + editingTextObject.x * viewport.zoom}px`,
-            top: `${viewport.y + editingTextObject.y * viewport.zoom}px`,
+            left: `${canvasOffsetLeft + viewport.x + editingTextObject.x * viewport.zoom}px`,
+            top: `${canvasOffsetTop + viewport.y + editingTextObject.y * viewport.zoom}px`,
             width: `${editingTextObject.width * viewport.zoom}px`,
             height: `${editingTextObject.height * viewport.zoom}px`,
             fontSize: `${(editingTextObject.font_size || 16) * viewport.zoom}px`,

@@ -58,6 +58,10 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
   }, [selectedIds, onSelectionChange])
 
   const editingTextObject = editingTextId ? objects.find((o) => o.id === editingTextId) : null
+  const editingFontSize = editingTextObject?.font_size ?? 16
+  const editingTextPadding = editingTextObject
+    ? Math.max(0, (editingTextObject.height - editingFontSize * 1.2) / 2)
+    : 0
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
@@ -150,40 +154,49 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
       />
 
       {editingTextId && editingTextObject && (
-        <textarea
-          ref={textInputRef}
-          value={textValue}
-          onChange={(e) => setTextValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault()
-              saveTextEdit(editingTextId, textValue)
-            } else if (e.key === "Escape") {
-              e.preventDefault()
-              cancelTextEdit()
-            }
-          }}
-          onBlur={() => {
-            saveTextEdit(editingTextId, textValue)
-          }}
-          className="absolute z-20 resize-none border-2 border-blue-500 bg-white/90 text-center text-black outline-none overflow-hidden"
+        <div
+          className="absolute left-0 top-0 z-20"
           style={{
-            left: `${viewport.x + editingTextObject.x * viewport.zoom}px`,
-            top: `${viewport.y + editingTextObject.y * viewport.zoom}px`,
-            width: `${editingTextObject.width * viewport.zoom}px`,
-            height: `${editingTextObject.height * viewport.zoom}px`,
-            fontSize: `${(editingTextObject.font_size || 16) * viewport.zoom}px`,
-            fontFamily: editingTextObject.font_family || "Arial",
-            paddingTop: `${(editingTextObject.height * viewport.zoom - (editingTextObject.font_size || 16) * viewport.zoom * 1.2) / 2}px`,
-            lineHeight: "1.2",
-            color: editingTextObject.fill_color,
-            caretColor: editingTextObject.fill_color,
-            paddingLeft: 0,
-            paddingRight: 0,
-            margin: 0,
-            boxSizing: "border-box",
+            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+            transformOrigin: "0 0",
           }}
-        />
+        >
+          <textarea
+            ref={textInputRef}
+            value={textValue}
+            onChange={(e) => setTextValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                saveTextEdit(editingTextId, textValue)
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                cancelTextEdit()
+              }
+            }}
+            onBlur={() => {
+              saveTextEdit(editingTextId, textValue)
+            }}
+            className="absolute resize-none overflow-hidden bg-transparent text-center outline-none"
+            style={{
+              left: `${editingTextObject.x}px`,
+              top: `${editingTextObject.y}px`,
+              width: `${editingTextObject.width}px`,
+              height: `${editingTextObject.height}px`,
+              border: "none",
+              fontSize: `${editingFontSize}px`,
+              fontFamily: editingTextObject.font_family || "Arial",
+              paddingTop: `${editingTextPadding}px`,
+              lineHeight: "1.2",
+              color: editingTextObject.fill_color,
+              caretColor: editingTextObject.fill_color,
+              paddingLeft: 0,
+              paddingRight: 0,
+              margin: 0,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
       )}
 
       {/* Multiplayer cursors overlay */}

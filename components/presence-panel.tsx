@@ -27,7 +27,7 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
 
       {/* Current User */}
       <div className="mb-2 flex items-center gap-2">
-        <div className="flex h-2 w-2 items-center justify-center">
+        <div className="relative flex h-2 w-2 items-center justify-center">
           <div className="h-2 w-2 rounded-full" style={{ backgroundColor: currentUser.userColor }} />
           <div
             className="absolute h-2 w-2 animate-ping rounded-full"
@@ -41,7 +41,7 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
       {/* Online Users */}
       {onlineUsers.map((user) => (
         <div key={user.user_id} className="mb-2 flex items-center gap-2">
-          <div className="flex h-2 w-2 items-center justify-center">
+          <div className="relative flex h-2 w-2 items-center justify-center">
             <div className="h-2 w-2 rounded-full" style={{ backgroundColor: user.color }} />
             <div className="absolute h-2 w-2 animate-ping rounded-full" style={{ backgroundColor: user.color }} />
           </div>

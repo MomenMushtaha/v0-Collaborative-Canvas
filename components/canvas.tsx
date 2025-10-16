@@ -39,6 +39,7 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
 
   const textInputRef = useRef<HTMLTextAreaElement>(null)
   const [textValue, setTextValue] = useState("")
+  const [textPadding, setTextPadding] = useState({ horizontal: 0, vertical: 0 })
 
   useEffect(() => {
     if (editingTextId) {
@@ -58,6 +59,40 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
   }, [selectedIds, onSelectionChange])
 
   const editingTextObject = editingTextId ? objects.find((o) => o.id === editingTextId) : null
+
+  useEffect(() => {
+    if (!editingTextObject || !canvasRef.current) {
+      setTextPadding({ horizontal: 0, vertical: 0 })
+      return
+    }
+
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const fontSize = editingTextObject.font_size || 16
+    const fontFamily = editingTextObject.font_family || "Arial"
+    const text = textValue || ""
+
+    ctx.save()
+    ctx.font = `${fontSize}px ${fontFamily}`
+    const metrics = ctx.measureText(text || " ")
+    ctx.restore()
+
+    const ascent = metrics.actualBoundingBoxAscent ?? fontSize * 0.8
+    const descent = metrics.actualBoundingBoxDescent ?? fontSize * 0.2
+    const textHeight = ascent + descent
+
+    const textWidth =
+      metrics.actualBoundingBoxRight !== undefined && metrics.actualBoundingBoxLeft !== undefined
+        ? metrics.actualBoundingBoxRight - metrics.actualBoundingBoxLeft
+        : metrics.width
+
+    const vertical = Math.max(0, (editingTextObject.height - textHeight) / 2)
+    const horizontal = Math.max(0, (editingTextObject.width - textWidth) / 2)
+
+    setTextPadding({ horizontal, vertical })
+  }, [editingTextObject, textValue])
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
@@ -174,12 +209,13 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
             height: `${editingTextObject.height * viewport.zoom}px`,
             fontSize: `${(editingTextObject.font_size || 16) * viewport.zoom}px`,
             fontFamily: editingTextObject.font_family || "Arial",
-            paddingTop: `${(editingTextObject.height * viewport.zoom - (editingTextObject.font_size || 16) * viewport.zoom * 1.2) / 2}px`,
-            lineHeight: "1.2",
+            paddingTop: `${textPadding.vertical * viewport.zoom}px`,
+            paddingBottom: `${textPadding.vertical * viewport.zoom}px`,
+            paddingLeft: `${textPadding.horizontal * viewport.zoom}px`,
+            paddingRight: `${textPadding.horizontal * viewport.zoom}px`,
+            lineHeight: `${(editingTextObject.font_size || 16) * viewport.zoom}px`,
             color: editingTextObject.fill_color,
             caretColor: editingTextObject.fill_color,
-            paddingLeft: 0,
-            paddingRight: 0,
             margin: 0,
             boxSizing: "border-box",
           }}

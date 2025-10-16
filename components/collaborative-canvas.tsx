@@ -157,6 +157,27 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
         })
         break
 
+      case "createText": {
+        const newTextObject: CanvasObject = {
+          id: crypto.randomUUID(),
+          type: "text",
+          x: operation.x,
+          y: operation.y,
+          width: 200, // Default width for text
+          height: operation.fontSize || 16,
+          rotation: 0,
+          fill_color: operation.color || "#000000",
+          stroke_color: operation.color || "#000000",
+          stroke_width: 0,
+          text_content: operation.text,
+          font_size: operation.fontSize || 16,
+          font_family: "Arial",
+        }
+        updatedObjects.push(newTextObject)
+        console.log("[v0] Created text object:", operation.text)
+        break
+      }
+
       case "move": {
         const moveIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
         if (moveIndex < 0 || moveIndex >= updatedObjects.length) {

@@ -36,9 +36,12 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, objX: 0, objY: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [dragOffsets, setDragOffsets] = useState<Map<string, { x: number; y: number }>>(new Map())
-  const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line">("select")
+  const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line" | "text">("select")
   const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null)
   const [linePreview, setLinePreview] = useState<{ x: number; y: number } | null>(null)
+  const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  const lastClickTime = useRef<number>(0)
+  const lastClickedId = useRef<string | null>(null)
   const lastCursorUpdate = useRef<number>(0)
   const CURSOR_THROTTLE_MS = 16
   const animationFrameRef = useRef<number>()
@@ -82,7 +85,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
 
   const getResizeHandleAtPosition = useCallback(
     (pos: { x: number; y: number }, obj: CanvasObject): ResizeHandle => {
-      if (obj.type === "line") return null
+      if (obj.type === "line" || obj.type === "text") return null
 
       const handleSize = 8 / viewport.zoom
       const x1 = obj.x
@@ -185,73 +188,60 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
             ctx.stroke()
             ctx.setLineDash([])
           }
-        } else {
-          ctx.translate(obj.x + obj.width / 2, obj.y + obj.height / 2)
-          ctx.rotate((obj.rotation * Math.PI) / 180)
+        } else if (obj.type === "rectangle") {
+          ctx.fillRect(obj.x, obj.y, obj.width, obj.height)
+          ctx.strokeRect(obj.x, obj.y, obj.width, obj.height)
+        } else if (obj.type === "circle") {
+          const radius = Math.min(obj.width, obj.height) / 2
+          ctx.beginPath()
+          ctx.arc(obj.x + obj.width / 2, obj.y + obj.height / 2, radius, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.stroke()
+        } else if (obj.type === "triangle") {
+          ctx.beginPath()
+          ctx.moveTo(obj.x, obj.y)
+          ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
+          ctx.lineTo(obj.x + obj.width, obj.y)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+        } else if (obj.type === "text") {
+          if (obj.id === editingTextId) {
+            // Draw selection box but not the text itself
+            if (isSelected) {
+              ctx.strokeStyle = "#3b82f6"
+              ctx.lineWidth = 2 / viewport.zoom
+              ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+              ctx.strokeRect(obj.x, obj.y, obj.width, obj.height)
+              ctx.setLineDash([])
+            }
+          } else {
+            // Normal text rendering when not editing
+            if (isSelected) {
+              ctx.strokeStyle = "#3b82f6"
+              ctx.lineWidth = 2 / viewport.zoom
+              ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+              ctx.strokeRect(obj.x, obj.y, obj.width, obj.height)
+              ctx.setLineDash([])
+            }
 
-          ctx.fillStyle = obj.fill_color
-          ctx.strokeStyle = obj.stroke_color
-          ctx.lineWidth = obj.stroke_width
-
-          if (obj.type === "rectangle") {
-            ctx.fillRect(-obj.width / 2, -obj.height / 2, obj.width, obj.height)
-            ctx.strokeRect(-obj.width / 2, -obj.height / 2, obj.width, obj.height)
-          } else if (obj.type === "circle") {
-            const radius = Math.min(obj.width, obj.height) / 2
-            ctx.beginPath()
-            ctx.arc(0, 0, radius, 0, Math.PI * 2)
-            ctx.fill()
-            ctx.stroke()
-          } else if (obj.type === "triangle") {
-            ctx.beginPath()
-            ctx.moveTo(0, -obj.height / 2)
-            ctx.lineTo(-obj.width / 2, obj.height / 2)
-            ctx.lineTo(obj.width / 2, obj.height / 2)
-            ctx.closePath()
-            ctx.fill()
-            ctx.stroke()
+            ctx.font = `${obj.font_size || 16}px ${obj.font_family || "Arial"}`
+            ctx.fillStyle = obj.fill_color
+            ctx.textBaseline = "middle"
+            ctx.textAlign = "center"
+            ctx.fillText(obj.text_content || "", obj.x + obj.width / 2, obj.y + obj.height / 2)
           }
+        }
 
-          if (isSelected) {
-            ctx.strokeStyle = "#3b82f6"
-            ctx.lineWidth = 2 / viewport.zoom
-            ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
-            ctx.strokeRect(-obj.width / 2 - 5, -obj.height / 2 - 5, obj.width + 10, obj.height + 10)
-            ctx.setLineDash([])
-          }
+        if (isSelected && obj.type !== "text") {
+          ctx.strokeStyle = "#3b82f6"
+          ctx.lineWidth = 2 / viewport.zoom
+          ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+          ctx.strokeRect(obj.x - 5, obj.y - 5, obj.width + 10, obj.height + 10)
+          ctx.setLineDash([])
         }
 
         ctx.restore()
-
-        if (isSelected && selectedIds.length === 1 && obj.type !== "line") {
-          const handleSize = 8 / viewport.zoom
-          const x1 = obj.x
-          const y1 = obj.y
-          const x2 = obj.x + obj.width
-          const y2 = obj.y + obj.height
-          const centerX = obj.x + obj.width / 2
-          const centerY = obj.y + obj.height / 2
-
-          ctx.fillStyle = "#ffffff"
-          ctx.strokeStyle = "#3b82f6"
-          ctx.lineWidth = 2 / viewport.zoom
-
-          const handles = [
-            { x: x1, y: y1 },
-            { x: x2, y: y1 },
-            { x: x1, y: y2 },
-            { x: x2, y: y2 },
-            { x: centerX, y: y1 },
-            { x: x2, y: centerY },
-            { x: centerX, y: y2 },
-            { x: x1, y: centerY },
-          ]
-
-          handles.forEach((handle) => {
-            ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize)
-            ctx.strokeRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize)
-          })
-        }
       })
 
       if (selectionBox) {
@@ -292,10 +282,44 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox])
+  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, editingTextId])
+
+  const handleTextEdit = useCallback((objectId: string) => {
+    setEditingTextId(objectId)
+  }, [])
+
+  const saveTextEdit = useCallback(
+    (objectId: string, newText: string) => {
+      if (!newText.trim()) {
+        // If text is empty or only whitespace, delete the object
+        const updatedObjects = objects.filter((o) => o.id !== objectId)
+        onObjectsChange(updatedObjects)
+        setSelectedIds([])
+      } else {
+        // Save the text content
+        const updatedObjects = objects.map((o) =>
+          o.id === objectId
+            ? {
+                ...o,
+                text_content: newText,
+              }
+            : o,
+        )
+        onObjectsChange(updatedObjects)
+      }
+      setEditingTextId(null)
+    },
+    [objects, onObjectsChange],
+  )
+
+  const cancelTextEdit = useCallback(() => {
+    setEditingTextId(null)
+  }, [])
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (editingTextId) return
+
       const pos = screenToCanvas(e.clientX, e.clientY)
 
       if (e.button === 1 || (e.button === 0 && e.altKey)) {
@@ -390,6 +414,30 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         return
       }
 
+      if (tool === "text") {
+        const newObj: CanvasObject = {
+          id: crypto.randomUUID(),
+          canvas_id: canvasId,
+          type: "text",
+          x: pos.x,
+          y: pos.y,
+          width: 200,
+          height: 50,
+          rotation: 0,
+          fill_color: "#000000",
+          stroke_color: "#000000",
+          stroke_width: 0,
+          font_size: 24,
+          font_family: "Arial",
+          text_content: "",
+        }
+        onObjectsChange([...objects, newObj])
+        setSelectedIds([newObj.id])
+        setEditingTextId(newObj.id)
+        setTool("select")
+        return
+      }
+
       if (selectedIds.length === 1 && tool === "select") {
         const selectedObj = objects.find((o) => o.id === selectedIds[0])
         if (selectedObj) {
@@ -442,6 +490,16 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       })
 
       if (clickedObj) {
+        const now = Date.now()
+        const isDoubleClick = now - lastClickTime.current < 300 && lastClickedId.current === clickedObj.id
+        lastClickTime.current = now
+        lastClickedId.current = clickedObj.id
+
+        if (isDoubleClick && clickedObj.type === "text") {
+          handleTextEdit(clickedObj.id)
+          return
+        }
+
         if (e.shiftKey) {
           if (selectedIds.includes(clickedObj.id)) {
             setSelectedIds(selectedIds.filter((id) => id !== clickedObj.id))
@@ -485,11 +543,15 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       viewport.zoom,
       selectedIds,
       getResizeHandleAtPosition,
+      handleTextEdit,
+      editingTextId,
     ],
   )
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (editingTextId) return
+
       const pos = screenToCanvas(e.clientX, e.clientY)
 
       if (tool === "line" && lineStart) {
@@ -630,6 +692,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       onCursorMove,
       tool,
       lineStart,
+      editingTextId,
     ],
   )
 
@@ -670,5 +733,8 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     handleMouseUp,
     handleWheel,
     deleteSelectedObject: deleteSelectedObjects,
+    editingTextId,
+    saveTextEdit,
+    cancelTextEdit,
   }
 }

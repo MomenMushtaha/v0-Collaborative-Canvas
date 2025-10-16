@@ -91,6 +91,39 @@ export async function POST(request: Request) {
       {
         type: "function",
         function: {
+          name: "createText",
+          description: "Create a text layer on the canvas with customizable content, position, size, and color",
+          parameters: {
+            type: "object",
+            properties: {
+              text: {
+                type: "string",
+                description: "The text content to display",
+              },
+              x: {
+                type: "number",
+                description: "X coordinate position on the canvas",
+              },
+              y: {
+                type: "number",
+                description: "Y coordinate position on the canvas",
+              },
+              fontSize: {
+                type: "number",
+                description: "Font size in pixels (default: 16)",
+              },
+              color: {
+                type: "string",
+                description: "Text color as hex code (e.g., #000000 for black)",
+              },
+            },
+            required: ["text", "x", "y"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
           name: "createShape",
           description: "Create a new shape on the canvas",
           parameters: {
@@ -338,6 +371,7 @@ AVAILABLE FUNCTIONS:
 5. rotateShape - Rotate existing shapes
 6. deleteShape - Delete specific shapes or clear all
 7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
+8. createText - Create a text layer on the canvas
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -347,11 +381,11 @@ SHAPE IDENTIFICATION RULES:
 - When user says "the last shape" or "the latest", use index -1
 - If multiple shapes match, operate on the first match or ask for clarification
 
-SELECTION CONTEXT EXAMPLES:
-- "make it bigger" → resize the selected shape (index ${selectedIndices[0] ?? "none"})
-- "move the selected shape left" → move shape at index ${selectedIndices[0] ?? "none"}
-- "change the color to red" → modify the selected shape
-- "rotate it 45 degrees" → rotate the selected shape
+TEXT LAYER RULES:
+- Use createText to add text layers
+- Provide text content, position (x, y), font size, and color
+- Font size defaults to 16 pixels if not specified
+- Text color defaults to black (#000000) if not specified
 
 COLOR REFERENCE (use hex codes):
 - red: #ef4444, blue: #3b82f6, green: #22c55e, yellow: #eab308
@@ -370,6 +404,7 @@ DEFAULT VALUES:
 - Shape size: 100x100 pixels
 - Spacing: 50 pixels
 - Grid columns: 3
+- Font size: 16 pixels
 
 BEST PRACTICES:
 1. For questions about the canvas, use getCanvasState first
@@ -384,7 +419,8 @@ Examples:
 - "Move the circle left" → moveShape(find circle index, deltaX: -100)
 - "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
 - "How many shapes?" → getCanvasState(query: "count")
-- "Delete all red shapes" → Find all red shapes and delete each one`
+- "Delete all red shapes" → Find all red shapes and delete each one
+- "Add text 'Hello World' at the center" → createText(text: 'Hello World', x: 1000, y: 1000, fontSize: 24, color: '#000000')`
 
     const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -609,6 +645,50 @@ Examples:
             shapeIndices: args.shapeIndices || [],
             spacing: args.spacing || 50,
             columns: args.columns,
+          })
+        } else if (functionName === "createText") {
+          const validation = validateCreateText(args)
+          if (!validation.valid) {
+            validationErrors.push(`createText: ${validation.error}`)
+            console.warn("[v0] Validation error:", validation.error)
+            continue
+          }
+
+          const colorMap: Record<string, string> = {
+            black: "#000000",
+            white: "#ffffff",
+            red: "#ef4444",
+            blue: "#3b82f6",
+            green: "#22c55e",
+            yellow: "#eab308",
+            purple: "#a855f7",
+            pink: "#ec4899",
+            orange: "#f97316",
+            cyan: "#06b6d4",
+            teal: "#14b8a6",
+            indigo: "#6366f1",
+            gray: "#6b7280",
+          }
+
+          let color = args.color || "#000000"
+
+          if (!color.startsWith("#")) {
+            const normalizedColor = color.toLowerCase().trim()
+            color = colorMap[normalizedColor] || "#000000"
+          }
+
+          if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+            console.warn("[v0] Invalid color format:", color, "- using default black")
+            color = "#000000"
+          }
+
+          operations.push({
+            type: "createText",
+            text: args.text,
+            x: args.x,
+            y: args.y,
+            fontSize: args.fontSize || 16,
+            color: color,
           })
         }
       }
@@ -865,6 +945,26 @@ function validateArrangeShapes(args: any, currentObjects: any[]): { valid: boole
 
   if (args.columns !== undefined && (typeof args.columns !== "number" || args.columns < 1)) {
     return { valid: false, error: "Columns must be a positive number." }
+  }
+
+  return { valid: true }
+}
+
+function validateCreateText(args: any): { valid: boolean; error?: string } {
+  if (!args.text) {
+    return { valid: false, error: "Text content is required." }
+  }
+
+  if (typeof args.x !== "number" || typeof args.y !== "number") {
+    return { valid: false, error: "Position (x, y) must be numbers." }
+  }
+
+  if (args.fontSize !== undefined && (typeof args.fontSize !== "number" || args.fontSize <= 0)) {
+    return { valid: false, error: "Font size must be a positive number." }
+  }
+
+  if (args.color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(args.color)) {
+    return { valid: false, error: "Invalid color format. Must be a hex code." }
   }
 
   return { valid: true }

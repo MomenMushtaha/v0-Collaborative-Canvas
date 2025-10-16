@@ -10,6 +10,9 @@ export interface CanvasObject {
   fill_color: string
   stroke_color: string
   stroke_width: number
+  text_content?: string
+  font_size?: number
+  font_family?: string
   created_by?: string
   created_at?: string
   updated_at?: string

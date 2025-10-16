@@ -59,20 +59,6 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
 
   const editingTextObject = editingTextId ? objects.find((o) => o.id === editingTextId) : null
 
-  const getTextareaPosition = () => {
-    if (!canvasRef.current || !editingTextObject) return null
-
-    const rect = canvasRef.current.getBoundingClientRect()
-    return {
-      left: rect.left + viewport.x + editingTextObject.x * viewport.zoom,
-      top: rect.top + viewport.y + editingTextObject.y * viewport.zoom,
-      width: editingTextObject.width * viewport.zoom,
-      height: editingTextObject.height * viewport.zoom,
-    }
-  }
-
-  const textareaPosition = getTextareaPosition()
-
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
       {/* Toolbar */}
@@ -163,7 +149,7 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
         onWheel={handleWheel}
       />
 
-      {editingTextId && editingTextObject && textareaPosition && (
+      {editingTextId && editingTextObject && (
         <textarea
           ref={textInputRef}
           value={textValue}
@@ -180,18 +166,20 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
           onBlur={() => {
             saveTextEdit(editingTextId, textValue)
           }}
-          className="fixed z-20 resize-none border-2 border-blue-500 bg-white/90 text-center text-black outline-none overflow-hidden"
+          className="absolute z-20 resize-none border-2 border-blue-500 bg-white/90 text-center text-black outline-none overflow-hidden"
           style={{
-            left: `${textareaPosition.left}px`,
-            top: `${textareaPosition.top}px`,
-            width: `${textareaPosition.width}px`,
-            height: `${textareaPosition.height}px`,
+            left: `${viewport.x + editingTextObject.x * viewport.zoom}px`,
+            top: `${viewport.y + editingTextObject.y * viewport.zoom}px`,
+            width: `${editingTextObject.width * viewport.zoom}px`,
+            height: `${editingTextObject.height * viewport.zoom}px`,
             fontSize: `${(editingTextObject.font_size || 16) * viewport.zoom}px`,
             fontFamily: editingTextObject.font_family || "Arial",
+            paddingTop: `${(editingTextObject.height * viewport.zoom - (editingTextObject.font_size || 16) * viewport.zoom * 1.2) / 2}px`,
             lineHeight: "1.2",
             color: editingTextObject.fill_color,
             caretColor: editingTextObject.fill_color,
-            padding: 0,
+            paddingLeft: 0,
+            paddingRight: 0,
             margin: 0,
             boxSizing: "border-box",
           }}

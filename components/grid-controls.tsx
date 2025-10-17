@@ -10,34 +10,45 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { GridSettings } from "@/lib/grid-utils"
 
 interface GridControlsProps {
-  gridSettings: GridSettings
-  onToggleGrid: () => void
-  onToggleSnap: () => void
-  onChangeGridSize: (size: number) => void
+  gridEnabled: boolean
+  snapEnabled: boolean
+  gridSize: number
+  onGridChange: (enabled: boolean, snap: boolean, size: number) => void
 }
 
-export function GridControls({ gridSettings, onToggleGrid, onToggleSnap, onChangeGridSize }: GridControlsProps) {
+export function GridControls({ gridEnabled, snapEnabled, gridSize, onGridChange }: GridControlsProps) {
   const gridSizes = [10, 20, 30, 50, 100]
+
+  const handleToggleGrid = () => {
+    onGridChange(!gridEnabled, snapEnabled, gridSize)
+  }
+
+  const handleToggleSnap = () => {
+    onGridChange(gridEnabled, !snapEnabled, gridSize)
+  }
+
+  const handleChangeGridSize = (size: number) => {
+    onGridChange(gridEnabled, snapEnabled, size)
+  }
 
   return (
     <div className="flex items-center gap-1">
       <Button
-        variant={gridSettings.enabled ? "default" : "ghost"}
+        variant={gridEnabled ? "default" : "ghost"}
         size="sm"
-        onClick={onToggleGrid}
+        onClick={handleToggleGrid}
         title="Toggle Grid (Ctrl+')"
       >
         <Grid3x3 className="h-4 w-4" />
       </Button>
 
       <Button
-        variant={gridSettings.snapEnabled ? "default" : "ghost"}
+        variant={snapEnabled ? "default" : "ghost"}
         size="sm"
-        onClick={onToggleSnap}
-        disabled={!gridSettings.enabled}
+        onClick={handleToggleSnap}
+        disabled={!gridEnabled}
         title="Toggle Snap to Grid"
       >
         <Magnet className="h-4 w-4" />
@@ -45,8 +56,8 @@ export function GridControls({ gridSettings, onToggleGrid, onToggleSnap, onChang
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" disabled={!gridSettings.enabled}>
-            {gridSettings.size}px
+          <Button variant="ghost" size="sm" disabled={!gridEnabled}>
+            {gridSize}px
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
@@ -55,8 +66,8 @@ export function GridControls({ gridSettings, onToggleGrid, onToggleSnap, onChang
           {gridSizes.map((size) => (
             <DropdownMenuItem
               key={size}
-              onClick={() => onChangeGridSize(size)}
-              className={gridSettings.size === size ? "bg-accent" : ""}
+              onClick={() => handleChangeGridSize(size)}
+              className={gridSize === size ? "bg-accent" : ""}
             >
               {size}px
             </DropdownMenuItem>

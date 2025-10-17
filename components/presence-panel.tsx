@@ -22,7 +22,7 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
   const offlineUsers = otherUsers.filter((user) => !isUserOnline(user.last_seen))
 
   return (
-    <div className="absolute right-4 top-[300px] z-10 w-64 rounded-lg border bg-background/95 p-4 shadow-lg backdrop-blur">
+    <div className="absolute right-4 top-20 z-10 w-64 rounded-lg border bg-background/95 p-4 shadow-lg backdrop-blur">
       <h3 className="mb-3 text-sm font-semibold">Active Users</h3>
 
       {/* Current User */}

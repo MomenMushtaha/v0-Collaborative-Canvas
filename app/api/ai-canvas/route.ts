@@ -5,8 +5,35 @@ import { z } from "zod"
 
 export const maxDuration = 30
 
+const MAX_HISTORY_MESSAGES = 12
+
+const conversationMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().min(1).max(4000),
+})
+
+const conversationHistorySchema = z.array(conversationMessageSchema)
+
+type ConversationMessage = z.infer<typeof conversationMessageSchema>
+
+async function updateQueueStatus(queueItemId: string | null, updates: Record<string, unknown>) {
+  if (!queueItemId) return
+
+  try {
+    const supabase = createServiceRoleClient()
+    await supabase
+      .from("ai_operations_queue")
+      .update(updates)
+      .eq("id", queueItemId)
+  } catch (err) {
+    console.warn("[v0] Failed to update queue status:", err)
+  }
+}
+
 export async function POST(request: Request) {
   console.log("[v0] ===== AI Canvas API Route Called =====")
+
+  let queueItemId: string | null = null
 
   try {
     const body = await request.json()
@@ -19,6 +46,7 @@ export async function POST(request: Request) {
       userId,
       userName,
       viewport,
+      conversationHistory: conversationHistoryPayload,
     } = body
 
     console.log("[v0] Message:", message)
@@ -42,7 +70,36 @@ export async function POST(request: Request) {
       )
     }
 
-    let queueItemId: string | null = null
+    const conversationHistoryResult = conversationHistorySchema.safeParse(
+      Array.isArray(conversationHistoryPayload) ? conversationHistoryPayload : [],
+    )
+
+    if (!conversationHistoryResult.success && conversationHistoryPayload) {
+      console.warn("[v0] Invalid conversation history provided, ignoring.")
+    }
+
+    const safeConversationHistory = conversationHistoryResult.success
+      ? conversationHistoryResult.data.slice(-MAX_HISTORY_MESSAGES)
+      : []
+
+    const historyEnsuredLatestUser = (() => {
+      if (safeConversationHistory.length === 0) {
+        return [{ role: "user", content: message } satisfies ConversationMessage]
+      }
+
+      const lastEntry = safeConversationHistory[safeConversationHistory.length - 1]
+      if (lastEntry.role !== "user" || lastEntry.content !== message) {
+        return [...safeConversationHistory, { role: "user", content: message } satisfies ConversationMessage]
+      }
+
+      return safeConversationHistory
+    })()
+
+    const conversationMessages = historyEnsuredLatestUser.map((entry) => ({
+      role: entry.role,
+      content: entry.content,
+    }))
+
     if (canvasId && userId && userName) {
       try {
         const supabase = createServiceRoleClient()
@@ -660,13 +717,63 @@ Examples:
 - "Delete all red shapes" → Find all red shapes and delete each one
 - "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')`
 
-    const result = await generateText({
-      model: "openai/gpt-4o-mini",
-      system: systemPrompt,
-      prompt: message,
-      tools,
-      maxSteps: 5,
-    })
+    let result
+    try {
+      result = await generateText({
+        model: "openai/gpt-4o-mini",
+        system: systemPrompt,
+        messages: conversationMessages,
+        tools,
+        maxSteps: 5,
+        maxRetries: 2,
+      })
+    } catch (primaryError) {
+      console.warn("[v0] Primary AI call failed, attempting fallback:", primaryError)
+      const minimalHistory = conversationMessages.slice(-3)
+
+      if (minimalHistory.length === conversationMessages.length) {
+        await updateQueueStatus(queueItemId, {
+          status: "failed",
+          operations: [],
+          completed_at: new Date().toISOString(),
+        })
+
+        return NextResponse.json({
+          message:
+            "I ran into a temporary issue while processing that request. Please try again in a moment or rephrase what you need.",
+          operations: [],
+          queueItemId,
+          validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
+        })
+      }
+
+      try {
+        result = await generateText({
+          model: "openai/gpt-4o-mini",
+          system: systemPrompt,
+          messages: minimalHistory,
+          tools,
+          maxSteps: 5,
+          maxRetries: 2,
+        })
+        console.log("[v0] Fallback AI call succeeded with reduced context")
+      } catch (fallbackError) {
+        console.error("[v0] Fallback AI call failed:", fallbackError)
+        await updateQueueStatus(queueItemId, {
+          status: "failed",
+          operations: [],
+          completed_at: new Date().toISOString(),
+        })
+
+        return NextResponse.json({
+          message:
+            "I ran into a temporary issue while processing that request. Please try again in a moment or rephrase what you need.",
+          operations: [],
+          queueItemId,
+          validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
+        })
+      }
+    }
 
     console.log("[v0] AI SDK response received")
     console.log("[v0] Operations collected:", operations.length)
@@ -677,21 +784,11 @@ Examples:
       aiMessage += `\n\nNote: Some operations couldn't be completed:\n${validationErrors.map((e) => `• ${e}`).join("\n")}`
     }
 
-    if (queueItemId && canvasId) {
-      try {
-        const supabase = createServiceRoleClient()
-        await supabase
-          .from("ai_operations_queue")
-          .update({
-            status: "completed",
-            operations: operations,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", queueItemId)
-      } catch (err) {
-        console.warn("[v0] Failed to update queue status:", err)
-      }
-    }
+    await updateQueueStatus(queueItemId, {
+      status: "completed",
+      operations: operations,
+      completed_at: new Date().toISOString(),
+    })
 
     console.log("[v0] Returning", operations.length, "operations")
     return NextResponse.json({
@@ -705,6 +802,12 @@ Examples:
     console.error("[v0] Error type:", error?.constructor?.name)
     console.error("[v0] Error message:", error instanceof Error ? error.message : String(error))
     console.error("[v0] Error stack:", error instanceof Error ? error.stack : "No stack trace")
+
+    await updateQueueStatus(queueItemId, {
+      status: "failed",
+      operations: [],
+      completed_at: new Date().toISOString(),
+    })
 
     return NextResponse.json(
       {

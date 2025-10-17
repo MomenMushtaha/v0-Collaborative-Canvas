@@ -1,7 +1,18 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LogOut, Undo, Redo, Download, History, MessageSquare, Copy, Clipboard } from "lucide-react"
+import {
+  LogOut,
+  Undo,
+  Redo,
+  Download,
+  History,
+  MessageSquare,
+  Copy,
+  Clipboard,
+  Lasso,
+  MousePointerClick,
+} from "lucide-react"
 import { AlignmentToolbar } from "./alignment-toolbar"
 import { GridControls } from "./grid-controls"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
@@ -32,6 +43,9 @@ interface ToolbarProps {
   onSendToBack?: () => void
   onBringForward?: () => void
   onSendBackward?: () => void
+  lassoMode?: boolean
+  onToggleLassoMode?: () => void
+  onSelectAllOfType?: () => void
 }
 
 export function Toolbar({
@@ -59,6 +73,9 @@ export function Toolbar({
   onSendToBack,
   onBringForward,
   onSendBackward,
+  lassoMode = false,
+  onToggleLassoMode,
+  onSelectAllOfType,
 }: ToolbarProps) {
   return (
     <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b border-border/50 bg-background/95 backdrop-blur-md shadow-sm transition-all duration-200 px-4">
@@ -99,6 +116,36 @@ export function Toolbar({
             </Button>
           )}
         </div>
+
+        {(onToggleLassoMode || onSelectAllOfType) && (
+          <div className="flex items-center gap-1 border-l pl-4">
+            {onToggleLassoMode && (
+              <Button
+                variant={lassoMode ? "default" : "ghost"}
+                size="icon"
+                onClick={onToggleLassoMode}
+                title="Lasso Select (L)"
+              >
+                <Lasso className="h-4 w-4" />
+              </Button>
+            )}
+            {onSelectAllOfType && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  console.log("[v0] Select All of Type button clicked")
+                  console.log("[v0] onSelectAllOfType function:", onSelectAllOfType)
+                  onSelectAllOfType()
+                }}
+                disabled={selectedCount === 0}
+                title="Select All of Type (Ctrl+Shift+A)"
+              >
+                <MousePointerClick className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        )}
 
         {onAlign && onDistribute && (
           <AlignmentToolbar

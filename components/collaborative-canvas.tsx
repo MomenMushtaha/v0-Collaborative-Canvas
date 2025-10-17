@@ -60,6 +60,8 @@ interface CollaborativeCanvasProps {
   onSendToBack?: Dispatch<SetStateAction<(() => void) | undefined>>
   onBringForward?: Dispatch<SetStateAction<(() => void) | undefined>>
   onSendBackward?: Dispatch<SetStateAction<(() => void) | undefined>>
+  lassoMode?: boolean // Added lassoMode prop type
+  onSelectAllOfType?: Dispatch<SetStateAction<(() => void) | undefined>> // Added onSelectAllOfType prop type
 }
 
 export function CollaborativeCanvas({
@@ -89,6 +91,8 @@ export function CollaborativeCanvas({
   onSendToBack,
   onBringForward,
   onSendBackward,
+  lassoMode = false,
+  onSelectAllOfType,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -341,6 +345,34 @@ export function CollaborativeCanvas({
     console.log("[v0] Selected all objects:", allIds.length)
   }, [objects])
 
+  const handleSelectAllOfType = useCallback(() => {
+    console.log("[v0] handleSelectAllOfType called")
+    console.log("[v0] selectedObjectIds:", selectedObjectIds)
+    console.log("[v0] objects:", objects.length)
+
+    if (selectedObjectIds.length === 0) {
+      console.log("[v0] No objects selected, returning")
+      return
+    }
+
+    // Get the types of all currently selected objects
+    const selectedTypes = new Set(objects.filter((obj) => selectedObjectIds.includes(obj.id)).map((obj) => obj.type))
+    console.log("[v0] selectedTypes:", Array.from(selectedTypes))
+
+    // Select all objects that match any of the selected types
+    const matchingIds = objects.filter((obj) => selectedTypes.has(obj.type)).map((obj) => obj.id)
+    console.log("[v0] matchingIds:", matchingIds)
+
+    setSelectedObjectIds(matchingIds)
+    onSelectionChange?.(matchingIds) // Sync to parent component
+    console.log("[v0] Updated selection to:", matchingIds.length, "objects")
+
+    toast({
+      title: "Selected by Type",
+      description: `Selected ${matchingIds.length} ${Array.from(selectedTypes).join(", ")} object${matchingIds.length > 1 ? "s" : ""}`,
+    })
+  }, [selectedObjectIds, objects, toast, onSelectionChange])
+
   const selectedObjects = useMemo(() => {
     return objects.filter((obj) => selectedObjectIds.includes(obj.id))
   }, [objects, selectedObjectIds])
@@ -351,6 +383,7 @@ export function CollaborativeCanvas({
     onDelete: handleDelete,
     onDuplicate: handleDuplicate,
     onSelectAll: handleSelectAll,
+    onSelectAllOfType: handleSelectAllOfType, // Added select all of type to keyboard shortcuts
     onCopy: handleCopy,
     onPaste: handlePaste,
     canUndo: historyCanUndo,
@@ -637,6 +670,12 @@ export function CollaborativeCanvas({
     onSendBackward,
   ])
 
+  useEffect(() => {
+    if (onSelectAllOfType) {
+      onSelectAllOfType(() => handleSelectAllOfType)
+    }
+  }, [handleSelectAllOfType, onSelectAllOfType])
+
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -678,6 +717,7 @@ export function CollaborativeCanvas({
         onSendToBack={handleSendToBack}
         onBringForward={handleBringForward}
         onSendBackward={handleSendBackward}
+        lassoMode={lassoMode} // Pass lassoMode to Canvas
       >
         <MultiplayerCursors users={otherUsers} />
         {comments.map((comment) => (

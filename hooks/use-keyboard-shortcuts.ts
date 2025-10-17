@@ -8,6 +8,7 @@ interface KeyboardShortcutsProps {
   onDelete?: () => void
   onDuplicate?: () => void
   onSelectAll?: () => void
+  onSelectAllOfType?: () => void // New prop for select all of type
   onCopy?: () => void
   onPaste?: () => void
   canUndo?: boolean
@@ -21,6 +22,7 @@ export function useKeyboardShortcuts({
   onDelete,
   onDuplicate,
   onSelectAll,
+  onSelectAllOfType, // New parameter
   onCopy,
   onPaste,
   canUndo = false,
@@ -38,8 +40,15 @@ export function useKeyboardShortcuts({
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
       const modifier = isMac ? e.metaKey : e.ctrlKey
 
+      if (modifier && e.shiftKey && e.key === "a" && hasSelection && onSelectAllOfType) {
+        e.preventDefault()
+        onSelectAllOfType()
+        console.log("[v0] Keyboard shortcut: Select All of Type")
+        return
+      }
+
       // Select All: Ctrl+A (Windows/Linux) or Cmd+A (Mac)
-      if (modifier && e.key === "a" && onSelectAll) {
+      if (modifier && e.key === "a" && !e.shiftKey && onSelectAll) {
         e.preventDefault()
         onSelectAll()
         console.log("[v0] Keyboard shortcut: Select All")
@@ -97,5 +106,17 @@ export function useKeyboardShortcuts({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [onUndo, onRedo, onDelete, onDuplicate, onSelectAll, onCopy, onPaste, canUndo, canRedo, hasSelection])
+  }, [
+    onUndo,
+    onRedo,
+    onDelete,
+    onDuplicate,
+    onSelectAll,
+    onSelectAllOfType,
+    onCopy,
+    onPaste,
+    canUndo,
+    canRedo,
+    hasSelection,
+  ])
 }

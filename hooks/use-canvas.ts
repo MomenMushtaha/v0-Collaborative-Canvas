@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { snapToGrid } from "@/lib/grid-utils"
+import { snapToGrid, isObjectInLasso } from "@/lib/grid-utils"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { CanvasObject } from "@/lib/types"
@@ -166,6 +166,9 @@ export function useCanvas({
     return { width, height }
   }, [])
 
+  const [lassoPath, setLassoPath] = useState<{ x: number; y: number }[]>([])
+  const [isLassoSelecting, setIsLassoSelecting] = useState(false)
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -327,13 +330,19 @@ export function useCanvas({
         ctx.setLineDash([])
       }
 
-      if (lineStart && linePreview) {
-        ctx.strokeStyle = "#a855f7"
-        ctx.lineWidth = 3
-        ctx.setLineDash([5, 5])
+      if (isLassoSelecting && lassoPath.length > 1) {
+        ctx.strokeStyle = "#3b82f6"
+        ctx.lineWidth = 2 / viewport.zoom
+        ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+        ctx.fillStyle = "rgba(59, 130, 246, 0.1)"
+
         ctx.beginPath()
-        ctx.moveTo(lineStart.x, lineStart.y)
-        ctx.lineTo(linePreview.x, linePreview.y)
+        ctx.moveTo(lassoPath[0].x, lassoPath[0].y)
+        for (let i = 1; i < lassoPath.length; i++) {
+          ctx.lineTo(lassoPath[i].x, lassoPath[i].y)
+        }
+        ctx.closePath()
+        ctx.fill()
         ctx.stroke()
         ctx.setLineDash([])
       }
@@ -355,7 +364,19 @@ export function useCanvas({
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, editingTextId, gridEnabled, gridSize])
+  }, [
+    objects,
+    viewport,
+    selectedIds,
+    lineStart,
+    linePreview,
+    selectionBox,
+    editingTextId,
+    gridEnabled,
+    gridSize,
+    isLassoSelecting,
+    lassoPath,
+  ])
 
   const handleTextEdit = useCallback((objectId: string) => {
     setEditingTextId(objectId)
@@ -412,6 +433,15 @@ export function useCanvas({
       if (editingTextId) return
 
       const pos = screenToCanvas(e.clientX, e.clientY)
+
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
+      const modifier = isMac ? e.metaKey : e.ctrlKey
+
+      if (modifier && tool === "select" && e.button === 0) {
+        setIsLassoSelecting(true)
+        setLassoPath([pos])
+        return
+      }
 
       if (e.button === 1 || (e.button === 0 && e.altKey)) {
         setIsPanning(true)
@@ -650,6 +680,11 @@ export function useCanvas({
         pos = snapToGrid(pos.x, pos.y, gridSize)
       }
 
+      if (isLassoSelecting) {
+        setLassoPath((prev) => [...prev, pos])
+        return
+      }
+
       if (tool === "line" && lineStart) {
         setLinePreview(pos)
       }
@@ -791,10 +826,19 @@ export function useCanvas({
       editingTextId,
       snapEnabled,
       gridSize,
+      isLassoSelecting,
     ],
   )
 
   const handleMouseUp = useCallback(() => {
+    if (isLassoSelecting && lassoPath.length > 2) {
+      const selectedObjects = objects.filter((obj) => isObjectInLasso(obj, lassoPath))
+      setSelectedIds(selectedObjects.map((obj) => obj.id))
+      setLassoPath([])
+      setIsLassoSelecting(false)
+      return
+    }
+
     if (isSelecting && selectionBox) {
       const selectedObjects = objects.filter((obj) => isObjectInSelectionBox(obj, selectionBox))
       setSelectedIds(selectedObjects.map((obj) => obj.id))
@@ -806,7 +850,9 @@ export function useCanvas({
     setIsResizing(false)
     setIsSelecting(false)
     setResizeHandle(null)
-  }, [isSelecting, selectionBox, objects, isObjectInSelectionBox])
+    setIsLassoSelecting(false)
+    setLassoPath([])
+  }, [isSelecting, selectionBox, objects, isObjectInSelectionBox, isLassoSelecting, lassoPath])
 
   const MIN_ZOOM = 1 // 100% minimum - no zooming out
   const MAX_ZOOM = 3 // Updated from 2 to 3 (300% maximum - allows zooming in up to 3x)
@@ -824,6 +870,7 @@ export function useCanvas({
     canvasRef,
     viewport,
     selectedIds,
+    setSelectedIds,
     tool,
     setTool,
     handleMouseDown,

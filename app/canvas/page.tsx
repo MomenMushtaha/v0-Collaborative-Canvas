@@ -39,9 +39,15 @@ export default function CanvasPage() {
   const [lastSnapshotTime, setLastSnapshotTime] = useState(Date.now())
   const [commentMode, setCommentMode] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
+  const [lassoMode, setLassoMode] = useState(false)
+  const [onSelectAllOfType, setOnSelectAllOfType] = useState<(() => void) | undefined>()
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()
+
+  useEffect(() => {
+    console.log("[v0] [PAGE] onSelectAllOfType state updated:", onSelectAllOfType)
+  }, [onSelectAllOfType])
 
   useEffect(() => {
     // Check authentication
@@ -227,6 +233,9 @@ export default function CanvasPage() {
           onSendToBack={onSendToBack}
           onBringForward={onBringForward}
           onSendBackward={onSendBackward}
+          lassoMode={lassoMode}
+          onToggleLassoMode={() => setLassoMode(!lassoMode)}
+          onSelectAllOfType={onSelectAllOfType}
         />
       </div>
       <div className="h-full w-full">
@@ -257,6 +266,8 @@ export default function CanvasPage() {
           onSendToBack={setOnSendToBack}
           onBringForward={setOnBringForward}
           onSendBackward={setOnSendBackward}
+          lassoMode={lassoMode}
+          onSelectAllOfType={setOnSelectAllOfType}
         />
       </div>
       <AiChat

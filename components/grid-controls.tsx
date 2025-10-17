@@ -56,7 +56,7 @@ export function GridControls({ gridEnabled, snapEnabled, gridSize, onGridChange 
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" disabled={!gridEnabled}>
+          <Button variant="ghost" size="sm" disabled={!gridEnabled} className="justify-center">
             {gridSize}px
           </Button>
         </DropdownMenuTrigger>

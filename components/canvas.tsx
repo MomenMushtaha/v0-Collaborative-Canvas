@@ -14,6 +14,7 @@ interface CanvasProps {
   onSelectionChange?: (selectedIds: string[]) => void
   children?: any
   viewport?: { x: number; y: number; zoom: number } // Add viewport prop
+  onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void // Add callback to report viewport changes to parent
   gridEnabled?: boolean
   snapEnabled?: boolean
   gridSize?: number
@@ -27,6 +28,7 @@ export function Canvas({
   onSelectionChange,
   children,
   viewport: externalViewport, // Receive viewport from parent
+  onViewportChange, // Accept viewport change callback
   gridEnabled = false,
   snapEnabled,
   gridSize,
@@ -155,8 +157,14 @@ export function Canvas({
     onSelectionChange?.(selectedIds)
   }, [selectedIds, onSelectionChange])
 
+  useEffect(() => {
+    if (onViewportChange) {
+      onViewportChange(viewport)
+    }
+  }, [viewport, onViewportChange])
+
   const editingTextObject = editingTextId ? objects.find((o) => o.id === editingTextId) : null
-  const { x: viewportX, y: viewportY, zoom: viewportZoom } = externalViewport || viewport
+  const { x: viewportX, y: viewportY, zoom: viewportZoom } = viewport // Always use internal viewport, not external
 
   const textAreaStyle: CSSProperties | undefined = useMemo(() => {
     if (!editingTextObject) return undefined
@@ -257,7 +265,7 @@ export function Canvas({
       </div>
 
       {/* Zoom display */}
-      <div className="absolute bottom-4 right-[224px] z-10 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md px-3 py-2 text-sm shadow-xl transition-all duration-200 hover:shadow-2xl">
+      <div className="absolute bottom-4 right-4 md:right-[224px] z-10 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md px-3 py-2 text-sm shadow-xl transition-all duration-200 hover:shadow-2xl">
         <span className="text-muted-foreground">Zoom: </span>
         <span className="font-medium">{Math.round(viewportZoom * 100)}%</span>
       </div>

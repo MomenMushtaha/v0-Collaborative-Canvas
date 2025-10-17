@@ -138,7 +138,8 @@ export default function CanvasPage() {
           onAiOperationsProcessed={() => setAiOperations([])}
           onObjectsChange={setCurrentObjects}
           onSelectionChange={setSelectedObjectIds}
-          viewport={viewport} // Pass viewport state
+          viewport={viewport}
+          onViewportChange={setViewport}
           onUndo={setOnUndo}
           onRedo={setOnRedo}
           canUndo={setCanUndo}

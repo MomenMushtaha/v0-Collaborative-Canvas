@@ -40,6 +40,7 @@ interface CollaborativeCanvasProps {
   onObjectsChange?: (objects: CanvasObject[]) => void
   onSelectionChange?: (selectedIds: string[]) => void
   viewport?: { x: number; y: number; zoom: number }
+  onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void
   onUndo?: Dispatch<SetStateAction<(() => void) | undefined>>
   onRedo?: Dispatch<SetStateAction<(() => void) | undefined>>
   canUndo?: (canUndo: boolean) => void
@@ -61,6 +62,7 @@ export function CollaborativeCanvas({
   onObjectsChange,
   onSelectionChange,
   viewport,
+  onViewportChange,
   onUndo,
   onRedo,
   canUndo,
@@ -494,6 +496,7 @@ export function CollaborativeCanvas({
         onCursorMove={updateCursor}
         onSelectionChange={handleSelectionChange}
         viewport={viewport}
+        onViewportChange={onViewportChange}
         onAlign={handleAlign}
         onDistribute={handleDistribute}
         selectedCount={selectedObjectIds.length}

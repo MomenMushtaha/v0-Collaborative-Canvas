@@ -136,9 +136,20 @@ export function useCanvas({
       const centerX = obj.x + obj.width / 2
       const centerY = obj.y + obj.height / 2
 
-      // Rotation handle is above the top edge
-      const rotateHandleY = obj.y - 30 / viewport.zoom
-      const rotateHandleX = centerX
+      // Rotation handle is above the top edge in local coordinates
+      const localHandleX = 0 // relative to center
+      const localHandleY = -obj.height / 2 - 30 / viewport.zoom // above the object
+
+      // Transform handle position by object's rotation
+      const rotationRad = (obj.rotation * Math.PI) / 180
+      const cos = Math.cos(rotationRad)
+      const sin = Math.sin(rotationRad)
+
+      const rotatedHandleX = localHandleX * cos - localHandleY * sin
+      const rotatedHandleY = localHandleX * sin + localHandleY * cos
+
+      const rotateHandleX = centerX + rotatedHandleX
+      const rotateHandleY = centerY + rotatedHandleY
 
       return Math.abs(pos.x - rotateHandleX) < handleSize && Math.abs(pos.y - rotateHandleY) < handleSize
     },

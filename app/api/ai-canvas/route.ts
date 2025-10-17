@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createServerClient } from "@/lib/supabase/server"
+import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import { generateText, tool } from "ai"
 import { z } from "zod"
 
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     let queueItemId: string | null = null
     if (canvasId && userId && userName) {
       try {
-        const supabase = await createServerClient()
+        const supabase = createServiceRoleClient()
         const { data: queueItem, error: queueError } = await supabase
           .from("ai_operations_queue")
           .insert({
@@ -389,14 +389,8 @@ export async function POST(request: Request) {
           x: z.number().optional().describe("Center X coordinate for the form"),
           y: z.number().optional().describe("Center Y coordinate for the form"),
           title: z.string().optional().describe("Heading text to display above the form"),
-          subtitle: z
-            .string()
-            .optional()
-            .describe("Optional supporting text shown below the title"),
-          primaryColor: z
-            .string()
-            .optional()
-            .describe("Accent color for the button (hex code or common color name)"),
+          subtitle: z.string().optional().describe("Optional supporting text shown below the title"),
+          primaryColor: z.string().optional().describe("Accent color for the button (hex code or common color name)"),
         }),
         execute: async ({ x, y, title, subtitle, primaryColor }) => {
           const formWidth = 360
@@ -432,23 +426,11 @@ export async function POST(request: Request) {
         description:
           "Create a horizontal navigation bar with a brand label and evenly spaced menu items across the top of the canvas.",
         inputSchema: z.object({
-          items: z
-            .number()
-            .int()
-            .min(2)
-            .max(8)
-            .optional()
-            .describe("How many navigation items to include (2-8)"),
+          items: z.number().int().min(2).max(8).optional().describe("How many navigation items to include (2-8)"),
           x: z.number().optional().describe("Center X coordinate for the navigation bar"),
-          y: z
-            .number()
-            .optional()
-            .describe("Top Y coordinate for the navigation bar (defaults to top of view)"),
+          y: z.number().optional().describe("Top Y coordinate for the navigation bar (defaults to top of view)"),
           brand: z.string().optional().describe("Brand or product name to show on the left"),
-          accentColor: z
-            .string()
-            .optional()
-            .describe("Highlight color for the active navigation item"),
+          accentColor: z.string().optional().describe("Highlight color for the active navigation item"),
         }),
         execute: async ({ items, x, y, brand, accentColor }) => {
           const navItems = clamp(items ?? 4, 2, 8)
@@ -467,9 +449,7 @@ export async function POST(request: Request) {
             height: navHeight,
             items: navItems,
             brandText: brand || "Product",
-            menuItems: Array.from({ length: navItems }, (_, index) =>
-              index === 0 ? "Home" : `Item ${index + 1}`,
-            ),
+            menuItems: Array.from({ length: navItems }, (_, index) => (index === 0 ? "Home" : `Item ${index + 1}`)),
             backgroundColor: "#111827",
             itemColor: "#1f2937",
             activeItemColor: highlightColor,
@@ -486,15 +466,9 @@ export async function POST(request: Request) {
           x: z.number().optional().describe("Center X coordinate for the card"),
           y: z.number().optional().describe("Center Y coordinate for the card"),
           title: z.string().optional().describe("Title text inside the card"),
-          description: z
-            .string()
-            .optional()
-            .describe("Supporting description text for the card"),
+          description: z.string().optional().describe("Supporting description text for the card"),
           buttonText: z.string().optional().describe("Call-to-action label for the card button"),
-          accentColor: z
-            .string()
-            .optional()
-            .describe("Accent color for the media area and button"),
+          accentColor: z.string().optional().describe("Accent color for the media area and button"),
         }),
         execute: async ({ x, y, title, description, buttonText, accentColor }) => {
           const cardWidth = 320
@@ -657,7 +631,7 @@ Examples:
 
     if (queueItemId && canvasId) {
       try {
-        const supabase = await createServerClient()
+        const supabase = createServiceRoleClient()
         await supabase
           .from("ai_operations_queue")
           .update({

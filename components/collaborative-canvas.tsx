@@ -703,6 +703,7 @@ export function CollaborativeCanvas({
         onObjectsChange={syncObjects}
         onCursorMove={updateCursor}
         onSelectionChange={handleSelectionChange}
+        selectedIds={selectedObjectIds}
         viewport={viewport}
         onViewportChange={onViewportChange}
         onAlign={handleAlign}

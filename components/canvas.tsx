@@ -8,6 +8,11 @@ import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Square, MousePointer2, Circle, Triangle, Trash2, Minus, Type, Send, X } from "lucide-react"
 
+function areSelectionsEqual(a: string[], b: string[]) {
+  if (a.length !== b.length) return false
+  return a.every((value, index) => value === b[index])
+}
+
 interface CanvasProps {
   canvasId: string
   objects: CanvasObject[]
@@ -22,6 +27,8 @@ interface CanvasProps {
   gridSize?: number
   commentMode?: boolean
   onCommentCreate?: (x: number, y: number, content: string) => void
+  selectedIds?: string[]
+  lassoMode?: boolean
 }
 
 export function Canvas({
@@ -38,7 +45,10 @@ export function Canvas({
   gridSize,
   commentMode = false,
   onCommentCreate,
+  selectedIds: externalSelectedIds,
+  lassoMode = false,
 }: CanvasProps) {
+  const syncingExternalSelection = useRef(false)
   const {
     canvasRef,
     tool,
@@ -48,7 +58,8 @@ export function Canvas({
     handleMouseUp,
     handleWheel,
     viewport,
-    selectedIds,
+    selectedIds: internalSelectedIds,
+    setSelectedIds: setInternalSelectedIds,
     deleteSelectedObject,
     editingTextId,
     saveTextEdit,
@@ -63,6 +74,7 @@ export function Canvas({
     gridEnabled,
     snapEnabled,
     gridSize,
+    lassoMode,
   })
 
   const textInputRef = useRef<HTMLTextAreaElement>(null)
@@ -79,6 +91,34 @@ export function Canvas({
   })
 
   const [commentDraft, setCommentDraft] = useState<{ x: number; y: number; content: string } | null>(null)
+
+  const selectedIds = internalSelectedIds
+
+  useEffect(() => {
+    if (externalSelectedIds === undefined) return
+    setInternalSelectedIds((prev) => {
+      if (areSelectionsEqual(prev, externalSelectedIds)) {
+        return prev
+      }
+      syncingExternalSelection.current = true
+      return [...externalSelectedIds]
+    })
+  }, [externalSelectedIds, setInternalSelectedIds])
+
+  useEffect(() => {
+    if (!onSelectionChange) return
+    if (syncingExternalSelection.current) {
+      syncingExternalSelection.current = false
+      return
+    }
+    onSelectionChange(selectedIds)
+  }, [selectedIds, onSelectionChange])
+
+  useEffect(() => {
+    if (lassoMode && tool !== "select") {
+      setTool("select")
+    }
+  }, [lassoMode, tool, setTool])
 
   const updateCanvasMetrics = useCallback(() => {
     const canvasEl = canvasRef.current
@@ -162,10 +202,6 @@ export function Canvas({
       observer.disconnect()
     }
   }, [canvasRef, updateCanvasMetrics])
-
-  useEffect(() => {
-    onSelectionChange?.(selectedIds)
-  }, [selectedIds, onSelectionChange])
 
   useEffect(() => {
     if (onViewportChange) {

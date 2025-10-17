@@ -372,6 +372,86 @@ export async function POST(request: Request) {
           return { success: true, pattern, shapeIndices, spacing, columns }
         },
       }),
+      createLayoutPreset: tool({
+        description:
+          "Create multi-element UI layouts like login forms, nav bars, dashboards, hero sections, pricing tables, and button rows.",
+        inputSchema: z.object({
+          preset: z
+            .enum([
+              "login_form",
+              "dashboard",
+              "nav_bar",
+              "card",
+              "form",
+              "hero_section",
+              "pricing_table",
+              "button_row",
+            ])
+            .describe("The layout preset to generate"),
+          x: z.number().optional().describe("Optional X coordinate for the layout center"),
+          y: z.number().optional().describe("Optional Y coordinate for the layout center"),
+          theme: z.enum(["light", "dark"]).optional().describe("Visual theme variant"),
+          items: z
+            .number()
+            .optional()
+            .describe("Number of navigation items (nav_bar)"),
+          fields: z
+            .number()
+            .optional()
+            .describe("Number of fields (form presets)"),
+          tiers: z
+            .number()
+            .optional()
+            .describe("Number of pricing tiers (pricing_table)"),
+          buttons: z
+            .number()
+            .optional()
+            .describe("Number of buttons (button_row)"),
+          title: z.string().optional().describe("Optional title text override"),
+          subtitle: z.string().optional().describe("Optional subtitle text override"),
+          brand: z.string().optional().describe("Brand label for nav_bar"),
+        }),
+        execute: async (args) => {
+          const validation = validateCreateLayoutPreset(args, visibleArea)
+          if (!validation.valid) {
+            validationErrors.push(`createLayoutPreset: ${validation.error}`)
+            return { error: validation.error }
+          }
+
+          const { preset, x, y, theme, items, fields, tiers, buttons, title, subtitle, brand } = validation
+
+          switch (preset) {
+            case "login_form":
+              operations.push({ type: "createLoginForm", x, y, theme, title, subtitle })
+              break
+            case "dashboard":
+              operations.push({ type: "createDashboard", x, y, theme })
+              break
+            case "nav_bar":
+              operations.push({ type: "createNavBar", x, y, theme, items, brand })
+              break
+            case "card":
+              operations.push({ type: "createCard", x, y, theme })
+              break
+            case "form":
+              operations.push({ type: "createForm", x, y, theme, fields, title, subtitle })
+              break
+            case "hero_section":
+              operations.push({ type: "createHeroSection", x, y, theme })
+              break
+            case "pricing_table":
+              operations.push({ type: "createPricingTable", x, y, theme, tiers })
+              break
+            case "button_row":
+              operations.push({ type: "createButtonRow", x, y, theme, buttons })
+              break
+            default:
+              return { error: `Unsupported preset ${preset}` }
+          }
+
+          return { success: true, preset, x, y }
+        },
+      }),
     }
 
     const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
@@ -450,6 +530,7 @@ AVAILABLE FUNCTIONS:
 6. deleteShape - Delete specific shapes or clear all
 7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
 8. createText - Create a text layer on the canvas
+9. createLayoutPreset - Build complex, multi-element UI sections (login forms, dashboards, hero sections, pricing tables, nav bars, button rows)
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -496,7 +577,7 @@ DEFAULT VALUES:
 
 BEST PRACTICES:
 1. For questions about the canvas, use getCanvasState first
-2. For complex operations, call multiple functions in sequence
+2. For complex operations, prefer createLayoutPreset for ready-made layouts, then refine with other tools as needed
 3. When moving/resizing shapes, verify the shape exists first
 4. Be conversational and explain what you're doing
 5. If a request is ambiguous, make a reasonable assumption and explain it
@@ -509,14 +590,16 @@ Examples:
 - "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
 - "How many shapes?" → getCanvasState(query: "count")
 - "Delete all red shapes" → Find all red shapes and delete each one
-- "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')`
+- "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')
+- "Create a login form" → createLayoutPreset(preset: "login_form", theme: "light")
+- "Build a pricing table with 3 tiers" → createLayoutPreset(preset: "pricing_table", tiers: 3)`
 
     const result = await generateText({
       model: "openai/gpt-4o-mini",
       system: systemPrompt,
       prompt: message,
       tools,
-      maxSteps: 5,
+      maxSteps: 8,
     })
 
     console.log("[v0] AI SDK response received")
@@ -776,6 +859,84 @@ function validateArrangeShapes(args: any, currentObjects: any[]): { valid: boole
   }
 
   return { valid: true }
+}
+
+function validateCreateLayoutPreset(
+  args: any,
+  visibleArea: { centerX: number; centerY: number },
+): {
+  valid: boolean
+  error?: string
+  preset?: string
+  x?: number
+  y?: number
+  theme?: "light" | "dark"
+  items?: number
+  fields?: number
+  tiers?: number
+  buttons?: number
+  title?: string
+  subtitle?: string
+  brand?: string
+} {
+  const allowedPresets = [
+    "login_form",
+    "dashboard",
+    "nav_bar",
+    "card",
+    "form",
+    "hero_section",
+    "pricing_table",
+    "button_row",
+  ]
+
+  if (!args || !args.preset || !allowedPresets.includes(args.preset)) {
+    return {
+      valid: false,
+      error: `preset must be one of: ${allowedPresets.join(", ")}.`,
+    }
+  }
+
+  const clampValue = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+  const resolvePosition = (value: any, fallback: number) => {
+    const numeric = typeof value === "number" && Number.isFinite(value) ? value : fallback
+    return clampValue(numeric, 0, 2000)
+  }
+
+  const x = resolvePosition(args.x, visibleArea.centerX)
+  const y = resolvePosition(args.y, visibleArea.centerY)
+
+  const toPositiveInt = (value: any, fallback: number, min: number, max: number) => {
+    const numeric = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback
+    return clampValue(numeric, min, max)
+  }
+
+  const theme: "light" | "dark" = args.theme === "dark" ? "dark" : "light"
+  const items = toPositiveInt(args.items, 4, 2, 7)
+  const fields = toPositiveInt(args.fields, 3, 2, 5)
+  const tiers = toPositiveInt(args.tiers, 3, 2, 4)
+  const buttons = toPositiveInt(args.buttons, 3, 2, 5)
+
+  const sanitizeText = (value: any, maxLength: number) => {
+    if (typeof value !== "string") return undefined
+    return value.trim().slice(0, maxLength)
+  }
+
+  return {
+    valid: true,
+    preset: args.preset,
+    x,
+    y,
+    theme,
+    items,
+    fields,
+    tiers,
+    buttons,
+    title: sanitizeText(args.title, 80),
+    subtitle: sanitizeText(args.subtitle, 120),
+    brand: sanitizeText(args.brand, 48),
+  }
 }
 
 function validateCreateText(args: any): { valid: boolean; error?: string } {

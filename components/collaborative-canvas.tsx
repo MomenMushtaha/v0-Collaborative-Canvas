@@ -1012,6 +1012,21 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
         break
       }
 
+      case "createHeroSection": {
+        updatedObjects = createHeroSection(updatedObjects, operation)
+        break
+      }
+
+      case "createPricingTable": {
+        updatedObjects = createPricingTable(updatedObjects, operation)
+        break
+      }
+
+      case "createButtonRow": {
+        updatedObjects = createButtonRow(updatedObjects, operation)
+        break
+      }
+
       default:
         return { objects, error: `Unknown operation type: ${operation.type}` }
     }
@@ -1108,227 +1123,397 @@ function handleArrange(objects: CanvasObject[], operation: any): { objects: Canv
   return { objects: updatedObjects }
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function createRectangle(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fill: string,
+  stroke: string,
+  strokeWidth = 2,
+): CanvasObject {
+  return {
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x,
+    y,
+    width,
+    height,
+    rotation: 0,
+    fill_color: fill,
+    stroke_color: stroke,
+    stroke_width: strokeWidth,
+  }
+}
+
+function createTextLayer(
+  text: string,
+  x: number,
+  y: number,
+  fontSize: number,
+  color: string,
+  width?: number,
+  fontFamily = "Inter",
+): CanvasObject {
+  const computedWidth = width ?? Math.max(140, Math.round(text.length * fontSize * 0.6) + 40)
+  const computedHeight = Math.max(fontSize * 1.4, fontSize + 12)
+
+  return {
+    id: crypto.randomUUID(),
+    type: "text",
+    x,
+    y,
+    width: computedWidth,
+    height: computedHeight,
+    rotation: 0,
+    fill_color: color,
+    stroke_color: color,
+    stroke_width: 0,
+    text_content: text,
+    font_size: fontSize,
+    font_family: fontFamily,
+  }
+}
+
 function createLoginForm(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y } = operation
+  const { x, y, theme = "light", title = "Welcome back", subtitle = "Please sign in to continue" } = operation
+  const palette =
+    theme === "dark"
+      ? {
+          card: "#111827",
+          stroke: "#1f2937",
+          field: "#1f2937",
+          accent: "#2563eb",
+          textPrimary: "#f9fafb",
+          textSecondary: "#9ca3af",
+        }
+      : {
+          card: "#ffffff",
+          stroke: "#e5e7eb",
+          field: "#f3f4f6",
+          accent: "#2563eb",
+          textPrimary: "#111827",
+          textSecondary: "#6b7280",
+        }
+
+  const centerX = clamp(x, 100, 1900)
+  const centerY = clamp(y, 120, 1880)
+  const cardWidth = 360
+  const cardHeight = 320
+  const left = centerX - cardWidth / 2
+  const top = centerY - cardHeight / 2
+  const fieldWidth = cardWidth - 48
+  const fieldHeight = 48
+
   const updatedObjects = [...objects]
+  updatedObjects.push(createRectangle(left, top, cardWidth, cardHeight, palette.card, palette.stroke, 2))
+  updatedObjects.push(createTextLayer(title, left + 24, top + 24, 26, palette.textPrimary, cardWidth - 48))
+  updatedObjects.push(createTextLayer(subtitle, left + 24, top + 64, 16, palette.textSecondary, cardWidth - 48))
 
-  // Username field (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 150,
-    y: y - 100,
-    width: 300,
-    height: 40,
-    rotation: 0,
-    color: "#e5e7eb",
+  const labels = ["Email", "Password"]
+  labels.forEach((label, index) => {
+    const labelTop = top + 110 + index * 78
+    updatedObjects.push(createTextLayer(label, left + 24, labelTop, 14, palette.textSecondary, fieldWidth))
+    updatedObjects.push(createRectangle(left + 24, labelTop + 22, fieldWidth, fieldHeight, palette.field, palette.stroke, 1))
+    const placeholder = index === 0 ? "you@example.com" : "••••••••"
+    updatedObjects.push(createTextLayer(placeholder, left + 36, labelTop + 32, 15, palette.textSecondary, fieldWidth - 24))
   })
 
-  // Password field (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 150,
-    y: y - 40,
-    width: 300,
-    height: 40,
-    rotation: 0,
-    color: "#e5e7eb",
-  })
+  updatedObjects.push(createRectangle(left + 24, top + cardHeight - 72, fieldWidth, 48, palette.accent, palette.accent, 0))
+  updatedObjects.push(createTextLayer("Sign in", centerX - 32, top + cardHeight - 62, 18, "#ffffff", 120))
 
-  // Login button (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 75,
-    y: y + 20,
-    width: 150,
-    height: 40,
-    rotation: 0,
-    color: "#3b82f6",
-  })
+  updatedObjects.push(
+    createTextLayer("Forgot your password?", left + 24, top + cardHeight - 24, 14, palette.textSecondary, fieldWidth),
+  )
 
   return updatedObjects
 }
 
 function createDashboard(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y } = operation
+  const { x, y, theme = "light" } = operation
+  const palette =
+    theme === "dark"
+      ? {
+          background: "#0f172a",
+          stroke: "#1e293b",
+          header: "#1e293b",
+          sidebar: "#111827",
+          card: "#1f2937",
+          textPrimary: "#f1f5f9",
+          textSecondary: "#94a3b8",
+          accent: "#38bdf8",
+        }
+      : {
+          background: "#ffffff",
+          stroke: "#e2e8f0",
+          header: "#f1f5f9",
+          sidebar: "#f8fafc",
+          card: "#ffffff",
+          textPrimary: "#0f172a",
+          textSecondary: "#64748b",
+          accent: "#2563eb",
+        }
+
+  const centerX = clamp(x, 200, 1800)
+  const centerY = clamp(y, 240, 1760)
+  const layoutWidth = 900
+  const layoutHeight = 540
+  const left = centerX - layoutWidth / 2
+  const top = centerY - layoutHeight / 2
+
   const updatedObjects = [...objects]
+  updatedObjects.push(createRectangle(left, top, layoutWidth, layoutHeight, palette.background, palette.stroke, 2))
+  updatedObjects.push(createRectangle(left, top, layoutWidth, 72, palette.header, palette.stroke, 1))
+  updatedObjects.push(createRectangle(left, top + 72, 220, layoutHeight - 72, palette.sidebar, palette.stroke, 1))
+  updatedObjects.push(createTextLayer("Team Analytics", left + 28, top + 26, 22, palette.textPrimary, 300))
+  updatedObjects.push(createTextLayer("Overview", left + 28, top + 116, 16, palette.textSecondary, 180))
 
-  // Header (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x,
-    y,
-    width: 800,
-    height: 60,
-    rotation: 0,
-    color: "#1f2937",
+  const cardWidth = 200
+  const cardHeight = 120
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < 3; col++) {
+      const cardLeft = left + 260 + col * (cardWidth + 24)
+      const cardTop = top + 108 + row * (cardHeight + 24)
+      updatedObjects.push(createRectangle(cardLeft, cardTop, cardWidth, cardHeight, palette.card, palette.stroke, 1))
+      updatedObjects.push(createTextLayer(`Metric ${row * 3 + col + 1}`, cardLeft + 16, cardTop + 16, 14, palette.textSecondary, cardWidth - 32))
+      updatedObjects.push(createTextLayer("1,248", cardLeft + 16, cardTop + 44, 26, palette.textPrimary, cardWidth - 32))
+    }
+  }
+
+  updatedObjects.push(createTextLayer("Navigation", left + 28, top + 156, 14, palette.textSecondary, 160))
+  const navItems = ["Dashboard", "Reports", "Integrations", "Settings"]
+  navItems.forEach((item, idx) => {
+    updatedObjects.push(createTextLayer(item, left + 28, top + 188 + idx * 36, 15, palette.textPrimary, 160))
   })
 
-  // Sidebar (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x,
-    y: y + 60,
-    width: 200,
-    height: 540,
-    rotation: 0,
-    color: "#374151",
-  })
-
-  // Main content (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x + 200,
-    y: y + 60,
-    width: 600,
-    height: 540,
-    rotation: 0,
-    color: "#f3f4f6",
-  })
+  updatedObjects.push(
+    createRectangle(left + layoutWidth - 220, top + 72 + 24, 200, layoutHeight - 72 - 48, palette.sidebar, palette.stroke, 1),
+  )
+  updatedObjects.push(
+    createTextLayer("Team tasks", left + layoutWidth - 200, top + 108, 16, palette.textPrimary, 160),
+  )
 
   return updatedObjects
 }
 
 function createNavBar(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { items, x, y } = operation
+  const { items = 4, x, y, theme = "dark", brand = "Acme" } = operation
+  const clampedItems = clamp(items, 2, 7)
+  const palette =
+    theme === "dark"
+      ? { background: "#111827", stroke: "#1f2937", item: "#2563eb", text: "#f9fafb", muted: "#9ca3af" }
+      : { background: "#ffffff", stroke: "#e5e7eb", item: "#2563eb", text: "#111827", muted: "#6b7280" }
+
+  const centerX = clamp(x, 160, 1840)
+  const centerY = clamp(y, 80, 1920)
+  const navWidth = clampedItems * 140 + 160
+  const navHeight = 70
+  const left = centerX - navWidth / 2
+  const top = centerY - navHeight / 2
+
   const updatedObjects = [...objects]
+  updatedObjects.push(createRectangle(left, top, navWidth, navHeight, palette.background, palette.stroke, 2))
+  updatedObjects.push(createTextLayer(brand, left + 32, top + 22, 22, palette.text, 180))
 
-  // Nav bar background (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x,
-    y,
-    width: items * 120 + 40,
-    height: 50,
-    rotation: 0,
-    color: "#1f2937",
-  })
-
-  // Nav items (rectangles)
-  for (let i = 0; i < items; i++) {
-    updatedObjects.push({
-      id: crypto.randomUUID(),
-      type: "rectangle",
-      x: x + 20 + i * 120,
-      y: y + 10,
-      width: 100,
-      height: 30,
-      rotation: 0,
-      color: "#3b82f6",
-    })
+  for (let i = 0; i < clampedItems; i++) {
+    const itemLeft = left + 220 + i * 140
+    updatedObjects.push(createRectangle(itemLeft, top + 18, 120, 34, "transparent", "transparent", 0))
+    updatedObjects.push(createTextLayer(`Menu ${i + 1}`, itemLeft + 12, top + 22, 16, palette.muted, 120))
   }
+
+  updatedObjects.push(createRectangle(left + navWidth - 152, top + 16, 136, 40, palette.item, palette.item, 0))
+  updatedObjects.push(createTextLayer("Get started", left + navWidth - 140, top + 24, 16, "#ffffff", 120))
 
   return updatedObjects
 }
 
 function createCard(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y, width, height } = operation
+  const { x, y, width = 320, height = 360, theme = "light" } = operation
+  const palette =
+    theme === "dark"
+      ? { card: "#111827", stroke: "#1f2937", header: "#1f2937", accent: "#2563eb", text: "#f9fafb", muted: "#9ca3af" }
+      : { card: "#ffffff", stroke: "#e5e7eb", header: "#dbeafe", accent: "#2563eb", text: "#111827", muted: "#6b7280" }
+
+  const centerX = clamp(x, width / 2, 2000 - width / 2)
+  const centerY = clamp(y, height / 2, 2000 - height / 2)
+  const left = centerX - width / 2
+  const top = centerY - height / 2
+
   const updatedObjects = [...objects]
-
-  // Card background (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y - height / 2,
-    width,
-    height,
-    rotation: 0,
-    color: "#ffffff",
-  })
-
-  // Card header (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y - height / 2,
-    width,
-    height: 60,
-    rotation: 0,
-    color: "#3b82f6",
-  })
-
-  // Card footer (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y + height / 2 - 50,
-    width,
-    height: 50,
-    rotation: 0,
-    color: "#f3f4f6",
-  })
+  updatedObjects.push(createRectangle(left, top, width, height, palette.card, palette.stroke, 2))
+  updatedObjects.push(createRectangle(left, top, width, 160, palette.header, palette.stroke, 1))
+  updatedObjects.push(createRectangle(left + 24, top + 24, width - 48, 112, "transparent", palette.stroke, 2))
+  updatedObjects.push(createTextLayer("Card Title", left + 24, top + 184, 22, palette.text, width - 48))
+  updatedObjects.push(createTextLayer("Short description that explains the value proposition.", left + 24, top + 224, 16, palette.muted, width - 48))
+  updatedObjects.push(createRectangle(left + 24, top + height - 72, 140, 44, palette.accent, palette.accent, 0))
+  updatedObjects.push(createTextLayer("Learn more", left + 36, top + height - 64, 16, "#ffffff", 120))
 
   return updatedObjects
 }
 
 function createButton(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y, width, height, color } = operation
-  const updatedObjects = [...objects]
+  const { x, y, width = 160, height = 48, label = "Button", color = "#2563eb" } = operation
+  const centerX = clamp(x, width / 2, 2000 - width / 2)
+  const centerY = clamp(y, height / 2, 2000 - height / 2)
+  const left = centerX - width / 2
+  const top = centerY - height / 2
 
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x,
-    y,
-    width,
-    height,
-    rotation: 0,
-    color,
-  })
+  const updatedObjects = [...objects]
+  updatedObjects.push(createRectangle(left, top, width, height, color, color, 0))
+  updatedObjects.push(createTextLayer(label, left + 20, top + 12, 16, "#ffffff", width - 40))
 
   return updatedObjects
 }
 
 function createForm(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { fields, x, y } = operation
+  const { fields = 3, x, y, theme = "light", title = "Contact Us", subtitle = "We usually respond within 24 hours." } = operation
+  const clampedFields = clamp(fields, 2, 5)
+  const palette =
+    theme === "dark"
+      ? { card: "#0f172a", stroke: "#1e293b", field: "#1f2937", text: "#f8fafc", muted: "#94a3b8", accent: "#38bdf8" }
+      : { card: "#ffffff", stroke: "#e2e8f0", field: "#f8fafc", text: "#0f172a", muted: "#64748b", accent: "#2563eb" }
+
+  const formWidth = 440
+  const formHeight = clampedFields * 86 + 180
+  const centerX = clamp(x, formWidth / 2, 2000 - formWidth / 2)
+  const centerY = clamp(y, formHeight / 2, 2000 - formHeight / 2)
+  const left = centerX - formWidth / 2
+  const top = centerY - formHeight / 2
+
   const updatedObjects = [...objects]
+  updatedObjects.push(createRectangle(left, top, formWidth, formHeight, palette.card, palette.stroke, 2))
+  updatedObjects.push(createTextLayer(title, left + 28, top + 28, 24, palette.text, formWidth - 56))
+  updatedObjects.push(createTextLayer(subtitle, left + 28, top + 68, 16, palette.muted, formWidth - 56))
 
-  // Form background (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 200,
-    y: y - (fields * 60) / 2 - 40,
-    width: 400,
-    height: fields * 60 + 100,
-    rotation: 0,
-    color: "#ffffff",
-  })
-
-  // Input fields (rectangles)
-  for (let i = 0; i < fields; i++) {
-    updatedObjects.push({
-      id: crypto.randomUUID(),
-      type: "rectangle",
-      x: x - 180,
-      y: y - (fields * 60) / 2 + i * 60,
-      width: 360,
-      height: 40,
-      rotation: 0,
-      color: "#e5e7eb",
-    })
+  for (let i = 0; i < clampedFields; i++) {
+    const labelTop = top + 120 + i * 86
+    updatedObjects.push(createTextLayer(`Field ${i + 1}`, left + 28, labelTop, 14, palette.muted, formWidth - 56))
+    updatedObjects.push(createRectangle(left + 28, labelTop + 22, formWidth - 56, 50, palette.field, palette.stroke, 1))
   }
 
-  // Submit button (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 75,
-    y: y + (fields * 60) / 2 + 20,
-    width: 150,
-    height: 40,
-    rotation: 0,
-    color: "#3b82f6",
-  })
+  updatedObjects.push(createRectangle(left + 28, top + formHeight - 76, 160, 48, palette.accent, palette.accent, 0))
+  updatedObjects.push(createTextLayer("Submit", left + 48, top + formHeight - 70, 18, "#ffffff", 120))
+
+  return updatedObjects
+}
+
+function createHeroSection(objects: CanvasObject[], operation: any): CanvasObject[] {
+  const { x, y, theme = "light" } = operation
+  const palette =
+    theme === "dark"
+      ? { background: "#0f172a", stroke: "#1e293b", text: "#f8fafc", muted: "#94a3b8", accent: "#38bdf8" }
+      : { background: "#f8fafc", stroke: "#e2e8f0", text: "#0f172a", muted: "#475569", accent: "#2563eb" }
+
+  const heroWidth = 960
+  const heroHeight = 420
+  const centerX = clamp(x, heroWidth / 2, 2000 - heroWidth / 2)
+  const centerY = clamp(y, heroHeight / 2, 2000 - heroHeight / 2)
+  const left = centerX - heroWidth / 2
+  const top = centerY - heroHeight / 2
+
+  const updatedObjects = [...objects]
+  updatedObjects.push(createRectangle(left, top, heroWidth, heroHeight, palette.background, palette.stroke, 2))
+  updatedObjects.push(createTextLayer("Design faster with AI", left + 56, top + 64, 42, palette.text, heroWidth / 2 - 80))
+  updatedObjects.push(
+    createTextLayer(
+      "Generate polished layouts, iterate with natural language, and collaborate in real-time with your team.",
+      left + 56,
+      top + 132,
+      18,
+      palette.muted,
+      heroWidth / 2 - 80,
+    ),
+  )
+  updatedObjects.push(createRectangle(left + 56, top + 220, 180, 54, palette.accent, palette.accent, 0))
+  updatedObjects.push(createTextLayer("Start building", left + 72, top + 228, 18, "#ffffff", 160))
+  updatedObjects.push(createRectangle(left + 260, top + 220, 180, 54, "transparent", palette.stroke, 2))
+  updatedObjects.push(createTextLayer("View templates", left + 276, top + 228, 18, palette.text, 160))
+
+  const imageLeft = left + heroWidth / 2 + 32
+  updatedObjects.push(createRectangle(imageLeft, top + 56, heroWidth / 2 - 88, heroHeight - 112, "#ffffff20", palette.stroke, 2))
+  updatedObjects.push(createRectangle(imageLeft + 40, top + 96, heroWidth / 2 - 168, heroHeight - 192, "#ffffff30", palette.stroke, 2))
+
+  return updatedObjects
+}
+
+function createPricingTable(objects: CanvasObject[], operation: any): CanvasObject[] {
+  const { x, y, tiers = 3, theme = "light" } = operation
+  const clampedTiers = clamp(tiers, 2, 4)
+  const palette =
+    theme === "dark"
+      ? {
+          background: "#0f172a",
+          stroke: "#1e293b",
+          card: "#111827",
+          accent: "#38bdf8",
+          text: "#f8fafc",
+          muted: "#94a3b8",
+        }
+      : {
+          background: "#ffffff",
+          stroke: "#e2e8f0",
+          card: "#f8fafc",
+          accent: "#2563eb",
+          text: "#0f172a",
+          muted: "#64748b",
+        }
+
+  const tableWidth = clampedTiers * 260 + (clampedTiers + 1) * 24
+  const tableHeight = 420
+  const centerX = clamp(x, tableWidth / 2, 2000 - tableWidth / 2)
+  const centerY = clamp(y, tableHeight / 2, 2000 - tableHeight / 2)
+  const left = centerX - tableWidth / 2
+  const top = centerY - tableHeight / 2
+
+  const updatedObjects = [...objects]
+  updatedObjects.push(createRectangle(left, top, tableWidth, tableHeight, palette.background, palette.stroke, 2))
+  updatedObjects.push(createTextLayer("Simple pricing", left + 32, top + 32, 28, palette.text, tableWidth - 64))
+  updatedObjects.push(createTextLayer("Choose the plan that fits your team.", left + 32, top + 72, 18, palette.muted, tableWidth - 64))
+
+  for (let tier = 0; tier < clampedTiers; tier++) {
+    const cardLeft = left + 24 + tier * (260 + 24)
+    const cardTop = top + 120
+    updatedObjects.push(createRectangle(cardLeft, cardTop, 260, 260, palette.card, palette.stroke, 2))
+    updatedObjects.push(createTextLayer(`Plan ${tier + 1}`, cardLeft + 24, cardTop + 24, 18, palette.text, 212))
+    updatedObjects.push(createTextLayer(`$${(tier + 1) * 19}/mo`, cardLeft + 24, cardTop + 64, 26, palette.text, 212))
+    const features = ["Unlimited boards", "Real-time AI", "Export to Figma"]
+    features.forEach((feature, idx) => {
+      updatedObjects.push(createTextLayer(feature, cardLeft + 24, cardTop + 112 + idx * 32, 14, palette.muted, 212))
+    })
+    updatedObjects.push(createRectangle(cardLeft + 24, cardTop + 200, 212, 46, palette.accent, palette.accent, 0))
+    updatedObjects.push(createTextLayer("Choose plan", cardLeft + 44, cardTop + 206, 16, "#ffffff", 180))
+  }
+
+  return updatedObjects
+}
+
+function createButtonRow(objects: CanvasObject[], operation: any): CanvasObject[] {
+  const { x, y, buttons = 3, theme = "light" } = operation
+  const clampedButtons = clamp(buttons, 2, 5)
+  const palette =
+    theme === "dark"
+      ? { background: "#111827", stroke: "#1f2937", accent: "#38bdf8", text: "#f8fafc" }
+      : { background: "#ffffff", stroke: "#e5e7eb", accent: "#2563eb", text: "#0f172a" }
+
+  const rowWidth = clampedButtons * 180 + (clampedButtons + 1) * 20
+  const rowHeight = 80
+  const centerX = clamp(x, rowWidth / 2, 2000 - rowWidth / 2)
+  const centerY = clamp(y, rowHeight / 2, 2000 - rowHeight / 2)
+  const left = centerX - rowWidth / 2
+  const top = centerY - rowHeight / 2
+
+  const updatedObjects = [...objects]
+  updatedObjects.push(createRectangle(left, top, rowWidth, rowHeight, palette.background, palette.stroke, 2))
+
+  for (let i = 0; i < clampedButtons; i++) {
+    const buttonLeft = left + 20 + i * 200
+    updatedObjects.push(createRectangle(buttonLeft, top + 18, 180, 44, palette.accent, palette.accent, 0))
+    updatedObjects.push(createTextLayer(`Action ${i + 1}`, buttonLeft + 28, top + 26, 16, "#ffffff", 140))
+  }
 
   return updatedObjects
 }

@@ -44,10 +44,12 @@ export function useCanvas({
   const [isDragging, setIsDragging] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
+  const [isRotating, setIsRotating] = useState(false)
   const [isSelecting, setIsSelecting] = useState(false)
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const [resizeHandle, setResizeHandle] = useState<ResizeHandle>(null)
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, objX: 0, objY: 0 })
+  const [rotateStart, setRotateStart] = useState({ angle: 0, objRotation: 0, centerX: 0, centerY: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [dragOffsets, setDragOffsets] = useState<Map<string, { x: number; y: number }>>(new Map())
   const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line" | "text">("select")
@@ -128,6 +130,21 @@ export function useCanvas({
     [viewport.zoom],
   )
 
+  const getRotationHandleAtPosition = useCallback(
+    (pos: { x: number; y: number }, obj: CanvasObject): boolean => {
+      const handleSize = 8 / viewport.zoom
+      const centerX = obj.x + obj.width / 2
+      const centerY = obj.y + obj.height / 2
+
+      // Rotation handle is above the top edge
+      const rotateHandleY = obj.y - 30 / viewport.zoom
+      const rotateHandleX = centerX
+
+      return Math.abs(pos.x - rotateHandleX) < handleSize && Math.abs(pos.y - rotateHandleY) < handleSize
+    },
+    [viewport.zoom],
+  )
+
   const isObjectInSelectionBox = useCallback(
     (obj: CanvasObject, box: { x: number; y: number; width: number; height: number }) => {
       const boxX1 = Math.min(box.x, box.x + box.width)
@@ -162,8 +179,8 @@ export function useCanvas({
       maxWidth = Math.max(maxWidth, metrics.width)
     })
 
-    const width = Math.max(150, maxWidth + 40) // Increased minimum width and padding
-    const height = Math.max(fontSize * 1.5 + 20, lines.length * lineHeight + 20) // Better minimum height
+    const width = Math.max(150, maxWidth + 40)
+    const height = Math.max(fontSize * 1.5 + 20, lines.length * lineHeight + 20)
 
     return { width, height }
   }, [])
@@ -197,12 +214,10 @@ export function useCanvas({
         const fps = 1000 / frameDelta
         fpsRef.current.push(fps)
 
-        // Keep only last 60 frames for average calculation
         if (fpsRef.current.length > 60) {
           fpsRef.current.shift()
         }
 
-        // Log FPS every 60 frames (approximately once per second at 60fps)
         if (fpsRef.current.length === 60) {
           const avgFps = fpsRef.current.reduce((a, b) => a + b, 0) / fpsRef.current.length
           console.log(`[v0] [PERF] Average FPS: ${avgFps.toFixed(1)} (${objects.length} objects)`)
@@ -243,6 +258,14 @@ export function useCanvas({
 
         const isSelected = selectedIds.includes(obj.id)
 
+        if (obj.rotation !== 0) {
+          const centerX = obj.x + obj.width / 2
+          const centerY = obj.y + obj.height / 2
+          ctx.translate(centerX, centerY)
+          ctx.rotate((obj.rotation * Math.PI) / 180)
+          ctx.translate(-centerX, -centerY)
+        }
+
         if (obj.type === "line") {
           ctx.strokeStyle = obj.stroke_color
           ctx.lineWidth = obj.stroke_width
@@ -281,18 +304,14 @@ export function useCanvas({
           ctx.strokeStyle = obj.stroke_color
           ctx.lineWidth = obj.stroke_width
           ctx.beginPath()
-          // Top vertex (center top)
           ctx.moveTo(obj.x + obj.width / 2, obj.y)
-          // Bottom-left vertex
           ctx.lineTo(obj.x, obj.y + obj.height)
-          // Bottom-right vertex
           ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
           ctx.closePath()
           ctx.fill()
           ctx.stroke()
         } else if (obj.type === "text") {
           if (obj.id === editingTextId) {
-            // Draw selection box but not the text itself
             if (isSelected) {
               ctx.strokeStyle = "#3b82f6"
               ctx.lineWidth = 2 / viewport.zoom
@@ -301,7 +320,6 @@ export function useCanvas({
               ctx.setLineDash([])
             }
           } else {
-            // Normal text rendering when not editing
             if (isSelected) {
               ctx.strokeStyle = "#3b82f6"
               ctx.lineWidth = 2 / viewport.zoom
@@ -318,12 +336,34 @@ export function useCanvas({
           }
         }
 
-        if (isSelected && obj.type !== "text") {
+        if (isSelected) {
           ctx.strokeStyle = "#3b82f6"
           ctx.lineWidth = 2 / viewport.zoom
           ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
           ctx.strokeRect(obj.x - 5, obj.y - 5, obj.width + 10, obj.height + 10)
           ctx.setLineDash([])
+
+          if (selectedIds.length === 1) {
+            const centerX = obj.x + obj.width / 2
+            const rotateHandleY = obj.y - 30 / viewport.zoom
+
+            // Draw line from top center to rotation handle
+            ctx.strokeStyle = "#3b82f6"
+            ctx.lineWidth = 2 / viewport.zoom
+            ctx.beginPath()
+            ctx.moveTo(centerX, obj.y)
+            ctx.lineTo(centerX, rotateHandleY)
+            ctx.stroke()
+
+            // Draw rotation handle circle
+            ctx.fillStyle = "#ffffff"
+            ctx.strokeStyle = "#3b82f6"
+            ctx.lineWidth = 2 / viewport.zoom
+            ctx.beginPath()
+            ctx.arc(centerX, rotateHandleY, 6 / viewport.zoom, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          }
         }
 
         ctx.restore()
@@ -394,7 +434,6 @@ export function useCanvas({
   const saveTextEdit = useCallback(
     (objectId: string, newText: string) => {
       if (!newText.trim()) {
-        // If text is empty or only whitespace, delete the object
         const updatedObjects = objects.filter((o) => o.id !== objectId)
         onObjectsChange(updatedObjects)
         setSelectedIds([])
@@ -427,7 +466,6 @@ export function useCanvas({
     if (editingTextId) {
       const textObj = objects.find((o) => o.id === editingTextId)
       if (textObj && textObj.type === "text" && !textObj.text_content?.trim()) {
-        // Delete the empty text object
         const updatedObjects = objects.filter((o) => o.id !== editingTextId)
         onObjectsChange(updatedObjects)
         setSelectedIds([])
@@ -572,6 +610,22 @@ export function useCanvas({
       if (selectedIds.length === 1 && tool === "select") {
         const selectedObj = objects.find((o) => o.id === selectedIds[0])
         if (selectedObj) {
+          const isRotateHandle = getRotationHandleAtPosition(pos, selectedObj)
+          if (isRotateHandle) {
+            setIsRotating(true)
+            const centerX = selectedObj.x + selectedObj.width / 2
+            const centerY = selectedObj.y + selectedObj.height / 2
+            const angle = Math.atan2(pos.y - centerY, pos.x - centerX)
+            setRotateStart({
+              angle,
+              objRotation: selectedObj.rotation,
+              centerX,
+              centerY,
+            })
+            console.log("[v0] Started rotating object")
+            return
+          }
+
           const handle = getResizeHandleAtPosition(pos, selectedObj)
           if (handle) {
             setIsResizing(true)
@@ -674,6 +728,7 @@ export function useCanvas({
       viewport.zoom,
       selectedIds,
       getResizeHandleAtPosition,
+      getRotationHandleAtPosition,
       handleTextEdit,
       editingTextId,
       lassoMode,
@@ -723,6 +778,29 @@ export function useCanvas({
           width: pos.x - selectionBox.x,
           height: pos.y - selectionBox.y,
         })
+        return
+      }
+
+      if (isRotating && selectedIds.length === 1) {
+        const obj = objects.find((o) => o.id === selectedIds[0])
+        if (obj) {
+          const currentAngle = Math.atan2(pos.y - rotateStart.centerY, pos.x - rotateStart.centerX)
+          const angleDiff = ((currentAngle - rotateStart.angle) * 180) / Math.PI
+          let newRotation = rotateStart.objRotation + angleDiff
+
+          // Normalize rotation to 0-360 range
+          newRotation = ((newRotation % 360) + 360) % 360
+
+          const updatedObjects = objects.map((o) =>
+            o.id === selectedIds[0]
+              ? {
+                  ...o,
+                  rotation: newRotation,
+                }
+              : o,
+          )
+          onObjectsChange(updatedObjects)
+        }
         return
       }
 
@@ -821,10 +899,12 @@ export function useCanvas({
       isPanning,
       isDragging,
       isResizing,
+      isRotating,
       isSelecting,
       selectedIds,
       resizeHandle,
       resizeStart,
+      rotateStart,
       selectionBox,
       objects,
       dragStart,
@@ -855,17 +935,22 @@ export function useCanvas({
       setSelectionBox(null)
     }
 
+    if (isRotating) {
+      console.log("[v0] Finished rotating object")
+    }
+
     setIsDragging(false)
     setIsPanning(false)
     setIsResizing(false)
+    setIsRotating(false)
     setIsSelecting(false)
     setResizeHandle(null)
     setIsLassoSelecting(false)
     setLassoPath([])
-  }, [isSelecting, selectionBox, objects, isObjectInSelectionBox, isLassoSelecting, lassoPath])
+  }, [isSelecting, selectionBox, objects, isObjectInSelectionBox, isLassoSelecting, lassoPath, isRotating])
 
-  const MIN_ZOOM = 1 // 100% minimum - no zooming out
-  const MAX_ZOOM = 3 // Updated from 2 to 3 (300% maximum - allows zooming in up to 3x)
+  const MIN_ZOOM = 1
+  const MAX_ZOOM = 3
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault()

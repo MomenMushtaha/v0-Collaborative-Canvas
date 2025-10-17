@@ -5,7 +5,14 @@ import { MultiplayerCursors } from "@/components/multiplayer-cursors"
 import { PresencePanel } from "@/components/presence-panel"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
-import { useMemo, useEffect, useState, useCallback } from "react"
+import {
+  useMemo,
+  useEffect,
+  useState,
+  useCallback,
+  type Dispatch,
+  type SetStateAction,
+} from "react"
 import type { CanvasObject } from "@/lib/types"
 import { useAIQueue } from "@/hooks/use-ai-queue"
 import { ConnectionStatus } from "@/components/connection-status"
@@ -39,12 +46,12 @@ interface CollaborativeCanvasProps {
   onObjectsChange?: (objects: CanvasObject[]) => void
   onSelectionChange?: (selectedIds: string[]) => void
   viewport?: { x: number; y: number; zoom: number }
-  onUndo?: () => void
-  onRedo?: () => void
+  onUndo?: Dispatch<SetStateAction<(() => void) | undefined>>
+  onRedo?: Dispatch<SetStateAction<(() => void) | undefined>>
   canUndo?: (canUndo: boolean) => void
   canRedo?: (canRedo: boolean) => void
-  onAlign?: (alignHandler: () => void) => void
-  onDistribute?: (distributeHandler: () => void) => void
+  onAlign?: Dispatch<SetStateAction<((type: AlignmentType) => void) | undefined>>
+  onDistribute?: Dispatch<SetStateAction<((type: DistributeType) => void) | undefined>>
 }
 
 export function CollaborativeCanvas({
@@ -217,8 +224,12 @@ export function CollaborativeCanvas({
   })
 
   useEffect(() => {
-    onUndo?.(handleUndo)
-    onRedo?.(handleRedo)
+    if (onUndo) {
+      onUndo(() => handleUndo)
+    }
+    if (onRedo) {
+      onRedo(() => handleRedo)
+    }
   }, [handleUndo, handleRedo, onUndo, onRedo])
 
   useEffect(() => {

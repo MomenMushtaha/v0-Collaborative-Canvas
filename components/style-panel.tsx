@@ -12,7 +12,7 @@ interface StylePanelProps {
 export function StylePanel({ selectedObjects, onStyleChange }: StylePanelProps) {
   if (selectedObjects.length === 0) {
     return (
-      <div className="absolute left-1/2 top-20 z-10 w-64 -translate-x-1/2 rounded-lg border bg-card p-4 shadow-lg">
+      <div className="absolute right-4 top-[300px] z-10 w-64 rounded-lg border bg-card p-4 shadow-lg">
         <p className="text-sm text-muted-foreground">Select an object to edit its style</p>
       </div>
     )
@@ -24,7 +24,7 @@ export function StylePanel({ selectedObjects, onStyleChange }: StylePanelProps) 
   const strokeColor = firstObject.stroke_color || "#1e40af"
 
   return (
-    <div className="absolute left-1/2 top-20 z-10 w-64 -translate-x-1/2 rounded-lg border bg-card p-4 shadow-lg">
+    <div className="absolute right-4 top-[300px] z-10 w-64 rounded-lg border bg-card p-4 shadow-lg">
       <h3 className="mb-4 font-semibold">Style</h3>
       <div className="space-y-4">
         <div className="space-y-2">

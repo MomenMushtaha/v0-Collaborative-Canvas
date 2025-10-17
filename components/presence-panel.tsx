@@ -23,16 +23,15 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
   const offlineUsers = otherUsers.filter((user) => !isUserOnline(user.last_seen))
 
   return (
-    <div className="absolute right-4 top-20 z-10 w-72 max-h-[280px] rounded-xl border border-border/40 bg-card/95 shadow-2xl backdrop-blur-lg overflow-hidden flex flex-col transition-all duration-300 hover:shadow-[0_20px_50px_rgba(0,0,0,0.15)]">
-      <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/40 to-transparent border-b border-border/30">
-        <h3 className="text-center text-sm font-semibold tracking-wide text-foreground/90 uppercase">Active Users</h3>
-      </div>
+    <div className="absolute right-4 top-20 z-10 w-64 max-h-[260px] rounded-xl border border-border/50 bg-background/95 shadow-xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">
+      <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent">
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-center">Active Users</h3>
 
-      <div className="p-4 flex-shrink-0">
-        <div className="mb-3 flex items-center gap-3 rounded-lg p-3 bg-primary/5 border border-primary/10 transition-all duration-200 hover:bg-primary/10 hover:border-primary/20">
+        {/* Current User */}
+        <div className="mb-2 flex items-center gap-3 rounded-lg p-2.5 -mx-2 transition-all duration-150 hover:bg-accent/50 hover:shadow-sm">
           <div className="relative flex h-2.5 w-2.5 items-center justify-center">
             <div
-              className="h-2.5 w-2.5 rounded-full shadow-lg ring-2 ring-background"
+              className="h-2.5 w-2.5 rounded-full shadow-sm ring-2 ring-background"
               style={{ backgroundColor: currentUser.userColor }}
             />
             <div
@@ -40,22 +39,23 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
               style={{ backgroundColor: currentUser.userColor }}
             />
           </div>
-          <span className="text-sm font-semibold flex-1">{currentUser.userName}</span>
-          <span className="text-xs text-muted-foreground font-medium px-2 py-0.5 rounded-full bg-muted/50">(you)</span>
+          <span className="text-sm font-medium flex-1">{currentUser.userName}</span>
+          <span className="text-xs text-muted-foreground font-medium bg-muted/50 px-2 py-0.5 rounded-full">(you)</span>
         </div>
       </div>
 
       <ScrollArea className="flex-1 px-4 pb-2">
+        {/* Online Users */}
         {onlineUsers.length > 0 && (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {onlineUsers.map((user) => (
               <div
                 key={user.user_id}
-                className="flex items-center gap-3 rounded-lg p-2.5 transition-all duration-200 hover:bg-accent/60 hover:translate-x-1 hover:shadow-sm"
+                className="flex items-center gap-3 rounded-lg p-2.5 -mx-2 transition-all duration-150 hover:bg-accent/50 hover:translate-x-0.5 hover:shadow-sm"
               >
                 <div className="relative flex h-2.5 w-2.5 items-center justify-center">
                   <div
-                    className="h-2.5 w-2.5 rounded-full shadow-md ring-2 ring-background"
+                    className="h-2.5 w-2.5 rounded-full shadow-sm ring-2 ring-background"
                     style={{ backgroundColor: user.color }}
                   />
                   <div
@@ -69,17 +69,18 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
           </div>
         )}
 
+        {/* Offline Users */}
         {offlineUsers.length > 0 && (
           <>
-            <div className="my-4 h-px bg-gradient-to-r from-transparent via-border/60 to-transparent" />
-            <h4 className="mb-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+            <div className="my-4 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+            <h4 className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
               Offline
             </h4>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {offlineUsers.map((user) => (
                 <div
                   key={user.user_id}
-                  className="flex items-center gap-3 rounded-lg p-2.5 opacity-50 transition-all duration-200 hover:opacity-70 hover:bg-accent/40 hover:translate-x-0.5"
+                  className="flex items-center gap-3 rounded-lg p-2.5 -mx-2 opacity-60 transition-all duration-150 hover:opacity-80 hover:bg-accent/30"
                 >
                   <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40 ring-2 ring-background" />
                   <span className="text-sm text-muted-foreground">{user.user_name}</span>
@@ -90,16 +91,16 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
         )}
       </ScrollArea>
 
-      <div className="flex-shrink-0 px-4 py-3 border-t border-border/40 bg-gradient-to-t from-muted/30 to-transparent">
-        <div className="flex items-center justify-center gap-3 text-xs font-semibold text-muted-foreground">
-          <span className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-green-500 shadow-sm shadow-green-500/50 animate-pulse" />
-            <span>{onlineUsers.length + 1} online</span>
+      <div className="flex-shrink-0 px-4 py-3 border-t border-border/50 bg-gradient-to-t from-muted/20 to-transparent">
+        <div className="flex items-center justify-center gap-3 text-xs font-medium text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse shadow-sm shadow-green-500/50" />
+            <span className="font-semibold">{onlineUsers.length + 1}</span> online
           </span>
-          <span className="text-border/60">•</span>
-          <span className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-muted-foreground/40" />
-            <span>{offlineUsers.length} offline</span>
+          <span className="text-border/70">•</span>
+          <span className="flex items-center gap-1.5">
+            <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+            <span className="font-semibold">{offlineUsers.length}</span> offline
           </span>
         </div>
       </div>

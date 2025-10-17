@@ -67,6 +67,26 @@ export function AiChat({
 
     try {
       console.log("[v0] Sending AI request:", userMessage)
+      const sanitizedObjects = currentObjects.map((obj) => ({
+        id: obj.id,
+        type: obj.type,
+        x: obj.x,
+        y: obj.y,
+        width: obj.width,
+        height: obj.height,
+        rotation: obj.rotation,
+        fill_color: obj.fill_color,
+        stroke_color: obj.stroke_color,
+        stroke_width: obj.stroke_width,
+        text_content: obj.text_content,
+        font_size: obj.font_size,
+        font_family: obj.font_family,
+        locked: obj.locked ?? false,
+        visible: obj.visible ?? true,
+      }))
+
+      const selectedObjects = sanitizedObjects.filter((obj) => selectedObjectIds.includes(obj.id))
+
       const response = await fetch("/api/ai-canvas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -76,17 +96,9 @@ export function AiChat({
           userId,
           userName,
           viewport,
-          currentObjects: currentObjects.map((obj) => ({
-            type: obj.type,
-            x: obj.x,
-            y: obj.y,
-            width: obj.width,
-            height: obj.height,
-            rotation: obj.rotation,
-            fill_color: obj.fill_color,
-            stroke_color: obj.stroke_color,
-          })),
+          currentObjects: sanitizedObjects,
           selectedObjectIds,
+          selectedObjects,
         }),
       })
 

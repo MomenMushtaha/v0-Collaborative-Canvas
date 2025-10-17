@@ -38,7 +38,15 @@ CollabCanvas includes automatic performance logging that tracks:
 - Includes object count for context
 - Target: 60 FPS with 500+ objects
 
-### 4. AI Response Performance
+### 4. Cursor & Presence Performance
+\`\`\`
+[v0] Received cursor broadcast from: Sam at 412 216 (18ms)
+\`\`\`
+- Broadcast payloads include a `sentAt` timestamp so the receiving client logs real-world latency.
+- Cursor broadcasts are throttled to ~60 FPS (16 ms) and heartbeats keep `last_seen` fresh in the database.
+- Target: <50 ms cursor latency in typical sessions.
+
+### 5. AI Response Performance
 \`\`\`
 [v0] [PERF] AI response: 2.3s (3 operations)
 \`\`\`
@@ -99,26 +107,42 @@ CollabCanvas includes automatic performance logging that tracks:
 - FPS remains >50 with active collaboration
 - AI responses <5s per user
 
-### Scenario 4: Network Resilience
-**Objective:** Verify reconnection and operation queuing
+### Scenario 4: Network Resilience & Persistence
+**Objective:** Verify reconnection, queued operations, and refresh recovery
 
 **Steps:**
 1. Open canvas and create some objects
 2. Open browser DevTools → Network tab
 3. Set network to "Offline" mode
 4. Create/modify objects (operations are queued)
-5. Observe connection status banner
-6. Set network back to "Online"
-7. Verify queued operations sync
+5. Observe connection status banner + queued count increase
+6. Refresh the browser while still offline (state restores from cache)
+7. Set network back to "Online"
+8. Verify queued operations sync
 
 **Expected Results:**
 - Connection status shows "Offline" with queue count
-- Operations queue locally during disconnect
+- Operations queue locally during disconnect and survive refresh (persisted queue)
 - Automatic reconnection within 1-5 seconds
-- All queued operations sync successfully
+- All queued operations sync successfully and badges reflect the latest author
 - No data loss
 
-### Scenario 5: AI Agent Performance
+### Scenario 5: Offline Refresh Persistence
+**Objective:** Confirm canvas + metadata persistence across hard refreshes
+
+**Steps:**
+1. Perform several edits while online.
+2. Disable the network.
+3. Make three additional edits (create, update, delete).
+4. Hard refresh the tab.
+5. Re-enable the network.
+
+**Expected Results:**
+- Canvas reloads with the offline edits still visible (cached snapshot).
+- Once reconnected the queued operations replay without manual intervention.
+- Object badges & layers metadata continue to show correct authorship.
+
+### Scenario 6: AI Agent Performance
 **Objective:** Test AI command execution speed
 
 **Steps:**
@@ -156,6 +180,7 @@ CollabCanvas includes automatic performance logging that tracks:
 
 ### 4. Operation Queuing
 - Queues operations during disconnect
+- Queue persisted to `localStorage` so edits survive refreshes
 - Automatic replay on reconnection
 - Prevents data loss
 - Maintains operation order
@@ -217,6 +242,7 @@ CollabCanvas includes automatic performance logging that tracks:
 - [ ] Five users: No degradation in sync
 - [ ] Network drop: Operations queue correctly
 - [ ] Network restore: Operations replay successfully
+- [ ] Offline refresh: Canvas & queue restored after reload
 - [ ] AI simple command: <2s response
 - [ ] AI complex command: <5s response
 - [ ] Undo/Redo: Instant response
@@ -240,10 +266,11 @@ All performance metrics are automatically logged to the browser console with the
 1. **Connection Status UI** - Visual feedback on connection state
 2. **Performance Logging** - Automatic metrics collection
 3. **Reconnection Logic** - Handles network interruptions
-4. **Operation Queuing** - Prevents data loss during disconnect
+4. **Operation Queuing** - Prevents data loss during disconnect (persisted queue + tombstones)
 5. **Debounced Writes** - Reduces database load
 6. **Optimistic Updates** - Immediate UI feedback
-7. **Efficient Rendering** - Canvas optimization
+7. **Cursor Telemetry** - Sub-50 ms cursor latency logging and heartbeats
+8. **Author Badges** - Live “edited by” metadata on canvas + layers
 
 ## Conclusion
 

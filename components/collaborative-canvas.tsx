@@ -18,6 +18,7 @@ import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { useToast } from "@/hooks/use-toast"
 import { CommentMarker } from "@/components/comment-marker"
 import type { Comment } from "@/lib/comments-utils"
+import { ObjectLastEditedBadges } from "@/components/object-last-edited"
 
 // Generate a random color for each user
 function generateUserColor() {
@@ -101,9 +102,11 @@ export function CollaborativeCanvas({
   const [clipboard, setClipboard] = useState<CanvasObject[]>([]) // Added clipboard state
   const { toast } = useToast()
 
-  const { objects, isLoading, syncObjects, isConnected, queuedOperations } = useRealtimeCanvas({
+  const { objects, isLoading, syncObjects, isConnected, queuedOperations, metadata } = useRealtimeCanvas({
     canvasId,
     userId,
+    userName,
+    userColor,
     onConnectionChange: (connected, queued) => {
       setConnectionState({ isConnected: connected, queuedOps: queued })
     },
@@ -676,6 +679,14 @@ export function CollaborativeCanvas({
     }
   }, [handleSelectAllOfType, onSelectAllOfType])
 
+  useEffect(() => {
+    setConnectionState((prev) => ({ ...prev, queuedOps: queuedOperations }))
+  }, [queuedOperations])
+
+  useEffect(() => {
+    setConnectionState((prev) => ({ ...prev, isConnected }))
+  }, [isConnected])
+
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -696,6 +707,7 @@ export function CollaborativeCanvas({
         onDeleteObject={handleLayerDelete}
         onToggleVisibility={handleToggleVisibility}
         onToggleLock={handleToggleLock}
+        metadata={metadata}
       />
       <Canvas
         canvasId={canvasId}
@@ -724,6 +736,7 @@ export function CollaborativeCanvas({
         {comments.map((comment) => (
           <CommentMarker key={comment.id} comment={comment} />
         ))}
+        <ObjectLastEditedBadges objects={objects} metadata={metadata} selectedIds={selectedObjectIds} />
       </Canvas>
     </div>
   )

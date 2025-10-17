@@ -23,6 +23,32 @@ export interface CanvasObject {
   content?: string // text content for text objects
 }
 
+export interface ObjectMetadata {
+  version: number
+  lastEditedBy?: string
+  lastEditedAt?: number
+  lastEditedName?: string
+  lastEditedColor?: string
+}
+
+export interface RealtimeBroadcastMeta extends ObjectMetadata {
+  lastEditedBy: string
+  lastEditedAt: number
+  lastEditedName: string
+  lastEditedColor: string
+}
+
+export type RealtimeObjectPayload = CanvasObject & {
+  _timestamp?: number
+  _meta?: RealtimeBroadcastMeta
+}
+
+export type RealtimeDeletePayload = {
+  id: string
+  _timestamp?: number
+  _meta?: RealtimeBroadcastMeta
+}
+
 export interface UserPresence {
   id: string
   canvas_id: string

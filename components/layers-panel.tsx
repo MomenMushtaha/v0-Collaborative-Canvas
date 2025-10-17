@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import type { CanvasObject } from "@/lib/types"
+import type { CanvasObject, ObjectMetadata } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -27,6 +27,7 @@ interface LayersPanelProps {
   onToggleVisibility?: (id: string) => void
   onToggleLock?: (id: string) => void
   onReorder?: (id: string, newIndex: number) => void
+  metadata?: Record<string, ObjectMetadata>
 }
 
 export function LayersPanel({
@@ -37,8 +38,18 @@ export function LayersPanel({
   onToggleVisibility,
   onToggleLock,
   onReorder,
+  metadata,
 }: LayersPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+
+  const formatRelativeTime = (timestamp?: number) => {
+    if (!timestamp) return null
+    const delta = Math.max(0, Date.now() - timestamp)
+    if (delta < 1000) return "just now"
+    if (delta < 60_000) return `${Math.floor(delta / 1000)}s ago`
+    if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`
+    return `${Math.floor(delta / 3_600_000)}h ago`
+  }
 
   const getObjectIcon = (obj: CanvasObject) => {
     if (obj.type === "text") return <Type className="h-4 w-4" />
@@ -116,6 +127,8 @@ export function LayersPanel({
               const isSelected = selectedIds.includes(obj.id)
               const isVisible = obj.visible !== false
               const isLocked = obj.locked === true
+              const meta = metadata?.[obj.id]
+              const relative = formatRelativeTime(meta?.lastEditedAt)
 
               return (
                 <div
@@ -149,6 +162,12 @@ export function LayersPanel({
                   `}
                   >
                     {getObjectLabel(obj)}
+                    {meta && (
+                      <div className="mt-0.5 text-[10px] font-normal text-muted-foreground">
+                        Edited by {meta.lastEditedName || "Unknown"}
+                        {relative ? ` · ${relative}` : ""}
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}

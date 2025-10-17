@@ -17,18 +17,39 @@ interface CursorUpdate {
   color: string
   x: number
   y: number
+  sentAt: number
 }
 
 export function usePresence({ canvasId, userId, userName, userColor }: UsePresenceProps) {
   const [otherUsers, setOtherUsers] = useState<Map<string, UserPresence>>(new Map())
   const supabase = createClient()
-  const [presenceId, setPresenceId] = useState<string | null>(null)
+  const presenceIdRef = useRef<string | null>(null)
+  const heartbeatRef = useRef<NodeJS.Timeout>()
+  const lastCursorBroadcastRef = useRef<number>(0)
+  const lastPresenceUpdateRef = useRef<number>(0)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  const CURSOR_THROTTLE_MS = 16
+  const HEARTBEAT_INTERVAL_MS = 5000
+  const PRESENCE_REFRESH_MS = 5000
+
+  const cleanupPresence = useCallback(() => {
+    const presenceId = presenceIdRef.current
+    if (!presenceId) return
+
+    console.log("[v0] Cleaning up presence:", presenceId)
+    supabase.from("user_presence").delete().eq("id", presenceId).then(() => {
+      presenceIdRef.current = null
+    })
+  }, [supabase])
 
   // Initialize presence
   useEffect(() => {
     async function initPresence() {
       console.log("[v0] Initializing presence for user:", userName, userId)
+
+       await supabase.from("user_presence").delete().eq("canvas_id", canvasId).eq("user_id", userId)
+
       const { data, error } = await supabase
         .from("user_presence")
         .insert({
@@ -48,19 +69,41 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
       }
 
       console.log("[v0] Presence created successfully:", data.id)
-      setPresenceId(data.id)
+      presenceIdRef.current = data.id
+
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current)
+      }
+
+      heartbeatRef.current = setInterval(() => {
+        if (!presenceIdRef.current) return
+        supabase
+          .from("user_presence")
+          .update({ last_seen: new Date().toISOString() })
+          .eq("id", presenceIdRef.current)
+          .catch((err) => console.warn("[v0] Failed heartbeat update", err))
+      }, HEARTBEAT_INTERVAL_MS)
     }
 
     initPresence()
 
     // Cleanup on unmount
     return () => {
-      if (presenceId) {
-        console.log("[v0] Cleaning up presence:", presenceId)
-        supabase.from("user_presence").delete().eq("id", presenceId).then()
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current)
       }
+      cleanupPresence()
     }
-  }, [canvasId, userId, userName, userColor, supabase])
+  }, [canvasId, cleanupPresence, supabase, userColor, userId, userName])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleBeforeUnload = () => cleanupPresence()
+    window.addEventListener("beforeunload", handleBeforeUnload)
+
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [cleanupPresence])
 
   useEffect(() => {
     async function loadPresence() {
@@ -84,7 +127,7 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
     loadPresence()
 
     // Refresh presence list every 5 seconds to detect new users
-    const presenceInterval = setInterval(loadPresence, 5000)
+    const presenceInterval = setInterval(loadPresence, PRESENCE_REFRESH_MS)
 
     console.log("[v0] Setting up cursor broadcast channel for canvas:", canvasId)
     const channel = supabase
@@ -94,7 +137,15 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
         },
       })
       .on("broadcast", { event: "cursor" }, ({ payload }: { payload: CursorUpdate }) => {
-        console.log("[v0] Received cursor broadcast from:", payload.userName, "at", payload.x, payload.y)
+        const latency = Math.max(0, Date.now() - payload.sentAt)
+        console.log(
+          "[v0] Received cursor broadcast from:",
+          payload.userName,
+          "at",
+          payload.x,
+          payload.y,
+          `(${latency}ms)`,
+        )
 
         setOtherUsers((prev) => {
           const newMap = new Map(prev)
@@ -136,6 +187,13 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
         return
       }
 
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now()
+      if (now - lastCursorBroadcastRef.current < CURSOR_THROTTLE_MS) {
+        return
+      }
+
+      lastCursorBroadcastRef.current = now
+
       console.log("[v0] Broadcasting cursor position:", x, y, "for user:", userName)
       channelRef.current.send({
         type: "broadcast",
@@ -146,10 +204,27 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
           color: userColor,
           x,
           y,
+          sentAt: Date.now(),
         } as CursorUpdate,
       })
+
+      if (presenceIdRef.current) {
+        const lastUpdate = lastPresenceUpdateRef.current
+        if (now - lastUpdate > 1000) {
+          supabase
+            .from("user_presence")
+            .update({
+              cursor_x: x,
+              cursor_y: y,
+              last_seen: new Date().toISOString(),
+            })
+            .eq("id", presenceIdRef.current)
+            .catch((err) => console.warn("[v0] Failed to update presence cursor", err))
+          lastPresenceUpdateRef.current = now
+        }
+      }
     },
-    [userId, userName, userColor],
+    [CURSOR_THROTTLE_MS, userColor, userId, userName, supabase],
   )
 
   return {

@@ -70,7 +70,7 @@ export function LayersPanel({
 
   if (isCollapsed) {
     return (
-      <div className="fixed right-4 top-20 z-40">
+      <div className="fixed right-4 top-[420px] z-40">
         <Button variant="outline" size="sm" onClick={() => setIsCollapsed(false)} className="bg-background shadow-lg">
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -79,7 +79,7 @@ export function LayersPanel({
   }
 
   return (
-    <div className="fixed right-4 top-20 z-40 w-64 rounded-lg border bg-background shadow-lg">
+    <div className="fixed right-4 top-[420px] z-40 w-64 rounded-lg border bg-background shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between border-b p-3">
         <h3 className="text-sm font-semibold">Layers</h3>

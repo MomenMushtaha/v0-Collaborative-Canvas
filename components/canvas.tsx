@@ -26,8 +26,8 @@ export function Canvas({
   onSelectionChange,
   children,
   gridEnabled = false, // Added grid props with defaults
-  snapEnabled = false,
-  gridSize = 20,
+  snapEnabled,
+  gridSize,
 }: CanvasProps) {
   const {
     canvasRef,
@@ -185,7 +185,7 @@ export function Canvas({
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
       {/* Toolbar */}
-      <div className="absolute left-4 top-4 z-10 flex gap-2 rounded-lg border bg-card p-2 shadow-lg">
+      <div className="absolute left-4 top-20 z-10 flex gap-2 rounded-lg border bg-card p-2 shadow-lg">
         <Button
           variant={tool === "select" ? "default" : "ghost"}
           size="icon"

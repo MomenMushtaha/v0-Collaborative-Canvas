@@ -14,6 +14,7 @@ import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { StylePanel } from "@/components/style-panel"
 import { LayersPanel } from "@/components/layers-panel"
 import { alignObjects, distributeObjects } from "@/lib/alignment-utils"
+import { exportCanvas } from "@/lib/export-utils"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { useToast } from "@/hooks/use-toast"
 import { CommentMarker } from "@/components/comment-marker"
@@ -64,6 +65,7 @@ interface CollaborativeCanvasProps {
   onSelectAllOfType?: Dispatch<SetStateAction<(() => void) | undefined>> // Added onSelectAllOfType prop type
   historyRestore?: CanvasObject[] | null
   onHistoryRestoreComplete?: (result: "success" | "error") => void
+  onSaveSnapshot?: (name?: string) => Promise<void> | void
 }
 
 export function CollaborativeCanvas({
@@ -97,6 +99,7 @@ export function CollaborativeCanvas({
   onSelectAllOfType,
   historyRestore = null,
   onHistoryRestoreComplete,
+  onSaveSnapshot,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -467,50 +470,113 @@ export function CollaborativeCanvas({
   }, [historyCanUndo, historyCanRedo, canUndo, canRedo])
 
   useEffect(() => {
-    if (aiOperations.length > 0) {
-      console.log("[v0] Processing AI operations:", aiOperations)
+    if (aiOperations.length === 0) {
+      return
+    }
 
-      // Process operations sequentially with delays
-      const processOperationsSequentially = async () => {
-        let updatedObjects = [...objects]
-        const failedOperations: string[] = []
+    console.log("[v0] Processing AI operations:", aiOperations)
 
-        for (let i = 0; i < aiOperations.length; i++) {
-          const operation = aiOperations[i]
-          console.log(`[v0] Processing operation ${i + 1}/${aiOperations.length}:`, operation.type)
+    const processOperationsSequentially = async () => {
+      let updatedObjects = [...objects]
+      let currentSelection = [...selectedObjectIds]
+      let currentGridSettings = { enabled: gridEnabled, snap: snapEnabled, size: gridSize }
+      let currentViewportState = viewport || { x: 0, y: 0, zoom: 1 }
+      const failedOperations: string[] = []
 
-          try {
-            const result = applyOperation(updatedObjects, operation)
-            if (result.error) {
-              failedOperations.push(`${operation.type}: ${result.error}`)
-              console.warn(`[v0] Operation failed:`, result.error)
-            } else {
-              updatedObjects = result.objects
-              // Sync after each successful operation for visual feedback
-              syncObjects(updatedObjects)
-            }
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Unknown error"
-            failedOperations.push(`${operation.type}: ${errorMsg}`)
-            console.error(`[v0] Operation error:`, error)
-          }
-
-          // Add delay between operations (except for the last one)
-          if (i < aiOperations.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 150))
-          }
-        }
-
-        if (failedOperations.length > 0) {
-          console.warn("[v0] Some operations failed:", failedOperations)
-        }
-
-        onAiOperationsProcessed?.()
+      const selectObjectsFromAI = (ids: string[]) => {
+        currentSelection = ids
+        setSelectedObjectIds(ids)
+        onSelectionChange?.(ids)
       }
 
-      processOperationsSequentially()
+      const updateGridSettingsFromAI = (settings: { enabled: boolean; snap: boolean; size: number }) => {
+        currentGridSettings = settings
+        onGridChange?.(settings.enabled, settings.snap, settings.size)
+      }
+
+      const updateViewportFromAI = (nextViewport: { x: number; y: number; zoom: number }) => {
+        currentViewportState = nextViewport
+        onViewportChange?.(nextViewport)
+      }
+
+      for (let i = 0; i < aiOperations.length; i++) {
+        const operation = aiOperations[i]
+        console.log(`[v0] Processing operation ${i + 1}/${aiOperations.length}:`, operation.type)
+
+        try {
+          const result = await applyOperation(updatedObjects, operation, {
+            selectObjects: selectObjectsFromAI,
+            getSelection: () => currentSelection,
+            gridSettings: currentGridSettings,
+            setGridSettings: updateGridSettingsFromAI,
+            onCommentCreate,
+            viewport: currentViewportState,
+            setViewport: updateViewportFromAI,
+            exportCanvas: (format, selectionOnly = false) => {
+              const objectsToExport =
+                selectionOnly && currentSelection.length > 0
+                  ? updatedObjects.filter((obj) => currentSelection.includes(obj.id))
+                  : updatedObjects
+
+              if (objectsToExport.length === 0) {
+                throw new Error("No objects available to export")
+              }
+
+              exportCanvas({
+                format,
+                objects: objectsToExport,
+                backgroundColor: "#ffffff",
+                scale: format === "png" ? 2 : 1,
+                viewport: currentViewportState,
+                canvasWidth: typeof window !== "undefined" ? window.innerWidth : 1920,
+                canvasHeight: typeof window !== "undefined" ? window.innerHeight : 1080,
+              })
+            },
+            onSaveSnapshot,
+          })
+
+          if (result.error) {
+            failedOperations.push(`${operation.type}: ${result.error}`)
+            console.warn(`[v0] Operation failed:`, result.error)
+          } else {
+            updatedObjects = result.objects
+            syncObjects(updatedObjects)
+            objectsRef.current = updatedObjects
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : "Unknown error"
+          failedOperations.push(`${operation.type}: ${errorMsg}`)
+          console.error(`[v0] Operation error:`, error)
+        }
+
+        if (i < aiOperations.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 150))
+        }
+      }
+
+      if (failedOperations.length > 0) {
+        console.warn("[v0] Some operations failed:", failedOperations)
+      }
+
+      onAiOperationsProcessed?.()
     }
-  }, [aiOperations])
+
+    processOperationsSequentially()
+  }, [
+    aiOperations,
+    objects,
+    selectedObjectIds,
+    gridEnabled,
+    snapEnabled,
+    gridSize,
+    viewport,
+    onSelectionChange,
+    onGridChange,
+    onViewportChange,
+    onCommentCreate,
+    onSaveSnapshot,
+    syncObjects,
+  ])
 
   useEffect(() => {
     onObjectsChange?.(objects)
@@ -790,7 +856,65 @@ export function CollaborativeCanvas({
   )
 }
 
-function applyOperation(objects: CanvasObject[], operation: any): { objects: CanvasObject[]; error?: string } {
+interface OperationContext {
+  selectObjects: (ids: string[]) => void
+  getSelection: () => string[]
+  gridSettings: { enabled: boolean; snap: boolean; size: number }
+  setGridSettings: (settings: { enabled: boolean; snap: boolean; size: number }) => void
+  onCommentCreate?: (x: number, y: number, content: string) => Promise<void> | void
+  viewport: { x: number; y: number; zoom: number }
+  setViewport: (viewport: { x: number; y: number; zoom: number }) => void
+  exportCanvas?: (format: "png" | "svg", selectionOnly?: boolean) => void
+  onSaveSnapshot?: (name?: string) => Promise<void> | void
+}
+
+function resolveTargetIds(
+  objects: CanvasObject[],
+  operation: { targetIds?: string[]; shapeIndices?: number[]; applyToSelection?: boolean },
+  selection: string[],
+): string[] {
+  const ids = new Set<string>()
+
+  if (Array.isArray(operation.targetIds)) {
+    for (const id of operation.targetIds) {
+      if (objects.some((obj) => obj.id === id)) {
+        ids.add(id)
+      }
+    }
+  }
+
+  if (Array.isArray(operation.shapeIndices)) {
+    for (const index of operation.shapeIndices) {
+      if (index >= 0 && index < objects.length) {
+        ids.add(objects[index].id)
+      }
+    }
+  }
+
+  if (operation.applyToSelection) {
+    selection.forEach((id) => ids.add(id))
+  }
+
+  return Array.from(ids)
+}
+
+function getTargetsByIds(objects: CanvasObject[], targetIds: string[]) {
+  return targetIds
+    .map((id) => {
+      const index = objects.findIndex((obj) => obj.id === id)
+      if (index === -1) {
+        return null
+      }
+      return { index, object: objects[index] }
+    })
+    .filter((value): value is { index: number; object: CanvasObject } => value !== null)
+}
+
+async function applyOperation(
+  objects: CanvasObject[],
+  operation: any,
+  context: OperationContext,
+): Promise<{ objects: CanvasObject[]; error?: string }> {
   let updatedObjects = [...objects]
 
   try {
@@ -810,7 +934,7 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
           type: "text",
           x: operation.x,
           y: operation.y,
-          width: 200, // Default width for text
+          width: 200,
           height: operation.fontSize || 16,
           rotation: 0,
           fill_color: operation.color || "#000000",
@@ -979,6 +1103,250 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
             return obj
           })
         }
+        break
+      }
+
+      case "updateStyle": {
+        const targetIds = resolveTargetIds(updatedObjects, operation, context.getSelection())
+        if (targetIds.length === 0) {
+          return { objects, error: "No matching shapes found to style." }
+        }
+
+        const targets = getTargetsByIds(updatedObjects, targetIds)
+        if (targets.length === 0) {
+          return { objects, error: "Unable to locate shapes for style update." }
+        }
+
+        targets.forEach(({ index, object }) => {
+          const isText = object.type === "text"
+          updatedObjects[index] = {
+            ...object,
+            fill_color: isText
+              ? operation.textColor || operation.fillColor || object.fill_color
+              : operation.fillColor || object.fill_color,
+            stroke_color: operation.strokeColor || object.stroke_color,
+            stroke_width: operation.strokeWidth ?? object.stroke_width,
+            font_size: isText ? operation.fontSize ?? object.font_size : object.font_size,
+          }
+        })
+        break
+      }
+
+      case "updateText": {
+        const targetIds = resolveTargetIds(updatedObjects, operation, context.getSelection())
+        const targets = getTargetsByIds(updatedObjects, targetIds)
+        if (targets.length === 0) {
+          return { objects, error: "No text objects found to update." }
+        }
+
+        targets.forEach(({ index, object }) => {
+          if (object.type !== "text") {
+            return
+          }
+          updatedObjects[index] = {
+            ...object,
+            text_content: operation.text ?? object.text_content,
+            font_size: operation.fontSize ?? object.font_size,
+            fill_color: operation.textColor || object.fill_color,
+          }
+        })
+        break
+      }
+
+      case "updateLayerState": {
+        const targetIds = resolveTargetIds(updatedObjects, operation, context.getSelection())
+        const targets = getTargetsByIds(updatedObjects, targetIds)
+        if (targets.length === 0) {
+          return { objects, error: "No objects found to update state." }
+        }
+
+        targets.forEach(({ index, object }) => {
+          updatedObjects[index] = {
+            ...object,
+            visible: operation.visibility ?? object.visible,
+            locked: operation.locked ?? object.locked,
+          }
+        })
+        break
+      }
+
+      case "reorder": {
+        const targetIds = resolveTargetIds(updatedObjects, operation, context.getSelection())
+        const targets = getTargetsByIds(updatedObjects, targetIds)
+        if (targets.length === 0) {
+          return { objects, error: "No objects selected for reordering." }
+        }
+
+        switch (operation.action) {
+          case "bringToFront": {
+            const remaining = updatedObjects.filter((obj) => !targetIds.includes(obj.id))
+            const reordered = targets.map((target) => target.object)
+            updatedObjects = [...remaining, ...reordered]
+            break
+          }
+          case "sendToBack": {
+            const remaining = updatedObjects.filter((obj) => !targetIds.includes(obj.id))
+            const reordered = targets.map((target) => target.object)
+            updatedObjects = [...reordered, ...remaining]
+            break
+          }
+          case "bringForward": {
+            for (let i = updatedObjects.length - 2; i >= 0; i--) {
+              const current = updatedObjects[i]
+              if (targetIds.includes(current.id) && !targetIds.includes(updatedObjects[i + 1].id)) {
+                const swap = updatedObjects[i + 1]
+                updatedObjects[i + 1] = current
+                updatedObjects[i] = swap
+              }
+            }
+            break
+          }
+          case "sendBackward": {
+            for (let i = 1; i < updatedObjects.length; i++) {
+              const current = updatedObjects[i]
+              if (targetIds.includes(current.id) && !targetIds.includes(updatedObjects[i - 1].id)) {
+                const swap = updatedObjects[i - 1]
+                updatedObjects[i - 1] = current
+                updatedObjects[i] = swap
+              }
+            }
+            break
+          }
+          default:
+            return { objects, error: `Unknown reorder action: ${operation.action}` }
+        }
+        break
+      }
+
+      case "duplicate": {
+        const targetIds = resolveTargetIds(updatedObjects, operation, context.getSelection())
+        const targets = getTargetsByIds(updatedObjects, targetIds)
+        if (targets.length === 0) {
+          return { objects, error: "No objects available to duplicate." }
+        }
+
+        const offsetX = operation.offsetX ?? 20
+        const offsetY = operation.offsetY ?? 20
+
+        targets.forEach(({ object }) => {
+          const clone: CanvasObject = {
+            ...object,
+            id: crypto.randomUUID(),
+            x: object.x + offsetX,
+            y: object.y + offsetY,
+            created_at: undefined,
+            updated_at: undefined,
+          }
+          updatedObjects.push(clone)
+        })
+        break
+      }
+
+      case "select": {
+        if (operation.mode === "clear") {
+          context.selectObjects([])
+          break
+        }
+
+        if (operation.mode === "all") {
+          context.selectObjects(updatedObjects.map((obj) => obj.id))
+          break
+        }
+
+        if (operation.mode === "remove" && Array.isArray(operation.targetIds)) {
+          const current = new Set(context.getSelection())
+          operation.targetIds.forEach((id: string) => current.delete(id))
+          context.selectObjects(Array.from(current))
+          break
+        }
+
+        const targets = new Set(resolveTargetIds(updatedObjects, operation, context.getSelection()))
+
+        if (typeof operation.shapeType === "string") {
+          updatedObjects
+            .filter((obj) => obj.type === operation.shapeType)
+            .forEach((obj) => targets.add(obj.id))
+        }
+
+        if (typeof operation.fillColor === "string") {
+          const normalized = operation.fillColor.toLowerCase()
+          updatedObjects
+            .filter((obj) => obj.fill_color?.toLowerCase() === normalized)
+            .forEach((obj) => targets.add(obj.id))
+        }
+
+        const currentSelection = new Set(context.getSelection())
+        const targetIds = Array.from(targets)
+
+        if (operation.mode === "add") {
+          targetIds.forEach((id) => currentSelection.add(id))
+          context.selectObjects(Array.from(currentSelection))
+        } else if (operation.mode === "remove") {
+          targetIds.forEach((id) => currentSelection.delete(id))
+          context.selectObjects(Array.from(currentSelection))
+        } else {
+          context.selectObjects(targetIds)
+        }
+        break
+      }
+
+      case "viewport": {
+        const next = { ...context.viewport }
+        if (typeof operation.x === "number") {
+          next.x = operation.x
+        }
+        if (typeof operation.y === "number") {
+          next.y = operation.y
+        }
+        if (typeof operation.deltaX === "number") {
+          next.x += operation.deltaX
+        }
+        if (typeof operation.deltaY === "number") {
+          next.y += operation.deltaY
+        }
+        if (typeof operation.zoom === "number") {
+          next.zoom = Math.min(3, Math.max(1, operation.zoom))
+        }
+        if (typeof operation.deltaZoom === "number") {
+          next.zoom = Math.min(3, Math.max(1, next.zoom + operation.deltaZoom))
+        }
+
+        context.setViewport(next)
+        break
+      }
+
+      case "gridSettings": {
+        const nextSettings = {
+          enabled: operation.enabled ?? context.gridSettings.enabled,
+          snap: operation.snap ?? context.gridSettings.snap,
+          size: operation.size ?? context.gridSettings.size,
+        }
+        context.setGridSettings(nextSettings)
+        break
+      }
+
+      case "comment": {
+        if (!context.onCommentCreate) {
+          return { objects, error: "Comment functionality is not available." }
+        }
+
+        await context.onCommentCreate(operation.x, operation.y, operation.content)
+        break
+      }
+
+      case "export": {
+        if (!context.exportCanvas) {
+          return { objects, error: "Export functionality is not available." }
+        }
+        context.exportCanvas(operation.format, operation.selectionOnly)
+        break
+      }
+
+      case "snapshot": {
+        if (!context.onSaveSnapshot) {
+          return { objects, error: "Snapshot functionality is not available." }
+        }
+        await context.onSaveSnapshot(operation.name)
         break
       }
 

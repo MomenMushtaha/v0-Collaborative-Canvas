@@ -15,6 +15,7 @@ import { StylePanel } from "@/components/style-panel"
 import { LayersPanel } from "@/components/layers-panel"
 import { alignObjects, distributeObjects } from "@/lib/alignment-utils"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
+import { useToast } from "@/hooks/use-toast"
 
 // Generate a random color for each user
 function generateUserColor() {
@@ -76,6 +77,7 @@ export function CollaborativeCanvas({
   const [isUndoRedoOperation, setIsUndoRedoOperation] = useState(false)
   const [connectionState, setConnectionState] = useState({ isConnected: true, queuedOps: 0 })
   const [clipboard, setClipboard] = useState<CanvasObject[]>([]) // Added clipboard state
+  const { toast } = useToast()
 
   const { objects, isLoading, syncObjects, isConnected, queuedOperations } = useRealtimeCanvas({
     canvasId,
@@ -181,12 +183,19 @@ export function CollaborativeCanvas({
 
   const handleDelete = useCallback(() => {
     if (selectedObjectIds.length > 0) {
+      const count = selectedObjectIds.length
       const updatedObjects = objects.filter((obj) => !selectedObjectIds.includes(obj.id))
       syncObjects(updatedObjects)
       setSelectedObjectIds([])
       console.log("[v0] Deleted selected objects via keyboard shortcut")
+
+      toast({
+        title: "Deleted",
+        description: `${count} object${count > 1 ? "s" : ""} deleted`,
+        variant: "destructive",
+      })
     }
-  }, [selectedObjectIds, objects, syncObjects])
+  }, [selectedObjectIds, objects, syncObjects, toast])
 
   const handleDuplicate = useCallback(() => {
     if (selectedObjectIds.length === 0) return
@@ -202,10 +211,14 @@ export function CollaborativeCanvas({
     const updatedObjects = [...objects, ...duplicatedObjects]
     syncObjects(updatedObjects)
 
-    // Select the newly duplicated objects
     setSelectedObjectIds(duplicatedObjects.map((obj) => obj.id))
     console.log("[v0] Duplicated", selectedObjectIds.length, "object(s)")
-  }, [selectedObjectIds, objects, syncObjects])
+
+    toast({
+      title: "Duplicated",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} duplicated`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
 
   const handleCopy = useCallback(() => {
     if (selectedObjectIds.length === 0) return
@@ -213,7 +226,12 @@ export function CollaborativeCanvas({
     const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
     setClipboard(selectedObjs)
     console.log("[v0] Copied", selectedObjectIds.length, "object(s) to clipboard")
-  }, [selectedObjectIds, objects])
+
+    toast({
+      title: "Copied",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} copied to clipboard`,
+    })
+  }, [selectedObjectIds, objects, toast])
 
   const handlePaste = useCallback(() => {
     if (clipboard.length === 0) return
@@ -228,10 +246,14 @@ export function CollaborativeCanvas({
     const updatedObjects = [...objects, ...pastedObjects]
     syncObjects(updatedObjects)
 
-    // Select the newly pasted objects
     setSelectedObjectIds(pastedObjects.map((obj) => obj.id))
     console.log("[v0] Pasted", clipboard.length, "object(s) from clipboard")
-  }, [clipboard, objects, syncObjects])
+
+    toast({
+      title: "Pasted",
+      description: `${clipboard.length} object${clipboard.length > 1 ? "s" : ""} pasted`,
+    })
+  }, [clipboard, objects, syncObjects, toast])
 
   const handleStyleChange = useCallback(
     (updates: Partial<CanvasObject>) => {

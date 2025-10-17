@@ -19,10 +19,8 @@ export function ConnectionStatus({ isConnected, queuedOps }: ConnectionStatusPro
 
   return (
     <div
-      className={`fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium shadow-lg backdrop-blur-md transition-all animate-in slide-in-from-top ${
-        status === "reconnecting"
-          ? "bg-yellow-500/90 text-yellow-950 border border-yellow-600"
-          : "bg-red-500/90 text-white border border-red-600"
+      className={`fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium shadow-lg transition-all ${
+        status === "reconnecting" ? "bg-yellow-500 text-yellow-950" : "bg-red-500 text-white"
       }`}
     >
       {status === "reconnecting" ? (
@@ -30,14 +28,12 @@ export function ConnectionStatus({ isConnected, queuedOps }: ConnectionStatusPro
           <RefreshCw className="h-4 w-4 animate-spin" />
           <span>Reconnecting...</span>
           {queuedOps > 0 && (
-            <span className="ml-1 rounded-full bg-yellow-950/30 px-2 py-0.5 text-xs font-semibold animate-pulse">
-              {queuedOps} queued
-            </span>
+            <span className="ml-1 rounded-full bg-yellow-950/20 px-2 py-0.5 text-xs">{queuedOps} queued</span>
           )}
         </>
       ) : (
         <>
-          <WifiOff className="h-4 w-4 animate-pulse" />
+          <WifiOff className="h-4 w-4" />
           <span>Offline</span>
         </>
       )}

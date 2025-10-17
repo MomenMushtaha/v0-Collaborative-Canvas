@@ -70,13 +70,8 @@ export function LayersPanel({
 
   if (isCollapsed) {
     return (
-      <div className="fixed right-4 top-20 z-40 animate-in slide-in-from-right">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsCollapsed(false)}
-          className="bg-background shadow-lg transition-all hover:scale-105"
-        >
+      <div className="fixed right-4 top-20 z-40">
+        <Button variant="outline" size="sm" onClick={() => setIsCollapsed(false)} className="bg-background shadow-lg">
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
@@ -84,16 +79,11 @@ export function LayersPanel({
   }
 
   return (
-    <div className="fixed right-4 top-20 z-40 w-64 rounded-lg border bg-background/95 backdrop-blur-md shadow-xl animate-in slide-in-from-right">
+    <div className="fixed right-4 top-20 z-40 w-64 rounded-lg border bg-background shadow-lg">
       {/* Header */}
-      <div className="flex items-center justify-between border-b bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 p-3">
+      <div className="flex items-center justify-between border-b p-3">
         <h3 className="text-sm font-semibold">Layers</h3>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setIsCollapsed(true)}
-          className="h-6 w-6 p-0 transition-all hover:scale-110"
-        >
+        <Button variant="ghost" size="sm" onClick={() => setIsCollapsed(true)} className="h-6 w-6 p-0">
           <ChevronDown className="h-4 w-4" />
         </Button>
       </div>
@@ -114,9 +104,8 @@ export function LayersPanel({
                   key={obj.id}
                   className={`
                     flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer
-                    transition-all duration-200
-                    hover:bg-accent hover:scale-[1.02]
-                    ${isSelected ? "bg-accent ring-2 ring-blue-500 ring-offset-1" : ""}
+                    hover:bg-accent transition-colors
+                    ${isSelected ? "bg-accent" : ""}
                   `}
                   onClick={(e) => onSelectObject(obj.id, e.shiftKey)}
                 >
@@ -133,7 +122,7 @@ export function LayersPanel({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 transition-all hover:scale-110"
+                        className="h-6 w-6 p-0"
                         onClick={(e) => {
                           e.stopPropagation()
                           onToggleVisibility(obj.id)
@@ -148,7 +137,7 @@ export function LayersPanel({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 transition-all hover:scale-110"
+                        className="h-6 w-6 p-0"
                         onClick={(e) => {
                           e.stopPropagation()
                           onToggleLock(obj.id)
@@ -162,7 +151,7 @@ export function LayersPanel({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 w-6 p-0 text-destructive hover:text-destructive transition-all hover:scale-110"
+                      className="h-6 w-6 p-0 text-destructive hover:text-destructive"
                       onClick={(e) => {
                         e.stopPropagation()
                         onDeleteObject(obj.id)
@@ -179,7 +168,7 @@ export function LayersPanel({
       </ScrollArea>
 
       {/* Footer */}
-      <div className="border-t bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 p-2 text-xs text-muted-foreground text-center">
+      <div className="border-t p-2 text-xs text-muted-foreground text-center">
         {sortedObjects.length} object{sortedObjects.length !== 1 ? "s" : ""}
       </div>
     </div>

@@ -122,76 +122,81 @@
   body {
     @apply bg-background text-foreground;
   }
+}
 
-  /* Add smooth scrolling and custom animations */
-  html {
-    scroll-behavior: smooth;
+/* Adding smooth animations and transitions for polish */
+@layer utilities {
+  .animate-in {
+    animation: animate-in 0.2s ease-out;
   }
 
-  /* Custom animations for better UX */
-  @keyframes shimmer {
-    0% {
-      background-position: -1000px 0;
+  .animate-out {
+    animation: animate-out 0.15s ease-in;
+  }
+
+  @keyframes animate-in {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
     }
-    100% {
-      background-position: 1000px 0;
+    to {
+      opacity: 1;
+      transform: scale(1);
     }
   }
 
-  @keyframes float {
+  @keyframes animate-out {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+  }
+
+  .slide-in-from-right {
+    animation: slide-in-from-right 0.3s ease-out;
+  }
+
+  @keyframes slide-in-from-right {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .slide-in-from-left {
+    animation: slide-in-from-left 0.3s ease-out;
+  }
+
+  @keyframes slide-in-from-left {
+    from {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .pulse-subtle {
+    animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulse-subtle {
     0%,
     100% {
-      transform: translateY(0px);
+      opacity: 1;
     }
     50% {
-      transform: translateY(-10px);
+      opacity: 0.8;
     }
-  }
-
-  @keyframes glow {
-    0%,
-    100% {
-      box-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
-    }
-    50% {
-      box-shadow: 0 0 20px rgba(59, 130, 246, 0.8);
-    }
-  }
-
-  /* Smooth transitions for interactive elements */
-  button,
-  a,
-  input,
-  select,
-  textarea {
-    @apply transition-all duration-200;
-  }
-
-  /* Focus visible improvements */
-  *:focus-visible {
-    @apply outline-2 outline-offset-2 outline-blue-600;
-  }
-
-  /* Selection styling */
-  ::selection {
-    @apply bg-blue-600/20;
-  }
-
-  /* Scrollbar styling */
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  ::-webkit-scrollbar-track {
-    @apply bg-muted/30;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/30 rounded-full;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/50;
   }
 }

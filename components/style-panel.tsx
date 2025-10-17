@@ -11,7 +11,11 @@ interface StylePanelProps {
 
 export function StylePanel({ selectedObjects, onStyleChange }: StylePanelProps) {
   if (selectedObjects.length === 0) {
-    return null // Hide panel when nothing is selected instead of showing message
+    return (
+      <div className="absolute right-4 top-20 z-10 w-64 rounded-lg border bg-card p-4 shadow-lg">
+        <p className="text-sm text-muted-foreground">Select an object to edit its style</p>
+      </div>
+    )
   }
 
   // Get the first selected object's colors (for multi-select, we show the first object's values)
@@ -20,30 +24,26 @@ export function StylePanel({ selectedObjects, onStyleChange }: StylePanelProps) 
   const strokeColor = firstObject.stroke_color || "#1e40af"
 
   return (
-    <div className="absolute right-4 top-20 z-10 w-64 rounded-lg border bg-background/95 backdrop-blur-md p-4 shadow-xl animate-in slide-in-from-right">
-      <div className="mb-4 pb-3 border-b">
-        <h3 className="font-semibold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-          Style Properties
-        </h3>
-        {selectedObjects.length > 1 && (
-          <p className="text-xs text-muted-foreground mt-1">Editing {selectedObjects.length} objects</p>
-        )}
-      </div>
-
+    <div className="absolute right-4 top-20 z-10 w-64 rounded-lg border bg-card p-4 shadow-lg">
+      <h3 className="mb-4 font-semibold">Style</h3>
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Fill Color</Label>
+          <Label>Fill Color</Label>
           <ColorPicker color={fillColor} onChange={(color) => onStyleChange({ fill_color: color })} label="Fill" />
         </div>
 
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Stroke Color</Label>
+          <Label>Stroke Color</Label>
           <ColorPicker
             color={strokeColor}
             onChange={(color) => onStyleChange({ stroke_color: color })}
             label="Stroke"
           />
         </div>
+
+        {selectedObjects.length > 1 && (
+          <p className="text-xs text-muted-foreground">Editing {selectedObjects.length} objects</p>
+        )}
       </div>
     </div>
   )

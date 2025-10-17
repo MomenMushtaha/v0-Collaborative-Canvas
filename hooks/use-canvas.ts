@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { snapToGrid } from "@/lib/grid-utils"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { CanvasObject } from "@/lib/types"
@@ -10,6 +11,9 @@ interface UseCanvasProps {
   objects: CanvasObject[]
   onObjectsChange: (objects: CanvasObject[]) => void
   onCursorMove?: (x: number, y: number) => void
+  gridEnabled?: boolean
+  snapEnabled?: boolean
+  gridSize?: number
 }
 
 type ResizeHandle =
@@ -23,7 +27,15 @@ type ResizeHandle =
   | "left"
   | null
 
-export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: UseCanvasProps) {
+export function useCanvas({
+  canvasId,
+  objects,
+  onObjectsChange,
+  onCursorMove,
+  gridEnabled = false,
+  snapEnabled = false,
+  gridSize = 20,
+}: UseCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -193,24 +205,25 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       ctx.translate(viewport.x, viewport.y)
       ctx.scale(viewport.zoom, viewport.zoom)
 
-      ctx.strokeStyle = "#e5e7eb"
-      ctx.lineWidth = 1 / viewport.zoom
-      const gridSize = 50
-      const startX = Math.floor(-viewport.x / viewport.zoom / gridSize) * gridSize
-      const startY = Math.floor(-viewport.y / viewport.zoom / gridSize) * gridSize
-      const endX = startX + canvas.width / viewport.zoom + gridSize
-      const endY = startY + canvas.height / viewport.zoom + gridSize
+      if (gridEnabled) {
+        ctx.strokeStyle = "#e5e7eb"
+        ctx.lineWidth = 1 / viewport.zoom
+        const startX = Math.floor(-viewport.x / viewport.zoom / gridSize) * gridSize
+        const startY = Math.floor(-viewport.y / viewport.zoom / gridSize) * gridSize
+        const endX = startX + canvas.width / viewport.zoom + gridSize
+        const endY = startY + canvas.height / viewport.zoom + gridSize
 
-      ctx.beginPath()
-      for (let x = startX; x < endX; x += gridSize) {
-        ctx.moveTo(x, startY)
-        ctx.lineTo(x, endY)
+        ctx.beginPath()
+        for (let x = startX; x < endX; x += gridSize) {
+          ctx.moveTo(x, startY)
+          ctx.lineTo(x, endY)
+        }
+        for (let y = startY; y < endY; y += gridSize) {
+          ctx.moveTo(startX, y)
+          ctx.lineTo(endX, y)
+        }
+        ctx.stroke()
       }
-      for (let y = startY; y < endY; y += gridSize) {
-        ctx.moveTo(startX, y)
-        ctx.lineTo(endX, y)
-      }
-      ctx.stroke()
 
       objects.forEach((obj) => {
         ctx.save()
@@ -338,7 +351,7 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, editingTextId])
+  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, editingTextId, gridEnabled, gridSize])
 
   const handleTextEdit = useCallback((objectId: string) => {
     setEditingTextId(objectId)
@@ -623,7 +636,11 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (editingTextId) return
 
-      const pos = screenToCanvas(e.clientX, e.clientY)
+      let pos = screenToCanvas(e.clientX, e.clientY)
+
+      if (snapEnabled && (isDragging || tool !== "select")) {
+        pos = snapToGrid(pos.x, pos.y, gridSize)
+      }
 
       if (tool === "line" && lineStart) {
         setLinePreview(pos)
@@ -764,6 +781,8 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
       tool,
       lineStart,
       editingTextId,
+      snapEnabled,
+      gridSize,
     ],
   )
 
@@ -807,6 +826,6 @@ export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: 
     editingTextId,
     saveTextEdit,
     cancelTextEdit,
-    measureText, // Export measureText for use in Canvas component
+    measureText,
   }
 }

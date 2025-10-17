@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { LogOut, Undo, Redo, Download } from "lucide-react"
 import { AlignmentToolbar } from "./alignment-toolbar"
+import { GridControls } from "./grid-controls"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
@@ -18,6 +19,10 @@ interface ToolbarProps {
   onDistribute?: (type: DistributeType) => void
   onExportPNG?: () => void
   onExportSVG?: () => void
+  gridEnabled?: boolean
+  snapEnabled?: boolean
+  gridSize?: number
+  onGridChange?: (enabled: boolean, snap: boolean, size: number) => void
 }
 
 export function Toolbar({
@@ -32,6 +37,10 @@ export function Toolbar({
   onDistribute,
   onExportPNG,
   onExportSVG,
+  gridEnabled = false,
+  snapEnabled = false,
+  gridSize = 20,
+  onGridChange,
 }: ToolbarProps) {
   return (
     <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b bg-card px-4">
@@ -50,6 +59,17 @@ export function Toolbar({
 
         {onAlign && onDistribute && (
           <AlignmentToolbar selectedCount={selectedCount} onAlign={onAlign} onDistribute={onDistribute} />
+        )}
+
+        {onGridChange && (
+          <div className="border-l pl-4">
+            <GridControls
+              gridEnabled={gridEnabled}
+              snapEnabled={snapEnabled}
+              gridSize={gridSize}
+              onGridChange={onGridChange}
+            />
+          </div>
         )}
 
         {(onExportPNG || onExportSVG) && (

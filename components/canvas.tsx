@@ -13,9 +13,22 @@ interface CanvasProps {
   onCursorMove?: (x: number, y: number) => void
   onSelectionChange?: (selectedIds: string[]) => void
   children?: any
+  gridEnabled?: boolean // Added grid props
+  snapEnabled?: boolean
+  gridSize?: number
 }
 
-export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSelectionChange, children }: CanvasProps) {
+export function Canvas({
+  canvasId,
+  objects,
+  onObjectsChange,
+  onCursorMove,
+  onSelectionChange,
+  children,
+  gridEnabled = false, // Added grid props with defaults
+  snapEnabled = false,
+  gridSize = 20,
+}: CanvasProps) {
   const {
     canvasRef,
     tool,
@@ -36,6 +49,9 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
     objects,
     onObjectsChange,
     onCursorMove,
+    gridEnabled, // Pass grid props to useCanvas hook
+    snapEnabled,
+    gridSize,
   })
 
   const textInputRef = useRef<HTMLTextAreaElement>(null)

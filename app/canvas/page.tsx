@@ -22,6 +22,9 @@ export default function CanvasPage() {
   const [onRedo, setOnRedo] = useState<(() => void) | undefined>()
   const [onAlign, setOnAlign] = useState<((type: AlignmentType) => void) | undefined>()
   const [onDistribute, setOnDistribute] = useState<((type: DistributeType) => void) | undefined>()
+  const [gridEnabled, setGridEnabled] = useState(false)
+  const [snapEnabled, setSnapEnabled] = useState(false)
+  const [gridSize, setGridSize] = useState(20)
   const router = useRouter()
   const supabase = createClient()
 
@@ -83,6 +86,13 @@ export default function CanvasPage() {
     })
   }
 
+  const handleGridChange = (enabled: boolean, snap: boolean, size: number) => {
+    setGridEnabled(enabled)
+    setSnapEnabled(snap)
+    setGridSize(size)
+    console.log("[v0] Grid settings changed:", { enabled, snap, size })
+  }
+
   if (isLoading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -106,6 +116,10 @@ export default function CanvasPage() {
           onDistribute={onDistribute}
           onExportPNG={handleExportPNG}
           onExportSVG={handleExportSVG}
+          gridEnabled={gridEnabled}
+          snapEnabled={snapEnabled}
+          gridSize={gridSize}
+          onGridChange={handleGridChange}
         />
       </div>
       <div className="h-full w-full">
@@ -123,6 +137,10 @@ export default function CanvasPage() {
           canRedo={setCanRedo}
           onAlign={setOnAlign}
           onDistribute={setOnDistribute}
+          gridEnabled={gridEnabled}
+          snapEnabled={snapEnabled}
+          gridSize={gridSize}
+          onGridChange={handleGridChange}
         />
       </div>
       <AiChat

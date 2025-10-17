@@ -45,6 +45,10 @@ interface CollaborativeCanvasProps {
   canRedo?: (canRedo: boolean) => void
   onAlign?: Dispatch<SetStateAction<((type: AlignmentType) => void) | undefined>>
   onDistribute?: Dispatch<SetStateAction<((type: DistributeType) => void) | undefined>>
+  gridEnabled?: boolean
+  snapEnabled?: boolean
+  gridSize?: number
+  onGridChange?: (enabled: boolean, snap: boolean, size: number) => void
 }
 
 export function CollaborativeCanvas({
@@ -62,6 +66,10 @@ export function CollaborativeCanvas({
   canRedo,
   onAlign,
   onDistribute,
+  gridEnabled = false,
+  snapEnabled = false,
+  gridSize = 20,
+  onGridChange,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -467,6 +475,9 @@ export function CollaborativeCanvas({
         onAlign={handleAlign}
         onDistribute={handleDistribute}
         selectedCount={selectedObjectIds.length}
+        gridEnabled={gridEnabled} // Pass grid props to Canvas
+        snapEnabled={snapEnabled}
+        gridSize={gridSize}
       >
         <MultiplayerCursors users={otherUsers} />
       </Canvas>

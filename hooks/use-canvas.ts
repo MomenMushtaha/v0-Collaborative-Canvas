@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-import { snapToGrid } from "@/lib/grid-utils"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { CanvasObject } from "@/lib/types"
@@ -11,9 +10,6 @@ interface UseCanvasProps {
   objects: CanvasObject[]
   onObjectsChange: (objects: CanvasObject[]) => void
   onCursorMove?: (x: number, y: number) => void
-  gridEnabled?: boolean
-  snapEnabled?: boolean
-  gridSize?: number
 }
 
 type ResizeHandle =
@@ -27,15 +23,7 @@ type ResizeHandle =
   | "left"
   | null
 
-export function useCanvas({
-  canvasId,
-  objects,
-  onObjectsChange,
-  onCursorMove,
-  gridEnabled = false,
-  snapEnabled = false,
-  gridSize = 20,
-}: UseCanvasProps) {
+export function useCanvas({ canvasId, objects, onObjectsChange, onCursorMove }: UseCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -57,9 +45,6 @@ export function useCanvas({
   const lastCursorUpdate = useRef<number>(0)
   const CURSOR_THROTTLE_MS = 16
   const animationFrameRef = useRef<number>()
-
-  const fpsRef = useRef<number[]>([])
-  const lastFrameTimeRef = useRef<number>(performance.now())
 
   const deleteSelectedObjects = useCallback(() => {
     if (selectedIds.length === 0) return
@@ -142,29 +127,6 @@ export function useCanvas({
     [],
   )
 
-  const measureText = useCallback((text: string, fontSize: number, fontFamily: string) => {
-    const canvas = canvasRef.current
-    if (!canvas) return { width: 200, height: 50 }
-
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return { width: 200, height: 50 }
-
-    ctx.font = `${fontSize}px ${fontFamily}`
-    const lines = text.split("\n")
-    const lineHeight = fontSize * 1.2
-
-    let maxWidth = 0
-    lines.forEach((line) => {
-      const metrics = ctx.measureText(line)
-      maxWidth = Math.max(maxWidth, metrics.width)
-    })
-
-    const width = Math.max(150, maxWidth + 40) // Increased minimum width and padding
-    const height = Math.max(fontSize * 1.5 + 20, lines.length * lineHeight + 20) // Better minimum height
-
-    return { width, height }
-  }, [])
-
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -176,27 +138,6 @@ export function useCanvas({
     if (!ctx) return
 
     const render = () => {
-      const now = performance.now()
-      const frameDelta = now - lastFrameTimeRef.current
-      lastFrameTimeRef.current = now
-
-      if (frameDelta > 0) {
-        const fps = 1000 / frameDelta
-        fpsRef.current.push(fps)
-
-        // Keep only last 60 frames for average calculation
-        if (fpsRef.current.length > 60) {
-          fpsRef.current.shift()
-        }
-
-        // Log FPS every 60 frames (approximately once per second at 60fps)
-        if (fpsRef.current.length === 60) {
-          const avgFps = fpsRef.current.reduce((a, b) => a + b, 0) / fpsRef.current.length
-          console.log(`[v0] [PERF] Average FPS: ${avgFps.toFixed(1)} (${objects.length} objects)`)
-          fpsRef.current = []
-        }
-      }
-
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.fillStyle = "#ffffff"
       ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -205,25 +146,24 @@ export function useCanvas({
       ctx.translate(viewport.x, viewport.y)
       ctx.scale(viewport.zoom, viewport.zoom)
 
-      if (gridEnabled) {
-        ctx.strokeStyle = "#e5e7eb"
-        ctx.lineWidth = 1 / viewport.zoom
-        const startX = Math.floor(-viewport.x / viewport.zoom / gridSize) * gridSize
-        const startY = Math.floor(-viewport.y / viewport.zoom / gridSize) * gridSize
-        const endX = startX + canvas.width / viewport.zoom + gridSize
-        const endY = startY + canvas.height / viewport.zoom + gridSize
+      ctx.strokeStyle = "#e5e7eb"
+      ctx.lineWidth = 1 / viewport.zoom
+      const gridSize = 50
+      const startX = Math.floor(-viewport.x / viewport.zoom / gridSize) * gridSize
+      const startY = Math.floor(-viewport.y / viewport.zoom / gridSize) * gridSize
+      const endX = startX + canvas.width / viewport.zoom + gridSize
+      const endY = startY + canvas.height / viewport.zoom + gridSize
 
-        ctx.beginPath()
-        for (let x = startX; x < endX; x += gridSize) {
-          ctx.moveTo(x, startY)
-          ctx.lineTo(x, endY)
-        }
-        for (let y = startY; y < endY; y += gridSize) {
-          ctx.moveTo(startX, y)
-          ctx.lineTo(endX, y)
-        }
-        ctx.stroke()
+      ctx.beginPath()
+      for (let x = startX; x < endX; x += gridSize) {
+        ctx.moveTo(x, startY)
+        ctx.lineTo(x, endY)
       }
+      for (let y = startY; y < endY; y += gridSize) {
+        ctx.moveTo(startX, y)
+        ctx.lineTo(endX, y)
+      }
+      ctx.stroke()
 
       objects.forEach((obj) => {
         ctx.save()
@@ -249,24 +189,15 @@ export function useCanvas({
             ctx.setLineDash([])
           }
         } else if (obj.type === "rectangle") {
-          ctx.fillStyle = obj.fill_color
-          ctx.strokeStyle = obj.stroke_color
-          ctx.lineWidth = obj.stroke_width
           ctx.fillRect(obj.x, obj.y, obj.width, obj.height)
           ctx.strokeRect(obj.x, obj.y, obj.width, obj.height)
         } else if (obj.type === "circle") {
-          ctx.fillStyle = obj.fill_color
-          ctx.strokeStyle = obj.stroke_color
-          ctx.lineWidth = obj.stroke_width
           const radius = Math.min(obj.width, obj.height) / 2
           ctx.beginPath()
           ctx.arc(obj.x + obj.width / 2, obj.y + obj.height / 2, radius, 0, Math.PI * 2)
           ctx.fill()
           ctx.stroke()
         } else if (obj.type === "triangle") {
-          ctx.fillStyle = obj.fill_color
-          ctx.strokeStyle = obj.stroke_color
-          ctx.lineWidth = obj.stroke_width
           ctx.beginPath()
           ctx.moveTo(obj.x, obj.y)
           ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
@@ -351,7 +282,7 @@ export function useCanvas({
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, editingTextId, gridEnabled, gridSize])
+  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, editingTextId])
 
   const handleTextEdit = useCallback((objectId: string) => {
     setEditingTextId(objectId)
@@ -365,40 +296,25 @@ export function useCanvas({
         onObjectsChange(updatedObjects)
         setSelectedIds([])
       } else {
-        const textObj = objects.find((o) => o.id === objectId)
-        if (textObj && textObj.type === "text") {
-          const { width, height } = measureText(newText, textObj.font_size || 16, textObj.font_family || "Arial")
-
-          const updatedObjects = objects.map((o) =>
-            o.id === objectId
-              ? {
-                  ...o,
-                  text_content: newText,
-                  width,
-                  height,
-                }
-              : o,
-          )
-          onObjectsChange(updatedObjects)
-        }
+        // Save the text content
+        const updatedObjects = objects.map((o) =>
+          o.id === objectId
+            ? {
+                ...o,
+                text_content: newText,
+              }
+            : o,
+        )
+        onObjectsChange(updatedObjects)
       }
       setEditingTextId(null)
     },
-    [objects, onObjectsChange, measureText],
+    [objects, onObjectsChange],
   )
 
   const cancelTextEdit = useCallback(() => {
-    if (editingTextId) {
-      const textObj = objects.find((o) => o.id === editingTextId)
-      if (textObj && textObj.type === "text" && !textObj.text_content?.trim()) {
-        // Delete the empty text object
-        const updatedObjects = objects.filter((o) => o.id !== editingTextId)
-        onObjectsChange(updatedObjects)
-        setSelectedIds([])
-      }
-    }
     setEditingTextId(null)
-  }, [editingTextId, objects, onObjectsChange])
+  }, [])
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -636,11 +552,7 @@ export function useCanvas({
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (editingTextId) return
 
-      let pos = screenToCanvas(e.clientX, e.clientY)
-
-      if (snapEnabled && (isDragging || tool !== "select")) {
-        pos = snapToGrid(pos.x, pos.y, gridSize)
-      }
+      const pos = screenToCanvas(e.clientX, e.clientY)
 
       if (tool === "line" && lineStart) {
         setLinePreview(pos)
@@ -781,8 +693,6 @@ export function useCanvas({
       tool,
       lineStart,
       editingTextId,
-      snapEnabled,
-      gridSize,
     ],
   )
 
@@ -826,6 +736,5 @@ export function useCanvas({
     editingTextId,
     saveTextEdit,
     cancelTextEdit,
-    measureText,
   }
 }

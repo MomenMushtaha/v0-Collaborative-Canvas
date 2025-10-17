@@ -3,6 +3,17 @@ import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import { generateText, tool } from "ai"
 import { z } from "zod"
 
+const MAX_CONVERSATION_HISTORY = 12
+
+const ConversationMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().max(2000),
+})
+
+const ConversationHistorySchema = z.array(ConversationMessageSchema).max(50)
+
+type ConversationMessage = z.infer<typeof ConversationMessageSchema>
+
 export const maxDuration = 30
 
 export async function POST(request: Request) {
@@ -19,19 +30,36 @@ export async function POST(request: Request) {
       userId,
       userName,
       viewport,
+      conversationHistory,
     } = body
 
-    console.log("[v0] Message:", message)
+    const messageText = typeof message === "string" ? message.trim() : ""
+
+    console.log("[v0] Message:", messageText)
     const safeCurrentObjects = Array.isArray(currentObjects) ? currentObjects : []
     const safeSelectedIds = Array.isArray(selectedObjectIds) ? selectedObjectIds : []
     const safeSelectedObjects = Array.isArray(selectedObjectsPayload) ? selectedObjectsPayload : []
 
+    const parsedHistory = ConversationHistorySchema.safeParse(conversationHistory)
+    let sanitizedHistory: ConversationMessage[] = []
+
+    if (parsedHistory.success) {
+      sanitizedHistory = parsedHistory.data
+        .map((entry) => ({ role: entry.role, content: entry.content.trim() }))
+        .filter((entry) => entry.content.length > 0)
+    } else if (conversationHistory !== undefined) {
+      console.warn("[v0] Conversation history rejected:", parsedHistory.error?.message)
+    }
+
+    const recentHistory = sanitizedHistory.slice(-MAX_CONVERSATION_HISTORY)
+
     console.log("[v0] Current objects count:", safeCurrentObjects.length)
     console.log("[v0] Selected objects count:", safeSelectedIds.length)
+    console.log("[v0] Conversation history length:", recentHistory.length)
     console.log("[v0] Canvas ID:", canvasId)
     console.log("[v0] User:", userName)
 
-    if (!message) {
+    if (!messageText) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 })
     }
 
@@ -546,9 +574,16 @@ export async function POST(request: Request) {
       }),
     }
 
+    const conversationMemorySection =
+      recentHistory.length > 0
+        ? `RECENT CONVERSATION HISTORY (oldest to newest):\n${recentHistory
+            .map((entry) => `${entry.role === "user" ? "User" : "Assistant"}: ${entry.content}`)
+            .join("\n")}\nUse this history to stay consistent with the user's goals and preferences.`
+        : ""
+
     const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
 
-CANVAS DIMENSIONS: 2000x2000 pixels
+${conversationMemorySection ? `${conversationMemorySection}\n\n` : ""}CANVAS DIMENSIONS: 2000x2000 pixels
 CANVAS CENTER: (1000, 1000)
 VIEWPORT: Users can pan and zoom (100% to 300%)
 
@@ -660,13 +695,55 @@ Examples:
 - "Delete all red shapes" → Find all red shapes and delete each one
 - "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')`
 
-    const result = await generateText({
-      model: "openai/gpt-4o-mini",
-      system: systemPrompt,
-      prompt: message,
-      tools,
-      maxSteps: 5,
-    })
+    const updateQueueStatus = async (
+      status: "completed" | "failed",
+      extra: Record<string, any> = {},
+    ) => {
+      if (!queueItemId || !canvasId) {
+        return
+      }
+
+      try {
+        const supabase = createServiceRoleClient()
+        await supabase
+          .from("ai_operations_queue")
+          .update({
+            status,
+            ...extra,
+          })
+          .eq("id", queueItemId)
+      } catch (err) {
+        console.warn(`[v0] Failed to update queue status to ${status}:`, err)
+      }
+    }
+
+    let result: Awaited<ReturnType<typeof generateText>>
+
+    try {
+      result = await generateText({
+        model: "openai/gpt-4o-mini",
+        system: systemPrompt,
+        prompt: messageText,
+        tools,
+        maxSteps: 5,
+      })
+    } catch (aiError) {
+      console.error("[v0] AI SDK error:", aiError)
+      operations.splice(0, operations.length)
+      const fallbackMessage =
+        "I ran into an issue processing that request, but nothing on the canvas was changed. Please try again in a moment."
+
+      await updateQueueStatus("failed", {
+        completed_at: new Date().toISOString(),
+      })
+
+      return NextResponse.json({
+        message: fallbackMessage,
+        operations: [],
+        queueItemId,
+        validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
+      })
+    }
 
     console.log("[v0] AI SDK response received")
     console.log("[v0] Operations collected:", operations.length)
@@ -677,21 +754,10 @@ Examples:
       aiMessage += `\n\nNote: Some operations couldn't be completed:\n${validationErrors.map((e) => `• ${e}`).join("\n")}`
     }
 
-    if (queueItemId && canvasId) {
-      try {
-        const supabase = createServiceRoleClient()
-        await supabase
-          .from("ai_operations_queue")
-          .update({
-            status: "completed",
-            operations: operations,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", queueItemId)
-      } catch (err) {
-        console.warn("[v0] Failed to update queue status:", err)
-      }
-    }
+    await updateQueueStatus("completed", {
+      operations,
+      completed_at: new Date().toISOString(),
+    })
 
     console.log("[v0] Returning", operations.length, "operations")
     return NextResponse.json({

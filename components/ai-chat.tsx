@@ -38,6 +38,7 @@ export function AiChat({
   canvasId,
   viewport,
 }: AiChatProps) {
+  const RECENT_HISTORY_LIMIT = 12
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -58,6 +59,10 @@ export function AiChat({
     if (!input.trim() || isLoading) return
 
     const userMessage = input.trim()
+    const historyForRequest = messages
+      .slice(-RECENT_HISTORY_LIMIT)
+      .map((message) => ({ role: message.role, content: message.content }))
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null
     setInput("")
     setMessages((prev) => [...prev, { role: "user", content: userMessage }])
     setIsLoading(true)
@@ -87,9 +92,15 @@ export function AiChat({
 
       const selectedObjects = sanitizedObjects.filter((obj) => selectedObjectIds.includes(obj.id))
 
+      const controller = new AbortController()
+      timeoutId = window.setTimeout(() => {
+        controller.abort()
+      }, 30000)
+
       const response = await fetch("/api/ai-canvas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           message: userMessage,
           canvasId,
@@ -99,6 +110,7 @@ export function AiChat({
           currentObjects: sanitizedObjects,
           selectedObjectIds,
           selectedObjects,
+          conversationHistory: historyForRequest,
         }),
       })
 
@@ -134,7 +146,15 @@ export function AiChat({
       }
     } catch (error) {
       console.error("[v0] AI chat error:", error)
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+      const isAbortError =
+        error instanceof DOMException
+          ? error.name === "AbortError"
+          : error instanceof Error && error.name === "AbortError"
+      const errorMessage = isAbortError
+        ? "The request timed out before the AI could respond."
+        : error instanceof Error
+          ? error.message
+          : "Unknown error occurred"
       setMessages((prev) => [
         ...prev,
         {
@@ -143,6 +163,9 @@ export function AiChat({
         },
       ])
     } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
       setIsLoading(false)
       setTimeout(() => setOperationProgress(null), 1000)
     }

@@ -255,7 +255,7 @@ export function Canvas({
       </div>
 
       {/* Zoom display */}
-      <div className="absolute bottom-4 right-[180px] z-10 rounded-lg border bg-card px-3 py-2 text-sm shadow-lg">
+      <div className="absolute bottom-4 right-[186px] z-10 rounded-lg border bg-card px-3 py-2 text-sm shadow-lg">
         <span className="text-muted-foreground">Zoom: </span>
         <span className="font-medium">{Math.round(viewport.zoom * 100)}%</span>
       </div>

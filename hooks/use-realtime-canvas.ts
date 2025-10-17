@@ -30,6 +30,12 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
   const operationQueueRef = useRef<QueuedOperation[]>([])
   const reconnectAttemptRef = useRef(0)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
+  const onConnectionChangeRef = useRef(onConnectionChange)
+  const lastStatusRef = useRef<string>("")
+
+  useEffect(() => {
+    onConnectionChangeRef.current = onConnectionChange
+  }, [onConnectionChange])
 
   // Load initial objects from database
   useEffect(() => {
@@ -105,8 +111,8 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
     }
 
     console.log("[v0] [RECONNECT] All queued operations processed")
-    onConnectionChange?.(true, 0)
-  }, [supabase, userId, onConnectionChange])
+    onConnectionChangeRef.current?.(true, 0)
+  }, [supabase, userId])
 
   const attemptReconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -161,7 +167,10 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         setObjects((prev) => prev.filter((obj) => obj.id !== payload.id))
       })
       .subscribe((status) => {
-        console.log("[v0] [RECONNECT] Channel status:", status)
+        if (status !== lastStatusRef.current) {
+          console.log("[v0] [RECONNECT] Channel status:", status)
+          lastStatusRef.current = status
+        }
 
         if (status === "SUBSCRIBED") {
           console.log("[v0] [RECONNECT] Connected successfully")
@@ -171,13 +180,13 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.log("[v0] [RECONNECT] Connection lost, will retry")
           setIsConnected(false)
-          onConnectionChange?.(false, operationQueueRef.current.length)
+          onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
           attemptReconnect()
         }
       })
 
     channelRef.current = channel
-  }, [canvasId, supabase, processQueuedOperations, attemptReconnect, onConnectionChange])
+  }, [canvasId, supabase, processQueuedOperations, attemptReconnect])
 
   useEffect(() => {
     setupChannel()
@@ -204,7 +213,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
       const existingIds = new Set(objects.map((o) => o.id))
       const updatedIds = new Set(updatedObjects.map((o) => o.id))
 
-      // Handle new objects
       const newObjects = updatedObjects.filter((o) => !existingIds.has(o.id))
       if (newObjects.length > 0) {
         try {
@@ -223,11 +231,10 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
               timestamp: Date.now(),
             })
           })
-          onConnectionChange?.(false, operationQueueRef.current.length)
+          onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
         }
       }
 
-      // Handle updated objects
       const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
       for (const obj of toUpdate) {
         const existing = objects.find((o) => o.id === obj.id)
@@ -257,12 +264,11 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
               object: obj,
               timestamp: Date.now(),
             })
-            onConnectionChange?.(false, operationQueueRef.current.length)
+            onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
           }
         }
       }
 
-      // Handle deleted objects
       const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
       if (deletedIds.length > 0) {
         try {
@@ -276,7 +282,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
               timestamp: Date.now(),
             })
           })
-          onConnectionChange?.(false, operationQueueRef.current.length)
+          onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
         }
       }
 
@@ -285,17 +291,15 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         `[v0] [PERF] Database write completed in ${dbWriteTime.toFixed(2)}ms (${newObjects.length} new, ${toUpdate.length} updated, ${deletedIds.length} deleted)`,
       )
     },
-    [objects, supabase, userId, isConnected, onConnectionChange],
+    [objects, supabase, userId, isConnected],
   )
 
   const syncObjects = useCallback(
     async (updatedObjects: CanvasObject[]) => {
       const broadcastStart = performance.now()
 
-      // Update local state immediately
       setObjects(updatedObjects)
 
-      // Store pending objects for debounced database sync
       pendingObjectsRef.current = updatedObjects
 
       const existingIds = new Set(objects.map((o) => o.id))
@@ -335,13 +339,12 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
           })
         })
 
-        onConnectionChange?.(false, operationQueueRef.current.length)
+        onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
         return
       }
 
       const timestamp = Date.now()
 
-      // Broadcast new objects
       const newObjects = updatedObjects.filter((o) => !existingIds.has(o.id))
       for (const obj of newObjects) {
         channel.send({
@@ -351,7 +354,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         })
       }
 
-      // Broadcast updated objects
       const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
       for (const obj of toUpdate) {
         const existing = objects.find((o) => o.id === obj.id)
@@ -364,7 +366,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         }
       }
 
-      // Broadcast deleted objects
       const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
       for (const id of deletedIds) {
         channel.send({
@@ -379,7 +380,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         `[v0] [PERF] Broadcast completed in ${broadcastTime.toFixed(2)}ms (${newObjects.length + toUpdate.length + deletedIds.length} operations)`,
       )
 
-      // Debounce database writes (300ms after last change)
       if (syncTimeoutRef.current) {
         clearTimeout(syncTimeoutRef.current)
       }
@@ -388,7 +388,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         debouncedDatabaseSync(pendingObjectsRef.current)
       }, 300)
     },
-    [objects, debouncedDatabaseSync, isConnected, onConnectionChange],
+    [objects, debouncedDatabaseSync, isConnected],
   )
 
   return {

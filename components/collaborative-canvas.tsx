@@ -16,6 +16,8 @@ import { LayersPanel } from "@/components/layers-panel"
 import { alignObjects, distributeObjects } from "@/lib/alignment-utils"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { useToast } from "@/hooks/use-toast"
+import { CommentMarker } from "@/components/comment-marker"
+import type { Comment } from "@/lib/comments-utils"
 
 // Generate a random color for each user
 function generateUserColor() {
@@ -51,6 +53,9 @@ interface CollaborativeCanvasProps {
   snapEnabled?: boolean
   gridSize?: number
   onGridChange?: (enabled: boolean, snap: boolean, size: number) => void
+  commentMode?: boolean
+  onCommentCreate?: (x: number, y: number, content: string) => void
+  comments?: Comment[]
 }
 
 export function CollaborativeCanvas({
@@ -73,6 +78,9 @@ export function CollaborativeCanvas({
   snapEnabled = false,
   gridSize = 20,
   onGridChange,
+  commentMode = false,
+  onCommentCreate,
+  comments = [],
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -103,6 +111,7 @@ export function CollaborativeCanvas({
 
   const { addCommand, undo, redo, canUndo: historyCanUndo, canRedo: historyCanRedo } = useHistory()
   const [previousObjects, setPreviousObjects] = useState<CanvasObject[]>([])
+  const [newTextObjectIds, setNewTextObjectIds] = useState<Set<string>>(new Set()) // Track new text objects
 
   useEffect(() => {
     if (isUndoRedoOperation) {
@@ -117,21 +126,36 @@ export function CollaborativeCanvas({
         // Objects added
         const newObjects = objects.filter((obj) => !previousObjects.find((prev) => prev.id === obj.id))
         if (newObjects.length > 0) {
-          addCommand({
-            type: "create",
-            objectIds: newObjects.map((obj) => obj.id),
-            beforeState: previousObjects,
-            afterState: objects,
-            timestamp: Date.now(),
-          })
+          const newTextIds = newObjects
+            .filter((obj) => obj.type === "text" && !obj.text_content?.trim())
+            .map((obj) => obj.id)
+          if (newTextIds.length > 0) {
+            setNewTextObjectIds((prev) => new Set([...prev, ...newTextIds]))
+          } else {
+            // Non-text objects or text with content - add to history immediately
+            addCommand({
+              type: "create",
+              objectIds: newObjects.map((obj) => obj.id),
+              beforeState: previousObjects,
+              afterState: objects,
+              timestamp: Date.now(),
+            })
+          }
         }
       } else {
         // Objects deleted
         const deletedObjects = previousObjects.filter((prev) => !objects.find((obj) => obj.id === prev.id))
         if (deletedObjects.length > 0) {
+          const deletedIds = deletedObjects.map((obj) => obj.id)
+          setNewTextObjectIds((prev) => {
+            const newSet = new Set(prev)
+            deletedIds.forEach((id) => newSet.delete(id))
+            return newSet
+          })
+
           addCommand({
             type: "delete",
-            objectIds: deletedObjects.map((obj) => obj.id),
+            objectIds: deletedIds,
             beforeState: previousObjects,
             afterState: objects,
             timestamp: Date.now(),
@@ -141,31 +165,60 @@ export function CollaborativeCanvas({
     } else if (objects.length > 0 && previousObjects.length > 0) {
       // Check for updates
       const updatedObjects = objects.filter((obj, idx) => {
-        const prev = previousObjects[idx]
+        const prev = previousObjects.find((p) => p.id === obj.id)
+        if (!prev) return false
+
         return (
-          prev &&
-          (obj.x !== prev.x ||
-            obj.y !== prev.y ||
-            obj.width !== prev.width ||
-            obj.height !== prev.height ||
-            obj.rotation !== prev.rotation ||
-            obj.text_content !== prev.text_content)
+          obj.x !== prev.x ||
+          obj.y !== prev.y ||
+          obj.width !== prev.width ||
+          obj.height !== prev.height ||
+          obj.rotation !== prev.rotation ||
+          obj.text_content !== prev.text_content
         )
       })
 
       if (updatedObjects.length > 0) {
-        addCommand({
-          type: "update",
-          objectIds: updatedObjects.map((obj) => obj.id),
-          beforeState: previousObjects,
-          afterState: objects,
-          timestamp: Date.now(),
-        })
+        const firstEditTextObjects = updatedObjects.filter(
+          (obj) => obj.type === "text" && newTextObjectIds.has(obj.id) && obj.text_content?.trim(),
+        )
+
+        if (firstEditTextObjects.length > 0) {
+          // This is the first edit - combine creation + edit into one history entry
+          const textIds = firstEditTextObjects.map((obj) => obj.id)
+
+          // Find the state before the text object was created
+          const beforeCreation = previousObjects.filter((obj) => !textIds.includes(obj.id))
+
+          addCommand({
+            type: "create", // Treat as creation, not update
+            objectIds: textIds,
+            beforeState: beforeCreation,
+            afterState: objects,
+            timestamp: Date.now(),
+          })
+
+          // Remove from tracking
+          setNewTextObjectIds((prev) => {
+            const newSet = new Set(prev)
+            textIds.forEach((id) => newSet.delete(id))
+            return newSet
+          })
+        } else {
+          // Regular update
+          addCommand({
+            type: "update",
+            objectIds: updatedObjects.map((obj) => obj.id),
+            beforeState: previousObjects,
+            afterState: objects,
+            timestamp: Date.now(),
+          })
+        }
       }
     }
 
     setPreviousObjects(objects)
-  }, [objects, isUndoRedoOperation])
+  }, [objects, isUndoRedoOperation, newTextObjectIds])
 
   const handleUndo = useCallback(() => {
     const newObjects = undo(objects)
@@ -468,6 +521,15 @@ export function CollaborativeCanvas({
     }
   }, [handleAlign, handleDistribute, onAlign, onDistribute])
 
+  const handleCommentCreate = useCallback(
+    (x: number, y: number, content: string) => {
+      if (onCommentCreate) {
+        onCommentCreate(x, y, content)
+      }
+    },
+    [onCommentCreate],
+  )
+
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -503,8 +565,13 @@ export function CollaborativeCanvas({
         gridEnabled={gridEnabled}
         snapEnabled={snapEnabled}
         gridSize={gridSize}
+        commentMode={commentMode}
+        onCommentCreate={handleCommentCreate}
       >
         <MultiplayerCursors users={otherUsers} />
+        {comments.map((comment) => (
+          <CommentMarker key={comment.id} comment={comment} />
+        ))}
       </Canvas>
     </div>
   )

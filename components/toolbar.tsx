@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LogOut, Undo, Redo, Download } from "lucide-react"
+import { LogOut, Undo, Redo, Download, History, MessageSquare } from "lucide-react"
 import { AlignmentToolbar } from "./alignment-toolbar"
 import { GridControls } from "./grid-controls"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
@@ -23,6 +23,9 @@ interface ToolbarProps {
   snapEnabled?: boolean
   gridSize?: number
   onGridChange?: (enabled: boolean, snap: boolean, size: number) => void
+  onShowHistory?: () => void
+  commentMode?: boolean
+  onToggleCommentMode?: () => void
 }
 
 export function Toolbar({
@@ -41,6 +44,9 @@ export function Toolbar({
   snapEnabled = false,
   gridSize = 20,
   onGridChange,
+  onShowHistory,
+  commentMode = false,
+  onToggleCommentMode,
 }: ToolbarProps) {
   return (
     <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b border-border/50 bg-background/95 backdrop-blur-md shadow-sm transition-all duration-200 px-4">
@@ -55,6 +61,21 @@ export function Toolbar({
           <Button variant="ghost" size="icon" onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Y)">
             <Redo className="h-4 w-4" />
           </Button>
+          {onShowHistory && (
+            <Button variant="ghost" size="icon" onClick={onShowHistory} title="Version History">
+              <History className="h-4 w-4" />
+            </Button>
+          )}
+          {onToggleCommentMode && (
+            <Button
+              variant={commentMode ? "default" : "ghost"}
+              size="icon"
+              onClick={onToggleCommentMode}
+              title="Comment Mode (C)"
+            >
+              <MessageSquare className="h-4 w-4" />
+            </Button>
+          )}
         </div>
 
         {onAlign && onDistribute && (

@@ -6,9 +6,14 @@ import { createClient } from "@/lib/supabase/client"
 import { CollaborativeCanvas } from "@/components/collaborative-canvas"
 import { Toolbar } from "@/components/toolbar"
 import { AiChat } from "@/components/ai-chat"
+import { HistoryPanel } from "@/components/history-panel"
+import { CommentsPanel } from "@/components/comments-panel"
 import type { CanvasObject } from "@/lib/types"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { exportCanvas } from "@/lib/export-utils"
+import { saveHistorySnapshot } from "@/lib/history-utils"
+import { loadComments, createComment, subscribeToComments, type Comment } from "@/lib/comments-utils"
+import { useToast } from "@/hooks/use-toast"
 
 export default function CanvasPage() {
   const [user, setUser] = useState<{ id: string; name: string } | null>(null)
@@ -26,8 +31,13 @@ export default function CanvasPage() {
   const [snapEnabled, setSnapEnabled] = useState(false)
   const [gridSize, setGridSize] = useState(20)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
+  const [showHistory, setShowHistory] = useState(false)
+  const [lastSnapshotTime, setLastSnapshotTime] = useState(Date.now())
+  const [commentMode, setCommentMode] = useState(false)
+  const [comments, setComments] = useState<Comment[]>([])
   const router = useRouter()
   const supabase = createClient()
+  const { toast } = useToast()
 
   useEffect(() => {
     // Check authentication
@@ -43,6 +53,38 @@ export default function CanvasPage() {
       }
     })
   }, [router, supabase])
+
+  useEffect(() => {
+    if (!user) return
+
+    const loadInitialComments = async () => {
+      const loadedComments = await loadComments("default")
+      setComments(loadedComments)
+    }
+
+    loadInitialComments()
+
+    const unsubscribe = subscribeToComments("default", (newComment) => {
+      setComments((prev) => [newComment, ...prev])
+    })
+
+    return unsubscribe
+  }, [user])
+
+  useEffect(() => {
+    if (!user || currentObjects.length === 0) return
+
+    const now = Date.now()
+    const timeSinceLastSnapshot = now - lastSnapshotTime
+
+    // Save snapshot if 2 minutes have passed and there are objects
+    if (timeSinceLastSnapshot > 120000) {
+      saveHistorySnapshot("default", currentObjects, user.id, user.name, "Auto-save").catch((error) => {
+        console.error("[v0] Failed to auto-save history:", error)
+      })
+      setLastSnapshotTime(now)
+    }
+  }, [currentObjects, user, lastSnapshotTime])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -100,6 +142,40 @@ export default function CanvasPage() {
     console.log("[v0] Grid settings changed:", { enabled, snap, size })
   }
 
+  const handleRestoreHistory = (objects: CanvasObject[]) => {
+    setCurrentObjects(objects)
+    console.log("[v0] Restored history snapshot with", objects.length, "objects")
+  }
+
+  const handleCommentCreate = async (x: number, y: number, content: string) => {
+    if (!user) return
+
+    const comment = await createComment("default", x, y, content, user.id, user.name)
+    if (comment) {
+      setComments((prev) => [comment, ...prev])
+      toast({
+        title: "Comment added",
+        description: "Your comment has been added to the canvas",
+      })
+    }
+  }
+
+  const handleCommentClick = (x: number, y: number) => {
+    const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
+    const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
+
+    setViewport({
+      x: canvasWidth / 2 - x * viewport.zoom,
+      y: canvasHeight / 2 - y * viewport.zoom,
+      zoom: viewport.zoom,
+    })
+  }
+
+  const handleCommentsChange = async () => {
+    const loadedComments = await loadComments("default")
+    setComments(loadedComments)
+  }
+
   if (isLoading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -127,6 +203,9 @@ export default function CanvasPage() {
           snapEnabled={snapEnabled}
           gridSize={gridSize}
           onGridChange={handleGridChange}
+          onShowHistory={() => setShowHistory(true)}
+          commentMode={commentMode}
+          onToggleCommentMode={() => setCommentMode(!commentMode)}
         />
       </div>
       <div className="h-full w-full">
@@ -150,6 +229,9 @@ export default function CanvasPage() {
           snapEnabled={snapEnabled}
           gridSize={gridSize}
           onGridChange={handleGridChange}
+          commentMode={commentMode}
+          onCommentCreate={handleCommentCreate}
+          comments={comments}
         />
       </div>
       <AiChat
@@ -159,6 +241,16 @@ export default function CanvasPage() {
         userId={user.id}
         userName={user.name}
         canvasId="default"
+      />
+      {showHistory && (
+        <HistoryPanel canvasId="default" onRestore={handleRestoreHistory} onClose={() => setShowHistory(false)} />
+      )}
+      <CommentsPanel
+        canvasId="default"
+        userId={user.id}
+        onCommentClick={handleCommentClick}
+        comments={comments}
+        onCommentsChange={handleCommentsChange}
       />
     </div>
   )

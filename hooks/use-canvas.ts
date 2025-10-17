@@ -52,6 +52,7 @@ export function useCanvas({
   const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null)
   const [linePreview, setLinePreview] = useState<{ x: number; y: number } | null>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  const [isNewTextObject, setIsNewTextObject] = useState(false)
   const lastClickTime = useRef<number>(0)
   const lastClickedId = useRef<string | null>(null)
   const lastCursorUpdate = useRef<number>(0)
@@ -379,6 +380,7 @@ export function useCanvas({
                   text_content: newText,
                   width,
                   height,
+                  _hasBeenEdited: true,
                 }
               : o,
           )
@@ -386,6 +388,7 @@ export function useCanvas({
         }
       }
       setEditingTextId(null)
+      setIsNewTextObject(false)
     },
     [objects, onObjectsChange, measureText],
   )
@@ -401,6 +404,7 @@ export function useCanvas({
       }
     }
     setEditingTextId(null)
+    setIsNewTextObject(false)
   }, [editingTextId, objects, onObjectsChange])
 
   const handleMouseDown = useCallback(
@@ -521,6 +525,7 @@ export function useCanvas({
         onObjectsChange([...objects, newObj])
         setSelectedIds([newObj.id])
         setEditingTextId(newObj.id)
+        setIsNewTextObject(true)
         setTool("select")
         return
       }
@@ -830,5 +835,6 @@ export function useCanvas({
     saveTextEdit,
     cancelTextEdit,
     measureText,
+    isNewTextObject,
   }
 }

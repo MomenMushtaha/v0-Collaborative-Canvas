@@ -1,10 +1,12 @@
 "use client"
 
+import type React from "react"
+
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useCanvas } from "@/hooks/use-canvas"
 import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import { Square, MousePointer2, Circle, Triangle, Trash2, Minus, Type } from "lucide-react"
+import { Square, MousePointer2, Circle, Triangle, Trash2, Minus, Type, Send, X } from "lucide-react"
 
 interface CanvasProps {
   canvasId: string
@@ -13,11 +15,13 @@ interface CanvasProps {
   onCursorMove?: (x: number, y: number) => void
   onSelectionChange?: (selectedIds: string[]) => void
   children?: any
-  viewport?: { x: number; y: number; zoom: number } // Add viewport prop
-  onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void // Add callback to report viewport changes to parent
+  viewport?: { x: number; y: number; zoom: number }
+  onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void
   gridEnabled?: boolean
   snapEnabled?: boolean
   gridSize?: number
+  commentMode?: boolean
+  onCommentCreate?: (x: number, y: number, content: string) => void
 }
 
 export function Canvas({
@@ -27,11 +31,13 @@ export function Canvas({
   onCursorMove,
   onSelectionChange,
   children,
-  viewport: externalViewport, // Receive viewport from parent
-  onViewportChange, // Accept viewport change callback
+  viewport: externalViewport,
+  onViewportChange,
   gridEnabled = false,
   snapEnabled,
   gridSize,
+  commentMode = false,
+  onCommentCreate,
 }: CanvasProps) {
   const {
     canvasRef,
@@ -48,6 +54,7 @@ export function Canvas({
     saveTextEdit,
     cancelTextEdit,
     measureText,
+    isNewTextObject, // Get the new text object flag
   } = useCanvas({
     canvasId,
     objects,
@@ -59,6 +66,7 @@ export function Canvas({
   })
 
   const textInputRef = useRef<HTMLTextAreaElement>(null)
+  const commentInputRef = useRef<HTMLTextAreaElement>(null)
   const [textValue, setTextValue] = useState("")
   const [textareaDimensions, setTextareaDimensions] = useState({ width: 200, height: 50 })
   const resizeTimerRef = useRef<NodeJS.Timeout>()
@@ -69,6 +77,8 @@ export function Canvas({
     scaleX: 1,
     scaleY: 1,
   })
+
+  const [commentDraft, setCommentDraft] = useState<{ x: number; y: number; content: string } | null>(null)
 
   const updateCanvasMetrics = useCallback(() => {
     const canvasEl = canvasRef.current
@@ -172,6 +182,7 @@ export function Canvas({
     const scaledZoomX = viewportZoom * canvasMetrics.scaleX
     const scaledZoomY = viewportZoom * canvasMetrics.scaleY
     const scaledFontSize = (editingTextObject.font_size || 16) * scaledZoomY
+    const horizontalPadding = scaledFontSize * 0.5 // 50% of font size for comfortable padding
     const paddingTop = Math.max(0, (textareaDimensions.height * scaledZoomY - scaledFontSize * 1.2) / 2)
 
     return {
@@ -185,12 +196,54 @@ export function Canvas({
       lineHeight: "1.2",
       color: editingTextObject.fill_color,
       caretColor: editingTextObject.fill_color,
-      paddingLeft: 0,
-      paddingRight: 0,
+      paddingLeft: `${horizontalPadding}px`,
+      paddingRight: `${horizontalPadding}px`,
       margin: 0,
       boxSizing: "border-box",
     }
   }, [canvasMetrics, editingTextObject, viewportX, viewportY, viewportZoom, textareaDimensions])
+
+  const handleCanvasClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (commentMode && onCommentCreate) {
+        const rect = canvasRef.current?.getBoundingClientRect()
+        if (!rect) return
+
+        const x = (e.clientX - rect.left - viewportX) / viewportZoom
+        const y = (e.clientY - rect.top - viewportY) / viewportZoom
+
+        setCommentDraft({ x, y, content: "" })
+        setTimeout(() => commentInputRef.current?.focus(), 0)
+        e.stopPropagation()
+      }
+    },
+    [commentMode, onCommentCreate, canvasRef, viewportX, viewportY, viewportZoom],
+  )
+
+  const handleCommentSubmit = useCallback(() => {
+    if (commentDraft && commentDraft.content.trim() && onCommentCreate) {
+      onCommentCreate(commentDraft.x, commentDraft.y, commentDraft.content.trim())
+      setCommentDraft(null)
+    }
+  }, [commentDraft, onCommentCreate])
+
+  const handleCommentCancel = useCallback(() => {
+    setCommentDraft(null)
+  }, [])
+
+  const commentInputStyle: CSSProperties | undefined = useMemo(() => {
+    if (!commentDraft) return undefined
+
+    const scaledZoomX = viewportZoom * canvasMetrics.scaleX
+    const scaledZoomY = viewportZoom * canvasMetrics.scaleY
+
+    return {
+      left: `${canvasMetrics.offsetX + (viewportX + commentDraft.x * viewportZoom) * canvasMetrics.scaleX}px`,
+      top: `${canvasMetrics.offsetY + (viewportY + commentDraft.y * viewportZoom) * canvasMetrics.scaleY}px`,
+      width: `${250 * scaledZoomX}px`,
+      minHeight: `${80 * scaledZoomY}px`,
+    }
+  }, [canvasMetrics, commentDraft, viewportX, viewportY, viewportZoom])
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
@@ -275,12 +328,13 @@ export function Canvas({
         ref={canvasRef}
         width={typeof window !== "undefined" ? window.innerWidth : 1920}
         height={typeof window !== "undefined" ? window.innerHeight : 1080}
-        className="h-full w-full cursor-crosshair"
-        onMouseDown={handleMouseDown}
+        className={`h-full w-full ${commentMode ? "cursor-crosshair" : "cursor-crosshair"}`}
+        onMouseDown={commentMode ? undefined : handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
+        onClick={handleCanvasClick}
       />
 
       {editingTextId && editingTextObject && (
@@ -313,17 +367,58 @@ export function Canvas({
               saveTextEdit(editingTextId, textValue)
             }}
             placeholder={showPlaceholder ? "Type here..." : ""}
-            className="h-full w-full resize-none border-none bg-transparent text-center text-black outline-none overflow-hidden placeholder:text-gray-400 placeholder:opacity-50"
+            className="h-full w-full resize-none border-none bg-transparent text-black outline-none overflow-hidden placeholder:text-gray-400 placeholder:opacity-50"
             style={{
               fontSize: textAreaStyle?.fontSize,
               fontFamily: textAreaStyle?.fontFamily,
               paddingTop: textAreaStyle?.paddingTop,
+              paddingLeft: textAreaStyle?.paddingLeft,
+              paddingRight: textAreaStyle?.paddingRight,
               lineHeight: textAreaStyle?.lineHeight,
               color: textAreaStyle?.color,
               caretColor: textAreaStyle?.caretColor,
               boxSizing: "border-box",
             }}
           />
+        </div>
+      )}
+
+      {commentDraft && (
+        <div
+          className="absolute z-30 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-2xl overflow-hidden"
+          style={commentInputStyle}
+        >
+          <div className="p-3 bg-gradient-to-b from-muted/30 to-transparent border-b border-border/50 mx-2.5 px-3 py-2.5 my-2.5 text-center">
+            <p className="text-xs font-semibold text-muted-foreground">New Comment</p>
+          </div>
+          <div className="p-3">
+            <textarea
+              ref={commentInputRef}
+              value={commentDraft.content}
+              onChange={(e) => setCommentDraft({ ...commentDraft, content: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  handleCommentSubmit()
+                } else if (e.key === "Escape") {
+                  e.preventDefault()
+                  handleCommentCancel()
+                }
+              }}
+              placeholder="Write a comment... (Ctrl+Enter to submit)"
+              className="w-full h-16 resize-none border-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
+            />
+          </div>
+          <div className="flex gap-2 p-2 border-border/50 bg-gradient-to-t from-muted/20 to-transparent mx-2.5 rounded-none my-2.5 text-center border-t px-0 items-end justify-center">
+            <Button variant="ghost" size="sm" onClick={handleCommentCancel}>
+              <X className="h-3 w-3 mr-1" />
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleCommentSubmit} disabled={!commentDraft.content.trim()}>
+              <Send className="h-3 w-3 mr-1" />
+              Post
+            </Button>
+          </div>
         </div>
       )}
 

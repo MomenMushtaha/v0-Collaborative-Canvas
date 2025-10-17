@@ -159,6 +159,30 @@ lib/
 - `operation_data` (jsonb)
 - `created_at` (timestamp)
 
+### OAuth Setup (Optional)
+
+To enable Google and GitHub OAuth authentication:
+
+1. **Configure OAuth providers in Supabase**
+   - Go to your Supabase project dashboard
+   - Navigate to Authentication > Providers
+   - Enable Google OAuth:
+     - Add your Google Client ID and Secret
+     - Get credentials from [Google Cloud Console](https://console.cloud.google.com/)
+   - Enable GitHub OAuth:
+     - Add your GitHub Client ID and Secret
+     - Get credentials from [GitHub Developer Settings](https://github.com/settings/developers)
+
+2. **Add redirect URLs**
+   - In each OAuth provider settings, add:
+     - Development: `http://localhost:3000/auth/callback`
+     - Production: `https://your-app.vercel.app/auth/callback`
+
+3. **Test OAuth flow**
+   - Users can now sign in with Google or GitHub buttons
+   - OAuth users are automatically created in the database
+   - User metadata (name, avatar) is pulled from OAuth provider
+
 ## Usage Guide
 
 ### Creating Objects
@@ -253,7 +277,3 @@ This project was built as part of the CollabCanvas Challenge. For questions or i
 ## License
 
 MIT License - See LICENSE file for details
-1. Create and modify your project using [v0.app](https://v0.app)
-2. Deploy your chats from the v0 interface
-3. Changes are automatically pushed to this repository
-4. Vercel deploys the latest version from this repository

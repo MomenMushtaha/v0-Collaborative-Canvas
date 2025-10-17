@@ -61,8 +61,8 @@ export function LayersPanel({
       return "Text"
     }
 
-    // Return the capitalized shape name
-    return obj.shape?.charAt(0).toUpperCase() + obj.shape?.slice(1) || "Object"
+    // Return the capitalized type name (rectangle, circle, triangle, line)
+    return obj.type.charAt(0).toUpperCase() + obj.type.slice(1)
   }
 
   // Sort objects by z-index (reverse so highest z-index is at top)

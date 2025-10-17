@@ -27,6 +27,8 @@ interface LayersPanelProps {
   onToggleVisibility?: (id: string) => void
   onToggleLock?: (id: string) => void
   onReorder?: (id: string, newIndex: number) => void
+  topPosition?: number
+  onCollapseChange?: (collapsed: boolean) => void
 }
 
 export function LayersPanel({
@@ -37,8 +39,15 @@ export function LayersPanel({
   onToggleVisibility,
   onToggleLock,
   onReorder,
+  topPosition = 360,
+  onCollapseChange,
 }: LayersPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+
+  const handleCollapseToggle = (collapsed: boolean) => {
+    setIsCollapsed(collapsed)
+    onCollapseChange?.(collapsed)
+  }
 
   const getObjectIcon = (obj: CanvasObject) => {
     if (obj.type === "text") return <Type className="h-4 w-4" />
@@ -70,29 +79,35 @@ export function LayersPanel({
 
   if (isCollapsed) {
     return (
-      <div className="fixed right-4 top-[360px] z-40">
+      <div className="fixed right-4 z-40" style={{ top: `${topPosition}px` }}>
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setIsCollapsed(false)}
-          className="bg-background/95 backdrop-blur-md shadow-lg hover:shadow-xl transition-all hover:scale-105 border border-border/50"
+          onClick={() => handleCollapseToggle(false)}
+          className="bg-background/95 backdrop-blur-md shadow-lg hover:shadow-xl transition-all hover:scale-105 border border-border/50 flex items-center justify-center"
         >
-          <ChevronRight className="h-4 w-4" />
+          <Square className="h-4 w-4 mr-2" />
+          <span className="text-xs font-medium">
+            {sortedObjects.length} Layer{sortedObjects.length !== 1 ? "s" : ""}
+          </span>
+          <ChevronRight className="h-4 w-4 ml-2" />
         </Button>
       </div>
     )
   }
 
   return (
-    <div className="fixed right-4 top-[360px] z-40 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">
-      {/* Header */}
+    <div
+      className="fixed right-4 z-40 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl"
+      style={{ top: `${topPosition}px` }}
+    >
       <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold tracking-tight flex-1 text-center">Layers</h3>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setIsCollapsed(true)}
+            onClick={() => handleCollapseToggle(true)}
             className="h-7 w-7 p-0 hover:bg-background/80 transition-colors"
           >
             <ChevronDown className="h-4 w-4" />

@@ -3,19 +3,39 @@
 import { ColorPicker } from "@/components/color-picker"
 import { Label } from "@/components/ui/label"
 import type { CanvasObject } from "@/lib/types"
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
+import { ChevronDown, ChevronRight, Palette } from "lucide-react"
 
 interface StylePanelProps {
   selectedObjects: CanvasObject[]
   onStyleChange: (updates: Partial<CanvasObject>) => void
+  topPosition?: number
+  onCollapseChange?: (collapsed: boolean) => void
 }
 
-export function StylePanel({ selectedObjects, onStyleChange }: StylePanelProps) {
-  if (selectedObjects.length === 0) {
+export function StylePanel({ selectedObjects, onStyleChange, topPosition = 640, onCollapseChange }: StylePanelProps) {
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
+  const handleCollapseToggle = (collapsed: boolean) => {
+    setIsCollapsed(collapsed)
+    onCollapseChange?.(collapsed)
+  }
+
+  if (selectedObjects.length === 0 || isCollapsed) {
     return (
-      <div className="absolute right-4 top-[640px] z-10 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl transition-all duration-200 hover:shadow-2xl">
-        <div className="bg-gradient-to-b from-muted/30 to-transparent px-4 py-3 text-center">
-          <p className="text-sm text-muted-foreground">Select an object to edit its style</p>
-        </div>
+      <div className="absolute right-4 z-10" style={{ top: `${topPosition}px` }}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => selectedObjects.length > 0 && handleCollapseToggle(false)}
+          disabled={selectedObjects.length === 0}
+          className="bg-background/95 backdrop-blur-md shadow-lg hover:shadow-xl transition-all hover:scale-105 border border-border/50 flex items-center justify-center"
+        >
+          <Palette className="h-4 w-4 mr-2" />
+          <span className="text-xs font-medium">{selectedObjects.length === 0 ? "No Selection" : "Style"}</span>
+          {selectedObjects.length > 0 && <ChevronRight className="h-4 w-4 ml-2" />}
+        </Button>
       </div>
     )
   }
@@ -26,10 +46,23 @@ export function StylePanel({ selectedObjects, onStyleChange }: StylePanelProps) 
   const strokeColor = firstObject.stroke_color || "#1e40af"
 
   return (
-    <div className="absolute right-4 top-[640px] z-10 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl transition-all duration-200 hover:shadow-2xl overflow-hidden">
+    <div
+      className="absolute right-4 z-10 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl transition-all duration-200 hover:shadow-2xl overflow-hidden"
+      style={{ top: `${topPosition}px` }}
+    >
       {/* Header */}
-      <div className="bg-gradient-to-b from-muted/30 to-transparent px-4 py-3 text-center border-b border-border/50">
-        <h3 className="text-sm font-semibold tracking-wide">Style</h3>
+      <div className="bg-gradient-to-b from-muted/30 to-transparent px-4 py-3 border-b border-border/50">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold tracking-wide flex-1 text-center">Style</h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleCollapseToggle(true)}
+            className="h-7 w-7 p-0 hover:bg-background/80 transition-colors -mr-2"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Content */}

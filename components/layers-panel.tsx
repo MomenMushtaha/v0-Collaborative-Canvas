@@ -89,7 +89,7 @@ export function LayersPanel({
       </div>
 
       {/* Layers List */}
-      <ScrollArea className="h-[400px]">
+      <ScrollArea className="h-[150px]">
         <div className="p-2 space-y-1">
           {sortedObjects.length === 0 ? (
             <div className="text-center text-sm text-muted-foreground py-8">No objects on canvas</div>

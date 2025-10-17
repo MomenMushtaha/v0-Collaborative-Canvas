@@ -14,6 +14,7 @@ interface UseCanvasProps {
   gridEnabled?: boolean
   snapEnabled?: boolean
   gridSize?: number
+  lassoMode?: boolean
 }
 
 type ResizeHandle =
@@ -35,6 +36,7 @@ export function useCanvas({
   gridEnabled = false,
   snapEnabled = false,
   gridSize = 20,
+  lassoMode = false,
 }: UseCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
@@ -168,6 +170,13 @@ export function useCanvas({
 
   const [lassoPath, setLassoPath] = useState<{ x: number; y: number }[]>([])
   const [isLassoSelecting, setIsLassoSelecting] = useState(false)
+
+  useEffect(() => {
+    if (!lassoMode) {
+      setIsLassoSelecting(false)
+      setLassoPath([])
+    }
+  }, [lassoMode])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -437,7 +446,7 @@ export function useCanvas({
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
       const modifier = isMac ? e.metaKey : e.ctrlKey
 
-      if (modifier && tool === "select" && e.button === 0) {
+      if ((lassoMode || modifier) && tool === "select" && e.button === 0) {
         setIsLassoSelecting(true)
         setLassoPath([pos])
         return
@@ -667,6 +676,7 @@ export function useCanvas({
       getResizeHandleAtPosition,
       handleTextEdit,
       editingTextId,
+      lassoMode,
     ],
   )
 

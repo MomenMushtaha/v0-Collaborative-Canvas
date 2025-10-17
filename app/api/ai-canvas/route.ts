@@ -10,11 +10,24 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
-    const { message, currentObjects, selectedObjectIds, canvasId, userId, userName, viewport } = body
+    const {
+      message,
+      currentObjects,
+      selectedObjectIds,
+      selectedObjects: selectedObjectsPayload,
+      canvasId,
+      userId,
+      userName,
+      viewport,
+    } = body
 
     console.log("[v0] Message:", message)
-    console.log("[v0] Current objects count:", currentObjects?.length || 0)
-    console.log("[v0] Selected objects count:", selectedObjectIds?.length || 0)
+    const safeCurrentObjects = Array.isArray(currentObjects) ? currentObjects : []
+    const safeSelectedIds = Array.isArray(selectedObjectIds) ? selectedObjectIds : []
+    const safeSelectedObjects = Array.isArray(selectedObjectsPayload) ? selectedObjectsPayload : []
+
+    console.log("[v0] Current objects count:", safeCurrentObjects.length)
+    console.log("[v0] Selected objects count:", safeSelectedIds.length)
     console.log("[v0] Canvas ID:", canvasId)
     console.log("[v0] User:", userName)
 
@@ -59,32 +72,67 @@ export async function POST(request: Request) {
 
     console.log("[v0] Calling AI SDK with function calling...")
 
-    const canvasContext =
-      currentObjects?.map((obj: any, idx: number) => ({
+    const canvasContext = safeCurrentObjects.map((obj: any, idx: number) => {
+      const objectId = (() => {
+        if (typeof obj.id === "string" && obj.id.length > 0) {
+          return obj.id
+        }
+        if (obj.id !== undefined && obj.id !== null) {
+          return String(obj.id)
+        }
+        return `object-${idx}`
+      })()
+
+      const isSelectedFromIds = safeSelectedIds.includes(objectId)
+      const isSelectedFromPayload = safeSelectedObjects.some((selected: any) => {
+        if (!selected) return false
+        if (typeof selected === "string") {
+          return selected === objectId
+        }
+        if (typeof selected?.id === "string" && selected.id.length > 0) {
+          return selected.id === objectId
+        }
+        if (selected?.id !== undefined && selected?.id !== null) {
+          return String(selected.id) === objectId
+        }
+        return false
+      })
+
+      const toRoundedNumber = (value: any, fallback = 0) =>
+        typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback
+
+      return {
         index: idx,
-        id: obj.id,
+        id: objectId,
         type: obj.type,
         color: obj.fill_color,
-        x: Math.round(obj.x),
-        y: Math.round(obj.y),
-        width: Math.round(obj.width),
-        height: Math.round(obj.height),
-        rotation: obj.rotation,
-      })) || []
+        strokeColor: obj.stroke_color,
+        strokeWidth: typeof obj.stroke_width === "number" ? obj.stroke_width : undefined,
+        x: toRoundedNumber(obj.x),
+        y: toRoundedNumber(obj.y),
+        width: toRoundedNumber(obj.width),
+        height: toRoundedNumber(obj.height),
+        rotation: typeof obj.rotation === "number" ? obj.rotation : 0,
+        text: obj.text_content || obj.content || "",
+        locked: Boolean(obj.locked),
+        visible: obj.visible !== false,
+        isSelected: isSelectedFromIds || isSelectedFromPayload,
+      }
+    })
 
-    const selectedObjects = canvasContext.filter((obj: any) => selectedObjectIds?.includes(obj.id))
-    const selectedIndices = selectedObjects.map((obj: any) => obj.index)
+    const selectedContext = canvasContext.filter((obj: any) => obj.isSelected)
+    const selectedIndices = selectedContext.map((obj: any) => obj.index)
 
     const canvasStats = {
-      totalShapes: currentObjects?.length || 0,
-      shapeTypes: currentObjects?.reduce(
+      totalShapes: safeCurrentObjects.length,
+      shapeTypes: safeCurrentObjects.reduce(
         (acc: any, obj: any) => {
           acc[obj.type] = (acc[obj.type] || 0) + 1
           return acc
         },
         {} as Record<string, number>,
       ),
-      colorGroups: currentObjects?.reduce(
+      colorGroups: safeCurrentObjects.reduce(
         (acc: any, obj: any) => {
           const color = obj.fill_color
           acc[color] = (acc[color] || 0) + 1
@@ -154,6 +202,7 @@ export async function POST(request: Request) {
 
     const operations: any[] = []
     const validationErrors: string[] = []
+    const shapeIndexSchema = z.union([z.number(), z.literal("selected")])
 
     const tools = {
       getCanvasState: tool({
@@ -163,7 +212,13 @@ export async function POST(request: Request) {
           query: z.string().describe("What information to retrieve (e.g., 'count', 'list all', 'find blue shapes')"),
         }),
         execute: async ({ query }) => {
-          return { query, canvasContext, canvasStats }
+          return {
+            query,
+            canvasContext,
+            canvasStats,
+            selectedObjects: selectedContext,
+            availableOperations: Object.keys(tools),
+          }
         },
       }),
       createText: tool({
@@ -237,18 +292,16 @@ export async function POST(request: Request) {
       moveShape: tool({
         description: "Move an existing shape to a new position",
         inputSchema: z.object({
-          shapeIndex: z
-            .number()
-            .describe(
-              "Index of the shape to move (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
-            ),
+          shapeIndex: shapeIndexSchema.describe(
+            "Index of the shape to move (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
+          ),
           x: z.number().optional().describe("New X coordinate (absolute position)"),
           y: z.number().optional().describe("New Y coordinate (absolute position)"),
           deltaX: z.number().optional().describe("Relative X movement (alternative to absolute x)"),
           deltaY: z.number().optional().describe("Relative Y movement (alternative to absolute y)"),
         }),
         execute: async ({ shapeIndex, x, y, deltaX, deltaY }) => {
-          const validation = validateMoveShape({ shapeIndex, x, y, deltaX, deltaY }, currentObjects, selectedIndices)
+          const validation = validateMoveShape({ shapeIndex, x, y, deltaX, deltaY }, safeCurrentObjects, selectedIndices)
           if (!validation.valid) {
             validationErrors.push(`moveShape: ${validation.error}`)
             return { error: validation.error }
@@ -256,7 +309,7 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "move",
-            shapeIndex: shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex,
+            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
             x,
             y,
             deltaX,
@@ -269,17 +322,15 @@ export async function POST(request: Request) {
       resizeShape: tool({
         description: "Resize an existing shape",
         inputSchema: z.object({
-          shapeIndex: z
-            .number()
-            .describe(
-              "Index of the shape to resize (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
-            ),
+          shapeIndex: shapeIndexSchema.describe(
+            "Index of the shape to resize (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
+          ),
           width: z.number().optional().describe("New width in pixels (absolute size)"),
           height: z.number().optional().describe("New height in pixels (absolute size)"),
           scale: z.number().optional().describe("Scale factor (e.g., 2 for twice as big, 0.5 for half size)"),
         }),
         execute: async ({ shapeIndex, width, height, scale }) => {
-          const validation = validateResizeShape({ shapeIndex, width, height, scale }, currentObjects, selectedIndices)
+          const validation = validateResizeShape({ shapeIndex, width, height, scale }, safeCurrentObjects, selectedIndices)
           if (!validation.valid) {
             validationErrors.push(`resizeShape: ${validation.error}`)
             return { error: validation.error }
@@ -287,7 +338,7 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "resize",
-            shapeIndex: shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex,
+            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
             width,
             height,
             scale,
@@ -299,11 +350,9 @@ export async function POST(request: Request) {
       rotateShape: tool({
         description: "Rotate an existing shape",
         inputSchema: z.object({
-          shapeIndex: z
-            .number()
-            .describe(
-              "Index of the shape to rotate (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
-            ),
+          shapeIndex: shapeIndexSchema.describe(
+            "Index of the shape to rotate (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
+          ),
           degrees: z.number().describe("Rotation amount in degrees"),
           absolute: z
             .boolean()
@@ -311,7 +360,7 @@ export async function POST(request: Request) {
             .describe("If true, set absolute rotation; if false, rotate relative to current rotation"),
         }),
         execute: async ({ shapeIndex, degrees, absolute }) => {
-          const validation = validateRotateShape({ shapeIndex, degrees, absolute }, currentObjects, selectedIndices)
+          const validation = validateRotateShape({ shapeIndex, degrees, absolute }, safeCurrentObjects, selectedIndices)
           if (!validation.valid) {
             validationErrors.push(`rotateShape: ${validation.error}`)
             return { error: validation.error }
@@ -319,7 +368,7 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "rotate",
-            shapeIndex: shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex,
+            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
             degrees: degrees ?? 0,
             absolute: absolute ?? false,
           })
@@ -330,14 +379,13 @@ export async function POST(request: Request) {
       deleteShape: tool({
         description: "Delete one or more shapes from the canvas",
         inputSchema: z.object({
-          shapeIndex: z
-            .number()
-            .optional()
-            .describe("Index of the shape to delete (0-based, or 'selected' for currently selected shape)"),
+          shapeIndex: shapeIndexSchema.optional().describe(
+            "Index of the shape to delete (0-based, or 'selected' for currently selected shape)",
+          ),
           all: z.boolean().optional().describe("If true, delete all shapes from the canvas"),
         }),
         execute: async ({ shapeIndex, all }) => {
-          const validation = validateDeleteShape({ shapeIndex, all }, currentObjects, selectedIndices)
+          const validation = validateDeleteShape({ shapeIndex, all }, safeCurrentObjects, selectedIndices)
           if (!validation.valid) {
             validationErrors.push(`deleteShape: ${validation.error}`)
             return { error: validation.error }
@@ -346,7 +394,7 @@ export async function POST(request: Request) {
           operations.push({
             type: "delete",
             shapeIndex:
-              shapeIndex === undefined ? undefined : shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex,
+              shapeIndex === undefined ? undefined : shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
             all: all ?? false,
           })
 
@@ -365,7 +413,7 @@ export async function POST(request: Request) {
           columns: z.number().optional().describe("Number of columns (for grid pattern)"),
         }),
         execute: async ({ pattern, shapeIndices, spacing, columns }) => {
-          const validation = validateArrangeShapes({ pattern, shapeIndices, spacing, columns }, currentObjects)
+          const validation = validateArrangeShapes({ pattern, shapeIndices, spacing, columns }, safeCurrentObjects)
           if (!validation.valid) {
             validationErrors.push(`arrangeShapes: ${validation.error}`)
             return { error: validation.error }
@@ -525,10 +573,10 @@ ${canvasStats.totalShapes > 0 ? `Shape types: ${JSON.stringify(canvasStats.shape
 ${canvasStats.totalShapes > 0 ? `Colors used: ${JSON.stringify(canvasStats.colorGroups)}` : ""}
 
 ${
-  selectedObjects.length > 0
+  selectedContext.length > 0
     ? `
-⭐ CURRENTLY SELECTED SHAPES (${selectedObjects.length}):
-${JSON.stringify(selectedObjects, null, 2)}
+⭐ CURRENTLY SELECTED SHAPES (${selectedContext.length}):
+${JSON.stringify(selectedContext, null, 2)}
 Selected indices: ${JSON.stringify(selectedIndices)}
 
 IMPORTANT: When the user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -536,7 +584,7 @@ IMPORTANT: When the user says "the selected shape", "it", "this", "the selection
     : "No shapes are currently selected.\n"
 }
 
-OBJECTS ON CANVAS (${currentObjects?.length || 0} total):
+OBJECTS ON CANVAS (${safeCurrentObjects.length} total):
 ${JSON.stringify(canvasContext, null, 2)}
 
 AVAILABLE FUNCTIONS:

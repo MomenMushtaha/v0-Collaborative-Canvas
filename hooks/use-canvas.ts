@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { snapToGrid, isObjectInLasso } from "@/lib/grid-utils"
+import { snapPointToGrid, isObjectInLasso } from "@/lib/grid-utils"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { CanvasObject } from "@/lib/types"
@@ -687,7 +687,7 @@ export function useCanvas({
       let pos = screenToCanvas(e.clientX, e.clientY)
 
       if (snapEnabled && (isDragging || tool !== "select")) {
-        pos = snapToGrid(pos.x, pos.y, gridSize)
+        pos = snapPointToGrid(pos.x, pos.y, gridSize)
       }
 
       if (isLassoSelecting) {

@@ -21,10 +21,7 @@ async function updateQueueStatus(queueItemId: string | null, updates: Record<str
 
   try {
     const supabase = createServiceRoleClient()
-    await supabase
-      .from("ai_operations_queue")
-      .update(updates)
-      .eq("id", queueItemId)
+    await supabase.from("ai_operations_queue").update(updates).eq("id", queueItemId)
   } catch (err) {
     console.warn("[v0] Failed to update queue status:", err)
   }
@@ -262,6 +259,7 @@ export async function POST(request: Request) {
     const shapeIndexSchema = z.union([z.number(), z.literal("selected")])
 
     const tools = {
+      // ===== QUERY & INFORMATION =====
       getCanvasState: tool({
         description:
           "Query information about the current canvas state. Use this to answer questions about shapes, count objects, or get information before making changes.",
@@ -278,6 +276,426 @@ export async function POST(request: Request) {
           }
         },
       }),
+
+      // ===== SELECTION OPERATIONS =====
+      selectObjects: tool({
+        description: "Select one or more objects by their indices or IDs. Replaces current selection.",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Array of object indices to select"),
+          ids: z.array(z.string()).optional().describe("Array of object IDs to select"),
+          addToSelection: z.boolean().optional().describe("If true, add to current selection instead of replacing"),
+        }),
+        execute: async ({ indices, ids, addToSelection }) => {
+          const targetIds = ids || indices?.map((i) => canvasContext[i]?.id).filter(Boolean) || []
+          operations.push({
+            type: "select",
+            objectIds: targetIds,
+            addToSelection: addToSelection || false,
+          })
+          return { success: true, selectedCount: targetIds.length }
+        },
+      }),
+
+      selectAll: tool({
+        description: "Select all objects on the canvas",
+        inputSchema: z.object({}),
+        execute: async () => {
+          operations.push({
+            type: "selectAll",
+          })
+          return { success: true, selectedCount: canvasContext.length }
+        },
+      }),
+
+      selectAllOfType: tool({
+        description: "Select all objects of the same type as currently selected objects",
+        inputSchema: z.object({
+          type: z
+            .enum(["rectangle", "circle", "triangle", "line", "text"])
+            .optional()
+            .describe("Specific type to select, or use currently selected types"),
+        }),
+        execute: async ({ type }) => {
+          const targetType = type || (selectedContext.length > 0 ? selectedContext[0].type : undefined)
+          if (!targetType) {
+            return { error: "No type specified and no objects selected" }
+          }
+          operations.push({
+            type: "selectAllOfType",
+            objectType: targetType,
+          })
+          const matchingCount = canvasContext.filter((obj) => obj.type === targetType).length
+          return { success: true, selectedCount: matchingCount, objectType: targetType }
+        },
+      }),
+
+      clearSelection: tool({
+        description: "Deselect all objects",
+        inputSchema: z.object({}),
+        execute: async () => {
+          operations.push({
+            type: "clearSelection",
+          })
+          return { success: true }
+        },
+      }),
+
+      // ===== CLIPBOARD OPERATIONS =====
+      copyObjects: tool({
+        description: "Copy selected objects to clipboard",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices to copy, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to copy" }
+          }
+          operations.push({
+            type: "copy",
+            objectIndices: targetIndices,
+          })
+          return { success: true, copiedCount: targetIndices.length }
+        },
+      }),
+
+      pasteObjects: tool({
+        description: "Paste objects from clipboard at specified position or with offset",
+        inputSchema: z.object({
+          x: z.number().optional().describe("X position to paste at"),
+          y: z.number().optional().describe("Y position to paste at"),
+          offsetX: z.number().optional().describe("X offset from original position (default: 20)"),
+          offsetY: z.number().optional().describe("Y offset from original position (default: 20)"),
+        }),
+        execute: async ({ x, y, offsetX, offsetY }) => {
+          operations.push({
+            type: "paste",
+            x,
+            y,
+            offsetX: offsetX ?? 20,
+            offsetY: offsetY ?? 20,
+          })
+          return { success: true }
+        },
+      }),
+
+      duplicateObjects: tool({
+        description: "Duplicate selected objects with an offset",
+        inputSchema: z.object({
+          offsetX: z.number().optional().describe("X offset for duplicates (default: 20)"),
+          offsetY: z.number().optional().describe("Y offset for duplicates (default: 20)"),
+        }),
+        execute: async ({ offsetX, offsetY }) => {
+          if (selectedIndices.length === 0) {
+            return { error: "No objects selected to duplicate" }
+          }
+          operations.push({
+            type: "duplicate",
+            objectIndices: selectedIndices,
+            offsetX: offsetX ?? 20,
+            offsetY: offsetY ?? 20,
+          })
+          return { success: true, duplicatedCount: selectedIndices.length }
+        },
+      }),
+
+      // ===== STYLING OPERATIONS =====
+      setFillColor: tool({
+        description: "Change the fill color of selected objects",
+        inputSchema: z.object({
+          color: z.string().describe("Hex color code (e.g., #ff0000) or color name (red, blue, green)"),
+          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
+        }),
+        execute: async ({ color, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to style" }
+          }
+          const finalColor = normalizeColorInput(color, "#3b82f6")
+          operations.push({
+            type: "setStyle",
+            objectIndices: targetIndices,
+            fillColor: finalColor,
+          })
+          return { success: true, styledCount: targetIndices.length, color: finalColor }
+        },
+      }),
+
+      setStrokeColor: tool({
+        description: "Change the stroke/border color of selected objects",
+        inputSchema: z.object({
+          color: z.string().describe("Hex color code (e.g., #ff0000) or color name"),
+          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
+        }),
+        execute: async ({ color, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to style" }
+          }
+          const finalColor = normalizeColorInput(color, "#1e40af")
+          operations.push({
+            type: "setStyle",
+            objectIndices: targetIndices,
+            strokeColor: finalColor,
+          })
+          return { success: true, styledCount: targetIndices.length, color: finalColor }
+        },
+      }),
+
+      setStrokeWidth: tool({
+        description: "Change the stroke/border width of selected objects",
+        inputSchema: z.object({
+          width: z.number().min(0).max(20).describe("Stroke width in pixels (0-20)"),
+          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
+        }),
+        execute: async ({ width, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to style" }
+          }
+          operations.push({
+            type: "setStyle",
+            objectIndices: targetIndices,
+            strokeWidth: width,
+          })
+          return { success: true, styledCount: targetIndices.length, strokeWidth: width }
+        },
+      }),
+
+      // ===== ALIGNMENT & DISTRIBUTION =====
+      alignObjects: tool({
+        description: "Align multiple selected objects (requires 2+ objects)",
+        inputSchema: z.object({
+          alignment: z.enum(["left", "center", "right", "top", "middle", "bottom"]).describe("Alignment type"),
+          indices: z.array(z.number()).optional().describe("Specific indices to align, or use current selection"),
+        }),
+        execute: async ({ alignment, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length < 2) {
+            return { error: "Need at least 2 objects to align" }
+          }
+          operations.push({
+            type: "align",
+            objectIndices: targetIndices,
+            alignment,
+          })
+          return { success: true, alignedCount: targetIndices.length, alignment }
+        },
+      }),
+
+      distributeObjects: tool({
+        description: "Distribute multiple selected objects evenly (requires 3+ objects)",
+        inputSchema: z.object({
+          direction: z.enum(["horizontal", "vertical"]).describe("Distribution direction"),
+          indices: z.array(z.number()).optional().describe("Specific indices to distribute, or use current selection"),
+        }),
+        execute: async ({ direction, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length < 3) {
+            return { error: "Need at least 3 objects to distribute" }
+          }
+          operations.push({
+            type: "distribute",
+            objectIndices: targetIndices,
+            direction,
+          })
+          return { success: true, distributedCount: targetIndices.length, direction }
+        },
+      }),
+
+      // ===== Z-ORDER / LAYERING =====
+      bringToFront: tool({
+        description: "Bring selected objects to the front (highest z-index)",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to reorder" }
+          }
+          operations.push({
+            type: "bringToFront",
+            objectIndices: targetIndices,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      sendToBack: tool({
+        description: "Send selected objects to the back (lowest z-index)",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to reorder" }
+          }
+          operations.push({
+            type: "sendToBack",
+            objectIndices: targetIndices,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      bringForward: tool({
+        description: "Bring selected objects one layer forward",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to reorder" }
+          }
+          operations.push({
+            type: "bringForward",
+            objectIndices: targetIndices,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      sendBackward: tool({
+        description: "Send selected objects one layer backward",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to reorder" }
+          }
+          operations.push({
+            type: "sendBackward",
+            objectIndices: targetIndices,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      // ===== VISIBILITY & LOCKING =====
+      toggleVisibility: tool({
+        description: "Toggle visibility of objects (show/hide)",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+          visible: z.boolean().optional().describe("Set specific visibility state, or toggle current state"),
+        }),
+        execute: async ({ indices, visible }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to modify" }
+          }
+          operations.push({
+            type: "toggleVisibility",
+            objectIndices: targetIndices,
+            visible,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      toggleLock: tool({
+        description: "Toggle lock state of objects (prevent/allow editing)",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+          locked: z.boolean().optional().describe("Set specific lock state, or toggle current state"),
+        }),
+        execute: async ({ indices, locked }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to modify" }
+          }
+          operations.push({
+            type: "toggleLock",
+            objectIndices: targetIndices,
+            locked,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      // ===== GRID CONTROLS =====
+      toggleGrid: tool({
+        description: "Toggle grid visibility on/off",
+        inputSchema: z.object({
+          enabled: z.boolean().optional().describe("Set specific state, or toggle current state"),
+        }),
+        execute: async ({ enabled }) => {
+          operations.push({
+            type: "toggleGrid",
+            enabled,
+          })
+          return { success: true, enabled }
+        },
+      }),
+
+      toggleSnapToGrid: tool({
+        description: "Toggle snap-to-grid on/off",
+        inputSchema: z.object({
+          enabled: z.boolean().optional().describe("Set specific state, or toggle current state"),
+        }),
+        execute: async ({ enabled }) => {
+          operations.push({
+            type: "toggleSnapToGrid",
+            enabled,
+          })
+          return { success: true, enabled }
+        },
+      }),
+
+      setGridSize: tool({
+        description: "Change the grid size",
+        inputSchema: z.object({
+          size: z.enum(["10", "20", "30", "50", "100"]).describe("Grid size in pixels"),
+        }),
+        execute: async ({ size }) => {
+          operations.push({
+            type: "setGridSize",
+            size: Number.parseInt(size),
+          })
+          return { success: true, gridSize: Number.parseInt(size) }
+        },
+      }),
+
+      // ===== VIEWPORT CONTROLS =====
+      setZoom: tool({
+        description: "Set canvas zoom level",
+        inputSchema: z.object({
+          zoom: z.number().min(1).max(3).describe("Zoom level (1.0 = 100%, 2.0 = 200%, 3.0 = 300%)"),
+        }),
+        execute: async ({ zoom }) => {
+          operations.push({
+            type: "setZoom",
+            zoom,
+          })
+          return { success: true, zoom }
+        },
+      }),
+
+      panViewport: tool({
+        description: "Pan the viewport to a specific position or by offset",
+        inputSchema: z.object({
+          x: z.number().optional().describe("Absolute X position"),
+          y: z.number().optional().describe("Absolute Y position"),
+          deltaX: z.number().optional().describe("Relative X movement"),
+          deltaY: z.number().optional().describe("Relative Y movement"),
+        }),
+        execute: async ({ x, y, deltaX, deltaY }) => {
+          operations.push({
+            type: "panViewport",
+            x,
+            y,
+            deltaX,
+            deltaY,
+          })
+          return { success: true }
+        },
+      }),
+
+      // ===== EXISTING CREATION & MANIPULATION TOOLS =====
       createText: tool({
         description: "Create a text layer on the canvas with customizable content, position, size, and color",
         inputSchema: z.object({
@@ -308,6 +726,7 @@ export async function POST(request: Request) {
           return { success: true, text, x, y, fontSize: fontSize || 16, color: finalColor }
         },
       }),
+
       createShape: tool({
         description: "Create a new shape on the canvas",
         inputSchema: z.object({
@@ -346,6 +765,7 @@ export async function POST(request: Request) {
           return { success: true, shape, x, y, width, height, color: finalColor }
         },
       }),
+
       moveShape: tool({
         description: "Move an existing shape to a new position",
         inputSchema: z.object({
@@ -358,7 +778,11 @@ export async function POST(request: Request) {
           deltaY: z.number().optional().describe("Relative Y movement (alternative to absolute y)"),
         }),
         execute: async ({ shapeIndex, x, y, deltaX, deltaY }) => {
-          const validation = validateMoveShape({ shapeIndex, x, y, deltaX, deltaY }, safeCurrentObjects, selectedIndices)
+          const validation = validateMoveShape(
+            { shapeIndex, x, y, deltaX, deltaY },
+            safeCurrentObjects,
+            selectedIndices,
+          )
           if (!validation.valid) {
             validationErrors.push(`moveShape: ${validation.error}`)
             return { error: validation.error }
@@ -376,6 +800,7 @@ export async function POST(request: Request) {
           return { success: true, shapeIndex, x, y, deltaX, deltaY }
         },
       }),
+
       resizeShape: tool({
         description: "Resize an existing shape",
         inputSchema: z.object({
@@ -387,7 +812,11 @@ export async function POST(request: Request) {
           scale: z.number().optional().describe("Scale factor (e.g., 2 for twice as big, 0.5 for half size)"),
         }),
         execute: async ({ shapeIndex, width, height, scale }) => {
-          const validation = validateResizeShape({ shapeIndex, width, height, scale }, safeCurrentObjects, selectedIndices)
+          const validation = validateResizeShape(
+            { shapeIndex, width, height, scale },
+            safeCurrentObjects,
+            selectedIndices,
+          )
           if (!validation.valid) {
             validationErrors.push(`resizeShape: ${validation.error}`)
             return { error: validation.error }
@@ -404,6 +833,7 @@ export async function POST(request: Request) {
           return { success: true, shapeIndex, width, height, scale }
         },
       }),
+
       rotateShape: tool({
         description: "Rotate an existing shape",
         inputSchema: z.object({
@@ -433,12 +863,13 @@ export async function POST(request: Request) {
           return { success: true, shapeIndex, degrees, absolute }
         },
       }),
+
       deleteShape: tool({
         description: "Delete one or more shapes from the canvas",
         inputSchema: z.object({
-          shapeIndex: shapeIndexSchema.optional().describe(
-            "Index of the shape to delete (0-based, or 'selected' for currently selected shape)",
-          ),
+          shapeIndex: shapeIndexSchema
+            .optional()
+            .describe("Index of the shape to delete (0-based, or 'selected' for currently selected shape)"),
           all: z.boolean().optional().describe("If true, delete all shapes from the canvas"),
         }),
         execute: async ({ shapeIndex, all }) => {
@@ -458,6 +889,7 @@ export async function POST(request: Request) {
           return { success: true, shapeIndex, all }
         },
       }),
+
       arrangeShapes: tool({
         description: "Arrange multiple shapes in a pattern (grid, row, column, circle)",
         inputSchema: z.object({
@@ -487,6 +919,8 @@ export async function POST(request: Request) {
           return { success: true, pattern, shapeIndices, spacing, columns }
         },
       }),
+
+      // ===== COMPLEX LAYOUT TOOLS =====
       createLoginForm: tool({
         description:
           "Create a polished login form with title, username/password fields, and a primary action button arranged vertically.",
@@ -527,6 +961,7 @@ export async function POST(request: Request) {
           return { success: true, x: centerX, y: centerY, width: formWidth, height: formHeight }
         },
       }),
+
       createNavigationBar: tool({
         description:
           "Create a horizontal navigation bar with a brand label and evenly spaced menu items across the top of the canvas.",
@@ -564,6 +999,7 @@ export async function POST(request: Request) {
           return { success: true, x: leftX, y: topY, width: navWidth, height: navHeight, items: navItems }
         },
       }),
+
       createCardLayout: tool({
         description:
           "Create a content card with an image placeholder, title, description text, and call-to-action button.",
@@ -603,7 +1039,7 @@ export async function POST(request: Request) {
       }),
     }
 
-    const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
+    const systemPrompt = `You are an advanced canvas assistant with FULL USER CAPABILITIES. You can perform ANY action a human user can perform on the collaborative canvas.
 
 CANVAS DIMENSIONS: 2000x2000 pixels
 CANVAS CENTER: (1000, 1000)
@@ -644,18 +1080,63 @@ IMPORTANT: When the user says "the selected shape", "it", "this", "the selection
 OBJECTS ON CANVAS (${safeCurrentObjects.length} total):
 ${JSON.stringify(canvasContext, null, 2)}
 
-AVAILABLE FUNCTIONS:
-1. getCanvasState - Query canvas information (use for questions like "how many shapes?")
-2. createShape - Create new shapes (rectangle, circle, triangle, line)
-3. moveShape - Move existing shapes by index
-4. resizeShape - Resize existing shapes
-5. rotateShape - Rotate existing shapes
-6. deleteShape - Delete specific shapes or clear all
-7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
-8. createText - Create a text layer on the canvas
-9. createLoginForm - Build a multi-element login form layout with labels and button
-10. createNavigationBar - Create a navigation bar with menu items
-11. createCardLayout - Create a card with media area, text, and button
+COMPREHENSIVE TOOL CATEGORIES:
+
+**QUERY & INFORMATION:**
+- getCanvasState - Query canvas information
+
+**SELECTION:**
+- selectObjects - Select specific objects by index or ID
+- selectAll - Select all objects
+- selectAllOfType - Select all objects of same type
+- clearSelection - Deselect all
+
+**CLIPBOARD:**
+- copyObjects - Copy to clipboard
+- pasteObjects - Paste from clipboard
+- duplicateObjects - Duplicate with offset
+
+**CREATION:**
+- createShape - Create rectangles, circles, triangles, lines
+- createText - Create text layers
+- createLoginForm - Multi-element login form
+- createNavigationBar - Navigation bar with menu items
+- createCardLayout - Content card with media and button
+
+**MANIPULATION:**
+- moveShape - Move objects
+- resizeShape - Resize objects
+- rotateShape - Rotate objects
+- deleteShape - Delete objects
+- arrangeShapes - Arrange in patterns (grid, row, column, circle)
+
+**STYLING:**
+- setFillColor - Change fill color
+- setStrokeColor - Change stroke/border color
+- setStrokeWidth - Change stroke width
+
+**ALIGNMENT & DISTRIBUTION:**
+- alignObjects - Align left/center/right/top/middle/bottom (2+ objects)
+- distributeObjects - Distribute horizontally/vertically (3+ objects)
+
+**Z-ORDER / LAYERING:**
+- bringToFront - Move to highest layer
+- sendToBack - Move to lowest layer
+- bringForward - Move up one layer
+- sendBackward - Move down one layer
+
+**VISIBILITY & LOCKING:**
+- toggleVisibility - Show/hide objects
+- toggleLock - Lock/unlock objects
+
+**GRID CONTROLS:**
+- toggleGrid - Show/hide grid
+- toggleSnapToGrid - Enable/disable snap
+- setGridSize - Change grid size (10/20/30/50/100px)
+
+**VIEWPORT:**
+- setZoom - Set zoom level (1.0-3.0)
+- panViewport - Pan to position or by offset
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -664,12 +1145,6 @@ SHAPE IDENTIFICATION RULES:
 - When user says "the circle", find the first shape of that type
 - When user says "the last shape" or "the latest", use index -1
 - If multiple shapes match, operate on the first match or ask for clarification
-
-TEXT LAYER RULES:
-- Use createText to add text layers
-- Provide text content, position (x, y), font size, and color
-- Font size defaults to 16 pixels if not specified
-- Text color defaults to black (#000000) if not specified
 
 COLOR REFERENCE (use hex codes):
 - red: #ef4444, blue: #3b82f6, green: #22c55e, yellow: #eab308
@@ -693,29 +1168,29 @@ ${
 `
 }
 
-DEFAULT VALUES:
-- Shape size: 100x100 pixels
-- Spacing: 50 pixels
-- Grid columns: 3
-- Font size: 16 pixels
-- **REQUIRED default position: (${visibleArea.centerX}, ${visibleArea.centerY}) - Always use this for new objects**
-
 BEST PRACTICES:
-1. For questions about the canvas, use getCanvasState first
-2. For complex operations, call multiple functions in sequence
-3. When moving/resizing shapes, verify the shape exists first
-4. Be conversational and explain what you're doing
-5. If a request is ambiguous, make a reasonable assumption and explain it
-6. **ALWAYS check if there's a selected shape before assuming which shape to operate on**
-7. **CRITICAL: ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) - this is within the user's accessible viewport**
+1. **Be conversational and natural** - Explain what you're doing in friendly language
+2. **Chain operations intelligently** - For complex requests, use multiple tools in sequence
+3. **Verify before acting** - Use getCanvasState to check canvas state before making changes
+4. **Handle ambiguity gracefully** - Make reasonable assumptions and explain them
+5. **Respect selection context** - Always check if objects are selected before assuming which to operate on
+6. **Position awareness** - ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY})
+7. **Multi-step operations** - Break complex requests into logical steps
+8. **Memory and context** - Remember previous conversation context and user preferences
 
-Examples:
+EXAMPLE INTERACTIONS:
 - "Create a blue square" → createShape(rectangle, x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, 100x100, blue)
-- "Move the circle left" → moveShape(find circle index, deltaX: -100)
-- "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
+- "Select all circles" → selectAllOfType(type: "circle")
+- "Make them red" (with selection) → setFillColor(color: "#ef4444")
+- "Align them to the left" (2+ selected) → alignObjects(alignment: "left")
+- "Bring it to front" (with selection) → bringToFront()
+- "Copy and paste it over there" → copyObjects() then pasteObjects(x: newX, y: newY)
+- "Hide the selected shapes" → toggleVisibility(visible: false)
+- "Turn on the grid" → toggleGrid(enabled: true)
+- "Zoom in" → setZoom(zoom: 2.0)
 - "How many shapes?" → getCanvasState(query: "count")
-- "Delete all red shapes" → Find all red shapes and delete each one
-- "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')`
+
+You have COMPLETE parity with human users. You can do EVERYTHING they can do. Be helpful, intelligent, and seamless in your interactions.`
 
     let result
     try {

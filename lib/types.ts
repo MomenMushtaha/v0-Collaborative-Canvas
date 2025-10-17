@@ -16,6 +16,9 @@ export interface CanvasObject {
   created_by?: string
   created_at?: string
   updated_at?: string
+  version?: number
+  last_modified_by?: string
+  last_synced_at?: string
   z?: number // z-index for layer ordering
   visible?: boolean // visibility toggle
   locked?: boolean // lock to prevent editing

@@ -17,6 +17,7 @@ interface CursorUpdate {
   color: string
   x: number
   y: number
+  sentAt: number
 }
 
 export function usePresence({ canvasId, userId, userName, userColor }: UsePresenceProps) {
@@ -24,6 +25,9 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
   const supabase = createClient()
   const [presenceId, setPresenceId] = useState<string | null>(null)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const pendingCursorRef = useRef<CursorUpdate | null>(null)
+  const rafRef = useRef<number>()
+  const lastSentRef = useRef(0)
 
   // Initialize presence
   useEffect(() => {
@@ -94,7 +98,16 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
         },
       })
       .on("broadcast", { event: "cursor" }, ({ payload }: { payload: CursorUpdate }) => {
-        console.log("[v0] Received cursor broadcast from:", payload.userName, "at", payload.x, payload.y)
+        const latency = Date.now() - payload.sentAt
+        console.log(
+          "[v0] Received cursor broadcast from:",
+          payload.userName,
+          "at",
+          payload.x,
+          payload.y,
+          "latency:",
+          `${latency}ms`,
+        )
 
         setOtherUsers((prev) => {
           const newMap = new Map(prev)
@@ -126,8 +139,37 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
       clearInterval(presenceInterval)
       supabase.removeChannel(channel)
       channelRef.current = null
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+      }
     }
   }, [canvasId, userId, userName, supabase])
+
+  const flushPendingCursor = useCallback(() => {
+    if (!channelRef.current || !pendingCursorRef.current) {
+      return
+    }
+
+    const payload = { ...pendingCursorRef.current, sentAt: Date.now() }
+    pendingCursorRef.current = payload
+
+    channelRef.current.send({
+      type: "broadcast",
+      event: "cursor",
+      payload,
+    })
+
+    lastSentRef.current = performance.now()
+    pendingCursorRef.current = null
+    rafRef.current = undefined
+  }, [])
+
+  const scheduleCursorBroadcast = useCallback(() => {
+    if (rafRef.current !== undefined) return
+    rafRef.current = requestAnimationFrame(() => {
+      flushPendingCursor()
+    })
+  }, [flushPendingCursor])
 
   const updateCursor = useCallback(
     (x: number, y: number) => {
@@ -136,20 +178,25 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
         return
       }
 
-      console.log("[v0] Broadcasting cursor position:", x, y, "for user:", userName)
-      channelRef.current.send({
-        type: "broadcast",
-        event: "cursor",
-        payload: {
-          userId,
-          userName,
-          color: userColor,
-          x,
-          y,
-        } as CursorUpdate,
-      })
+      const now = performance.now()
+      const cursorPayload: CursorUpdate = {
+        userId,
+        userName,
+        color: userColor,
+        x,
+        y,
+        sentAt: Date.now(),
+      }
+
+      pendingCursorRef.current = cursorPayload
+
+      if (now - lastSentRef.current >= 16) {
+        flushPendingCursor()
+      } else {
+        scheduleCursorBroadcast()
+      }
     },
-    [userId, userName, userColor],
+    [flushPendingCursor, scheduleCursorBroadcast, userId, userName, userColor],
   )
 
   return {

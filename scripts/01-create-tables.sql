@@ -12,8 +12,11 @@ CREATE TABLE IF NOT EXISTS canvas_objects (
   stroke_color TEXT DEFAULT '#1e40af',
   stroke_width REAL DEFAULT 2,
   created_by UUID REFERENCES auth.users(id),
+  last_modified_by UUID REFERENCES auth.users(id),
+  version BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  last_synced_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Create index for faster canvas queries

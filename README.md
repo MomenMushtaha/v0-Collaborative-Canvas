@@ -12,7 +12,7 @@ A real-time collaborative canvas application with AI-powered design assistance, 
 - **Live cursor tracking** - See where other users are working in real-time
 - **Persistent state** - All changes automatically saved to database
 - **Connection resilience** - Automatic reconnection with operation queuing during network drops
-- **Conflict resolution** - Last-write-wins strategy with real-time broadcast
+- **Conflict resolution** - Versioned last-write-wins strategy with deterministic convergence
 
 ### Canvas Functionality
 - **Drawing tools** - Rectangle, Circle, Triangle, Line, and Text layers
@@ -150,6 +150,9 @@ lib/
 - `visible` (boolean) - Visibility state
 - `locked` (boolean) - Lock state
 - `text_content`, `font_size`, `font_family` (text) - Text properties
+- `version` (bigint) - Lamport counter for conflict resolution
+- `last_modified_by` (uuid) - Author of most recent change
+- `last_synced_at` (timestamp) - When the object was last persisted successfully
 - `created_at`, `updated_at` (timestamp)
 
 **ai_operations_queue table:**

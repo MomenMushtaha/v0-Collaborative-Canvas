@@ -16,11 +16,6 @@ export interface CanvasObject {
   created_by?: string
   created_at?: string
   updated_at?: string
-  z?: number // z-index for layer ordering
-  visible?: boolean // visibility toggle
-  locked?: boolean // lock to prevent editing
-  shape?: "rectangle" | "circle" | "triangle" | "line" // shape type for non-text objects
-  content?: string // text content for text objects
 }
 
 export interface UserPresence {
@@ -39,12 +34,4 @@ export interface CanvasState {
   viewportX: number
   viewportY: number
   zoom: number
-}
-
-export interface HistoryCommand {
-  type: "create" | "update" | "delete"
-  objectIds: string[]
-  beforeState?: CanvasObject[]
-  afterState?: CanvasObject[]
-  timestamp: number
 }

@@ -864,6 +864,51 @@ function applyOperation(
         break
       }
 
+      case "updateText": {
+        const updateIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
+        if (updateIndex < 0 || updateIndex >= updatedObjects.length) {
+          return {
+            objects,
+            error: `Cannot update text at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+          }
+        }
+
+        const target = updatedObjects[updateIndex]
+        if (target.type !== "text") {
+          return { objects, error: `Shape at index ${updateIndex} is not a text object.` }
+        }
+
+        let newText = target.text_content || ""
+        if (typeof operation.text === "string") {
+          newText = operation.text
+        }
+        if (typeof operation.append === "string") {
+          newText = `${newText}${operation.append}`
+        }
+
+        const updates: Partial<CanvasObject> = {
+          text_content: newText,
+        }
+
+        if (typeof operation.fontSize === "number") {
+          updates.font_size = operation.fontSize
+          updates.height = operation.fontSize
+        }
+
+        if (typeof operation.color === "string") {
+          updates.fill_color = operation.color
+          updates.stroke_color = operation.color
+        }
+
+        if (typeof operation.fontFamily === "string") {
+          updates.font_family = operation.fontFamily
+        }
+
+        updatedObjects[updateIndex] = { ...target, ...updates }
+        console.log("[v0] Updated text object", updateIndex)
+        break
+      }
+
       case "move": {
         const moveIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
         if (moveIndex < 0 || moveIndex >= updatedObjects.length) {
@@ -924,6 +969,136 @@ function applyOperation(
           rotation: operation.absolute ? operation.degrees : obj.rotation + operation.degrees,
         }
         console.log("[v0] Rotated shape", rotateIndex, "to", updatedObjects[rotateIndex].rotation, "degrees")
+        break
+      }
+
+      case "style": {
+        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
+        if (targetIndices.length === 0) {
+          return { objects, error: "No valid shapes found to style." }
+        }
+
+        targetIndices.forEach((index) => {
+          const current = updatedObjects[index]
+          const updates: Partial<CanvasObject> = {}
+
+          if (typeof operation.fillColor === "string") {
+            updates.fill_color = operation.fillColor
+          }
+          if (typeof operation.strokeColor === "string") {
+            updates.stroke_color = operation.strokeColor
+          }
+          if (typeof operation.strokeWidth === "number") {
+            updates.stroke_width = operation.strokeWidth
+          }
+
+          updatedObjects[index] = { ...current, ...updates }
+        })
+
+        console.log("[v0] Styled", targetIndices.length, "shape(s)")
+        break
+      }
+
+      case "visibility": {
+        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
+        if (targetIndices.length === 0) {
+          return { objects, error: "No valid shapes found to toggle visibility." }
+        }
+
+        updatedObjects = updatedObjects.map((obj, index) =>
+          targetIndices.includes(index) ? { ...obj, visible: operation.visible } : obj,
+        )
+        console.log("[v0] Updated visibility for", targetIndices.length, "shape(s)")
+        break
+      }
+
+      case "lock": {
+        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
+        if (targetIndices.length === 0) {
+          return { objects, error: "No valid shapes found to lock or unlock." }
+        }
+
+        updatedObjects = updatedObjects.map((obj, index) =>
+          targetIndices.includes(index) ? { ...obj, locked: operation.locked } : obj,
+        )
+        console.log("[v0] Updated lock state for", targetIndices.length, "shape(s)")
+        break
+      }
+
+      case "duplicate": {
+        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
+        if (targetIndices.length === 0) {
+          return { objects, error: "No valid shapes found to duplicate." }
+        }
+
+        const offsetX = typeof operation.offsetX === "number" ? operation.offsetX : 20
+        const offsetY = typeof operation.offsetY === "number" ? operation.offsetY : 20
+
+        const duplicates: CanvasObject[] = targetIndices.map((index) => {
+          const original = updatedObjects[index]
+          return {
+            ...original,
+            id: crypto.randomUUID(),
+            x: original.x + offsetX,
+            y: original.y + offsetY,
+          }
+        })
+
+        updatedObjects = [...updatedObjects, ...duplicates]
+        console.log("[v0] Duplicated", duplicates.length, "shape(s)")
+        return { objects: updatedObjects, selectedIds: duplicates.map((obj) => obj.id) }
+      }
+
+      case "layer": {
+        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
+        if (targetIndices.length === 0) {
+          return { objects, error: "No valid shapes found to reorder." }
+        }
+
+        const targetIds = targetIndices.map((index) => updatedObjects[index]?.id).filter(Boolean)
+        if (targetIds.length === 0) {
+          return { objects, error: "Unable to resolve shape IDs for reordering." }
+        }
+
+        const selectedObjects = updatedObjects.filter((obj) => targetIds.includes(obj.id))
+        const otherObjects = updatedObjects.filter((obj) => !targetIds.includes(obj.id))
+
+        switch (operation.action) {
+          case "bringToFront":
+            updatedObjects = [...otherObjects, ...selectedObjects]
+            break
+          case "sendToBack":
+            updatedObjects = [...selectedObjects, ...otherObjects]
+            break
+          case "bringForward": {
+            const reordered = [...updatedObjects]
+            for (let i = reordered.length - 2; i >= 0; i--) {
+              if (targetIds.includes(reordered[i].id) && !targetIds.includes(reordered[i + 1].id)) {
+                const temp = reordered[i]
+                reordered[i] = reordered[i + 1]
+                reordered[i + 1] = temp
+              }
+            }
+            updatedObjects = reordered
+            break
+          }
+          case "sendBackward": {
+            const reordered = [...updatedObjects]
+            for (let i = 1; i < reordered.length; i++) {
+              if (targetIds.includes(reordered[i].id) && !targetIds.includes(reordered[i - 1].id)) {
+                const temp = reordered[i]
+                reordered[i] = reordered[i - 1]
+                reordered[i - 1] = temp
+              }
+            }
+            updatedObjects = reordered
+            break
+          }
+          default:
+            return { objects, error: `Unknown layer action: ${operation.action}` }
+        }
+
+        console.log("[v0] Reordered", targetIds.length, "shape(s) with action", operation.action)
         break
       }
 

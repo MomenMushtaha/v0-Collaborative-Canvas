@@ -5,10 +5,17 @@ import { MultiplayerCursors } from "@/components/multiplayer-cursors"
 import { PresencePanel } from "@/components/presence-panel"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
-import { useMemo, useEffect, useState } from "react"
+import { useMemo, useEffect, useState, useCallback, type Dispatch, type SetStateAction } from "react"
 import type { CanvasObject } from "@/lib/types"
 import { useAIQueue } from "@/hooks/use-ai-queue"
-import { AIStatusIndicator } from "@/components/ai-status-indicator"
+import { ConnectionStatus } from "@/components/connection-status"
+import { useHistory } from "@/hooks/use-history"
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
+import { StylePanel } from "@/components/style-panel"
+import { LayersPanel } from "@/components/layers-panel"
+import { alignObjects, distributeObjects } from "@/lib/alignment-utils"
+import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
+import { useToast } from "@/hooks/use-toast"
 
 // Generate a random color for each user
 function generateUserColor() {
@@ -32,6 +39,17 @@ interface CollaborativeCanvasProps {
   onAiOperationsProcessed?: () => void
   onObjectsChange?: (objects: CanvasObject[]) => void
   onSelectionChange?: (selectedIds: string[]) => void
+  viewport?: { x: number; y: number; zoom: number }
+  onUndo?: Dispatch<SetStateAction<(() => void) | undefined>>
+  onRedo?: Dispatch<SetStateAction<(() => void) | undefined>>
+  canUndo?: (canUndo: boolean) => void
+  canRedo?: (canRedo: boolean) => void
+  onAlign?: Dispatch<SetStateAction<((type: AlignmentType) => void) | undefined>>
+  onDistribute?: Dispatch<SetStateAction<((type: DistributeType) => void) | undefined>>
+  gridEnabled?: boolean
+  snapEnabled?: boolean
+  gridSize?: number
+  onGridChange?: (enabled: boolean, snap: boolean, size: number) => void
 }
 
 export function CollaborativeCanvas({
@@ -42,13 +60,31 @@ export function CollaborativeCanvas({
   onAiOperationsProcessed,
   onObjectsChange,
   onSelectionChange,
+  viewport,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onAlign,
+  onDistribute,
+  gridEnabled = false,
+  snapEnabled = false,
+  gridSize = 20,
+  onGridChange,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
+  const [isUndoRedoOperation, setIsUndoRedoOperation] = useState(false)
+  const [connectionState, setConnectionState] = useState({ isConnected: true, queuedOps: 0 })
+  const [clipboard, setClipboard] = useState<CanvasObject[]>([]) // Added clipboard state
+  const { toast } = useToast()
 
-  const { objects, isLoading, syncObjects } = useRealtimeCanvas({
+  const { objects, isLoading, syncObjects, isConnected, queuedOperations } = useRealtimeCanvas({
     canvasId,
     userId,
+    onConnectionChange: (connected, queued) => {
+      setConnectionState({ isConnected: connected, queuedOps: queued })
+    },
   })
 
   const { otherUsers, updateCursor } = usePresence({
@@ -62,6 +98,216 @@ export function CollaborativeCanvas({
     canvasId,
     userId,
   })
+
+  const { addCommand, undo, redo, canUndo: historyCanUndo, canRedo: historyCanRedo } = useHistory()
+  const [previousObjects, setPreviousObjects] = useState<CanvasObject[]>([])
+
+  useEffect(() => {
+    if (isUndoRedoOperation) {
+      setPreviousObjects(objects)
+      setIsUndoRedoOperation(false)
+      return
+    }
+
+    if (objects.length !== previousObjects.length) {
+      // Objects were added or removed
+      if (objects.length > previousObjects.length) {
+        // Objects added
+        const newObjects = objects.filter((obj) => !previousObjects.find((prev) => prev.id === obj.id))
+        if (newObjects.length > 0) {
+          addCommand({
+            type: "create",
+            objectIds: newObjects.map((obj) => obj.id),
+            beforeState: previousObjects,
+            afterState: objects,
+            timestamp: Date.now(),
+          })
+        }
+      } else {
+        // Objects deleted
+        const deletedObjects = previousObjects.filter((prev) => !objects.find((obj) => obj.id === prev.id))
+        if (deletedObjects.length > 0) {
+          addCommand({
+            type: "delete",
+            objectIds: deletedObjects.map((obj) => obj.id),
+            beforeState: previousObjects,
+            afterState: objects,
+            timestamp: Date.now(),
+          })
+        }
+      }
+    } else if (objects.length > 0 && previousObjects.length > 0) {
+      // Check for updates
+      const updatedObjects = objects.filter((obj, idx) => {
+        const prev = previousObjects[idx]
+        return (
+          prev &&
+          (obj.x !== prev.x ||
+            obj.y !== prev.y ||
+            obj.width !== prev.width ||
+            obj.height !== prev.height ||
+            obj.rotation !== prev.rotation ||
+            obj.text_content !== prev.text_content)
+        )
+      })
+
+      if (updatedObjects.length > 0) {
+        addCommand({
+          type: "update",
+          objectIds: updatedObjects.map((obj) => obj.id),
+          beforeState: previousObjects,
+          afterState: objects,
+          timestamp: Date.now(),
+        })
+      }
+    }
+
+    setPreviousObjects(objects)
+  }, [objects, isUndoRedoOperation])
+
+  const handleUndo = useCallback(() => {
+    const newObjects = undo(objects)
+    if (newObjects) {
+      setIsUndoRedoOperation(true)
+      syncObjects(newObjects)
+    }
+  }, [undo, objects, syncObjects])
+
+  const handleRedo = useCallback(() => {
+    const newObjects = redo(objects)
+    if (newObjects) {
+      setIsUndoRedoOperation(true)
+      syncObjects(newObjects)
+    }
+  }, [redo, objects, syncObjects])
+
+  const handleDelete = useCallback(() => {
+    if (selectedObjectIds.length > 0) {
+      const count = selectedObjectIds.length
+      const updatedObjects = objects.filter((obj) => !selectedObjectIds.includes(obj.id))
+      syncObjects(updatedObjects)
+      setSelectedObjectIds([])
+      console.log("[v0] Deleted selected objects via keyboard shortcut")
+
+      toast({
+        title: "Deleted",
+        description: `${count} object${count > 1 ? "s" : ""} deleted`,
+        variant: "destructive",
+      })
+    }
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
+  const handleDuplicate = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+    const duplicatedObjects = selectedObjs.map((obj) => ({
+      ...obj,
+      id: crypto.randomUUID(),
+      x: obj.x + 20, // Offset by 20px
+      y: obj.y + 20, // Offset by 20px
+    }))
+
+    const updatedObjects = [...objects, ...duplicatedObjects]
+    syncObjects(updatedObjects)
+
+    setSelectedObjectIds(duplicatedObjects.map((obj) => obj.id))
+    console.log("[v0] Duplicated", selectedObjectIds.length, "object(s)")
+
+    toast({
+      title: "Duplicated",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} duplicated`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
+  const handleCopy = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+    setClipboard(selectedObjs)
+    console.log("[v0] Copied", selectedObjectIds.length, "object(s) to clipboard")
+
+    toast({
+      title: "Copied",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} copied to clipboard`,
+    })
+  }, [selectedObjectIds, objects, toast])
+
+  const handlePaste = useCallback(() => {
+    if (clipboard.length === 0) return
+
+    const pastedObjects = clipboard.map((obj) => ({
+      ...obj,
+      id: crypto.randomUUID(),
+      x: obj.x + 20, // Offset by 20px
+      y: obj.y + 20, // Offset by 20px
+    }))
+
+    const updatedObjects = [...objects, ...pastedObjects]
+    syncObjects(updatedObjects)
+
+    setSelectedObjectIds(pastedObjects.map((obj) => obj.id))
+    console.log("[v0] Pasted", clipboard.length, "object(s) from clipboard")
+
+    toast({
+      title: "Pasted",
+      description: `${clipboard.length} object${clipboard.length > 1 ? "s" : ""} pasted`,
+    })
+  }, [clipboard, objects, syncObjects, toast])
+
+  const handleStyleChange = useCallback(
+    (updates: Partial<CanvasObject>) => {
+      if (selectedObjectIds.length === 0) return
+
+      const updatedObjects = objects.map((obj) => {
+        if (selectedObjectIds.includes(obj.id)) {
+          return { ...obj, ...updates }
+        }
+        return obj
+      })
+
+      syncObjects(updatedObjects)
+      console.log("[v0] Updated style for", selectedObjectIds.length, "object(s)")
+    },
+    [selectedObjectIds, objects, syncObjects],
+  )
+
+  const handleSelectAll = useCallback(() => {
+    const allIds = objects.map((obj) => obj.id)
+    setSelectedObjectIds(allIds)
+    console.log("[v0] Selected all objects:", allIds.length)
+  }, [objects])
+
+  const selectedObjects = useMemo(() => {
+    return objects.filter((obj) => selectedObjectIds.includes(obj.id))
+  }, [objects, selectedObjectIds])
+
+  useKeyboardShortcuts({
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    onDelete: handleDelete,
+    onDuplicate: handleDuplicate,
+    onSelectAll: handleSelectAll,
+    onCopy: handleCopy,
+    onPaste: handlePaste,
+    canUndo: historyCanUndo,
+    canRedo: historyCanRedo,
+    hasSelection: selectedObjectIds.length > 0,
+  })
+
+  useEffect(() => {
+    if (onUndo) {
+      onUndo(() => handleUndo)
+    }
+    if (onRedo) {
+      onRedo(() => handleRedo)
+    }
+  }, [handleUndo, handleRedo, onUndo, onRedo])
+
+  useEffect(() => {
+    canUndo?.(historyCanUndo)
+    canRedo?.(historyCanRedo)
+  }, [historyCanUndo, historyCanRedo, canUndo, canRedo])
 
   useEffect(() => {
     if (aiOperations.length > 0) {
@@ -118,6 +364,108 @@ export function CollaborativeCanvas({
     onSelectionChange?.(selectedIds)
   }
 
+  const handleLayerSelect = useCallback((id: string, addToSelection: boolean) => {
+    if (addToSelection) {
+      setSelectedObjectIds((prev) => {
+        if (prev.includes(id)) {
+          return prev.filter((selectedId) => selectedId !== id)
+        }
+        return [...prev, id]
+      })
+    } else {
+      setSelectedObjectIds([id])
+    }
+  }, [])
+
+  const handleLayerDelete = useCallback(
+    (id: string) => {
+      const updatedObjects = objects.filter((obj) => obj.id !== id)
+      syncObjects(updatedObjects)
+      setSelectedObjectIds((prev) => prev.filter((selectedId) => selectedId !== id))
+      console.log("[v0] Deleted object from layers panel:", id)
+    },
+    [objects, syncObjects],
+  )
+
+  const handleToggleVisibility = useCallback(
+    (id: string) => {
+      const updatedObjects = objects.map((obj) => {
+        if (obj.id === id) {
+          return { ...obj, visible: obj.visible === false ? true : false }
+        }
+        return obj
+      })
+      syncObjects(updatedObjects)
+      console.log("[v0] Toggled visibility for object:", id)
+    },
+    [objects, syncObjects],
+  )
+
+  const handleToggleLock = useCallback(
+    (id: string) => {
+      const updatedObjects = objects.map((obj) => {
+        if (obj.id === id) {
+          return { ...obj, locked: obj.locked === true ? false : true }
+        }
+        return obj
+      })
+      syncObjects(updatedObjects)
+      console.log("[v0] Toggled lock for object:", id)
+    },
+    [objects, syncObjects],
+  )
+
+  const handleAlign = useCallback(
+    (alignType: AlignmentType) => {
+      if (selectedObjectIds.length < 2) return
+
+      const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+      const updates = alignObjects(selectedObjs, alignType)
+
+      const updatedObjects = objects.map((obj) => {
+        const update = updates.get(obj.id)
+        if (update) {
+          return { ...obj, x: update.x, y: update.y }
+        }
+        return obj
+      })
+
+      syncObjects(updatedObjects)
+      console.log("[v0] Aligned", selectedObjectIds.length, "objects:", alignType)
+    },
+    [selectedObjectIds, objects, syncObjects],
+  )
+
+  const handleDistribute = useCallback(
+    (distributeType: DistributeType) => {
+      if (selectedObjectIds.length < 3) return
+
+      const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+      const updates = distributeObjects(selectedObjs, distributeType)
+
+      const updatedObjects = objects.map((obj) => {
+        const update = updates.get(obj.id)
+        if (update) {
+          return { ...obj, x: update.x, y: update.y }
+        }
+        return obj
+      })
+
+      syncObjects(updatedObjects)
+      console.log("[v0] Distributed", selectedObjectIds.length, "objects:", distributeType)
+    },
+    [selectedObjectIds, objects, syncObjects],
+  )
+
+  useEffect(() => {
+    if (onAlign) {
+      onAlign(() => handleAlign)
+    }
+    if (onDistribute) {
+      onDistribute(() => handleDistribute)
+    }
+  }, [handleAlign, handleDistribute, onAlign, onDistribute])
+
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -128,14 +476,30 @@ export function CollaborativeCanvas({
 
   return (
     <div className="relative h-full w-full">
-      <AIStatusIndicator isAIWorking={isAIWorking} currentOperation={currentOperation} queueLength={queue.length} />
+      <ConnectionStatus isConnected={connectionState.isConnected} queuedOps={connectionState.queuedOps} />
       <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
+      <StylePanel selectedObjects={selectedObjects} onStyleChange={handleStyleChange} />
+      <LayersPanel
+        objects={objects}
+        selectedIds={selectedObjectIds}
+        onSelectObject={handleLayerSelect}
+        onDeleteObject={handleLayerDelete}
+        onToggleVisibility={handleToggleVisibility}
+        onToggleLock={handleToggleLock}
+      />
       <Canvas
         canvasId={canvasId}
         objects={objects}
         onObjectsChange={syncObjects}
         onCursorMove={updateCursor}
         onSelectionChange={handleSelectionChange}
+        viewport={viewport}
+        onAlign={handleAlign}
+        onDistribute={handleDistribute}
+        selectedCount={selectedObjectIds.length}
+        gridEnabled={gridEnabled}
+        snapEnabled={snapEnabled}
+        gridSize={gridSize}
       >
         <MultiplayerCursors users={otherUsers} />
       </Canvas>
@@ -277,12 +641,61 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       }
 
       case "distribute": {
-        updatedObjects = handleDistribute(updatedObjects, operation)
+        const indices = operation.shapeIndices || updatedObjects.map((_: any, i: number) => i)
+        const shapesToDistribute = indices.map((i: number) => updatedObjects[i]).filter(Boolean)
+
+        if (shapesToDistribute.length >= 2) {
+          const distributeType: DistributeType = operation.direction === "horizontal" ? "horizontal" : "vertical"
+          const updates = distributeObjects(shapesToDistribute, distributeType)
+
+          updatedObjects = updatedObjects.map((obj) => {
+            const update = updates.get(obj.id)
+            if (update) {
+              return { ...obj, x: update.x, y: update.y }
+            }
+            return obj
+          })
+        }
         break
       }
 
       case "align": {
-        updatedObjects = handleAlign(updatedObjects, operation)
+        const indices = operation.shapeIndices || updatedObjects.map((_: any, i: number) => i)
+        const shapesToAlign = indices.map((i: number) => updatedObjects[i]).filter(Boolean)
+
+        if (shapesToAlign.length >= 2) {
+          let alignType: AlignmentType
+          switch (operation.alignment) {
+            case "left":
+              alignType = "left"
+              break
+            case "right":
+              alignType = "right"
+              break
+            case "top":
+              alignType = "top"
+              break
+            case "bottom":
+              alignType = "bottom"
+              break
+            case "center":
+            case "middle":
+              alignType = "center-h"
+              break
+            default:
+              alignType = "center-h"
+          }
+
+          const updates = alignObjects(shapesToAlign, alignType)
+
+          updatedObjects = updatedObjects.map((obj) => {
+            const update = updates.get(obj.id)
+            if (update) {
+              return { ...obj, x: update.x, y: update.y }
+            }
+            return obj
+          })
+        }
         break
       }
 
@@ -410,146 +823,6 @@ function handleArrange(objects: CanvasObject[], operation: any): { objects: Canv
   }
 
   return { objects: updatedObjects }
-}
-
-function handleDistribute(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const indices = operation.shapeIndices || objects.map((_: any, i: number) => i)
-  const shapesToDistribute = indices.map((i: number) => objects[i]).filter(Boolean)
-
-  if (shapesToDistribute.length < 2) return objects
-
-  const { direction, spacing } = operation
-  const updatedObjects = [...objects]
-
-  if (direction === "horizontal") {
-    // Sort by x position
-    const sorted = [...shapesToDistribute].sort((a, b) => a.x - b.x)
-    const minX = sorted[0].x
-    const maxX = sorted[sorted.length - 1].x
-    const totalSpacing = spacing !== undefined ? spacing * (sorted.length - 1) : maxX - minX
-    const step = totalSpacing / (sorted.length - 1)
-
-    sorted.forEach((shape: CanvasObject, i: number) => {
-      const originalIndex = indices[shapesToDistribute.indexOf(shape)]
-      updatedObjects[originalIndex] = {
-        ...shape,
-        x: minX + i * step,
-      }
-    })
-  } else {
-    // Sort by y position
-    const sorted = [...shapesToDistribute].sort((a, b) => a.y - b.y)
-    const minY = sorted[0].y
-    const maxY = sorted[sorted.length - 1].y
-    const totalSpacing = spacing !== undefined ? spacing * (sorted.length - 1) : maxY - minY
-    const step = totalSpacing / (sorted.length - 1)
-
-    sorted.forEach((shape: CanvasObject, i: number) => {
-      const originalIndex = indices[shapesToDistribute.indexOf(shape)]
-      updatedObjects[originalIndex] = {
-        ...shape,
-        y: minY + i * step,
-      }
-    })
-  }
-
-  return updatedObjects
-}
-
-function handleAlign(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const indices = operation.shapeIndices || objects.map((_: any, i: number) => i)
-  const shapesToAlign = indices.map((i: number) => objects[i]).filter(Boolean)
-
-  if (shapesToAlign.length === 0) return objects
-
-  const { alignment, toCanvas } = operation
-  const updatedObjects = [...objects]
-
-  if (toCanvas) {
-    // Align to canvas center (1000, 1000)
-    const canvasCenterX = 1000
-    const canvasCenterY = 1000
-
-    shapesToAlign.forEach((shape: CanvasObject, i: number) => {
-      const index = indices[i]
-      switch (alignment) {
-        case "left":
-          updatedObjects[index] = { ...shape, x: 100 }
-          break
-        case "right":
-          updatedObjects[index] = { ...shape, x: 1900 - shape.width }
-          break
-        case "center":
-          updatedObjects[index] = { ...shape, x: canvasCenterX - shape.width / 2 }
-          break
-        case "top":
-          updatedObjects[index] = { ...shape, y: 100 }
-          break
-        case "bottom":
-          updatedObjects[index] = { ...shape, y: 1900 - shape.height }
-          break
-        case "middle":
-          updatedObjects[index] = { ...shape, y: canvasCenterY - shape.height / 2 }
-          break
-      }
-    })
-  } else {
-    // Align to each other
-    switch (alignment) {
-      case "left": {
-        const minX = Math.min(...shapesToAlign.map((s: CanvasObject) => s.x))
-        shapesToAlign.forEach((shape: CanvasObject, i: number) => {
-          const index = indices[i]
-          updatedObjects[index] = { ...shape, x: minX }
-        })
-        break
-      }
-      case "right": {
-        const maxX = Math.max(...shapesToAlign.map((s: CanvasObject) => s.x + s.width))
-        shapesToAlign.forEach((shape: CanvasObject, i: number) => {
-          const index = indices[i]
-          updatedObjects[index] = { ...shape, x: maxX - shape.width }
-        })
-        break
-      }
-      case "center": {
-        const avgX =
-          shapesToAlign.reduce((sum: number, s: CanvasObject) => sum + s.x + s.width / 2, 0) / shapesToAlign.length
-        shapesToAlign.forEach((shape: CanvasObject, i: number) => {
-          const index = indices[i]
-          updatedObjects[index] = { ...shape, x: avgX - shape.width / 2 }
-        })
-        break
-      }
-      case "top": {
-        const minY = Math.min(...shapesToAlign.map((s: CanvasObject) => s.y))
-        shapesToAlign.forEach((shape: CanvasObject, i: number) => {
-          const index = indices[i]
-          updatedObjects[index] = { ...shape, y: minY }
-        })
-        break
-      }
-      case "bottom": {
-        const maxY = Math.max(...shapesToAlign.map((s: CanvasObject) => s.y + s.height))
-        shapesToAlign.forEach((shape: CanvasObject, i: number) => {
-          const index = indices[i]
-          updatedObjects[index] = { ...shape, y: maxY - shape.height }
-        })
-        break
-      }
-      case "middle": {
-        const avgY =
-          shapesToAlign.reduce((sum: number, s: CanvasObject) => sum + s.y + s.height / 2, 0) / shapesToAlign.length
-        shapesToAlign.forEach((shape: CanvasObject, i: number) => {
-          const index = indices[i]
-          updatedObjects[index] = { ...shape, y: avgY - shape.height / 2 }
-        })
-        break
-      }
-    }
-  }
-
-  return updatedObjects
 }
 
 function createLoginForm(objects: CanvasObject[], operation: any): CanvasObject[] {

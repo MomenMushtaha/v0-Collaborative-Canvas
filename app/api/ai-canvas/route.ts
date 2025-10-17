@@ -257,6 +257,63 @@ export async function POST(request: Request) {
     const operations: any[] = []
     const validationErrors: string[] = []
     const shapeIndexSchema = z.union([z.number(), z.literal("selected")])
+    const multiShapeTargetSchema = z
+      .union([z.array(z.number()), z.literal("selected"), z.literal("all")])
+      .optional()
+
+    const resolveTargetIndices = (
+      target: number[] | "selected" | "all" | undefined,
+      {
+        requireMultiple = false,
+        defaultToAllIfNone = false,
+        min = 1,
+      }: { requireMultiple?: boolean; defaultToAllIfNone?: boolean; min?: number } = {},
+    ): { indices?: number[]; error?: string } => {
+      if (safeCurrentObjects.length === 0) {
+        return { error: "There are no shapes on the canvas." }
+      }
+
+      let indices: number[] = []
+
+      if (target === "all") {
+        indices = safeCurrentObjects.map((_, idx) => idx)
+      } else if (Array.isArray(target) && target.length > 0) {
+        indices = target.map((value) => (value === -1 ? safeCurrentObjects.length - 1 : value))
+      } else if (target === "selected" || (!target && !defaultToAllIfNone)) {
+        indices = [...selectedIndices]
+      }
+
+      if (indices.length === 0 && defaultToAllIfNone) {
+        indices = safeCurrentObjects.map((_, idx) => idx)
+      }
+
+      const unique = Array.from(new Set(indices))
+      const invalidIndex = unique.find((idx) => idx < 0 || idx >= safeCurrentObjects.length)
+
+      if (invalidIndex !== undefined) {
+        return {
+          error: `Invalid shape index ${invalidIndex}. Canvas has ${safeCurrentObjects.length} shapes (indices 0-${Math.max(
+            safeCurrentObjects.length - 1,
+            0,
+          )}).`,
+        }
+      }
+
+      if (unique.length < min) {
+        return {
+          error:
+            unique.length === 0
+              ? "No shapes specified or selected for this operation."
+              : `This operation requires at least ${min} shape${min > 1 ? "s" : ""}.`,
+        }
+      }
+
+      if (requireMultiple && unique.length < 2) {
+        return { error: "Select at least two shapes or specify their indices for this operation." }
+      }
+
+      return { indices: unique }
+    }
 
     const tools = {
       // ===== QUERY & INFORMATION =====
@@ -894,29 +951,239 @@ export async function POST(request: Request) {
         description: "Arrange multiple shapes in a pattern (grid, row, column, circle)",
         inputSchema: z.object({
           pattern: z.enum(["grid", "row", "column", "circle"]).describe("The arrangement pattern"),
-          shapeIndices: z
-            .array(z.number())
-            .optional()
-            .describe("Indices of shapes to arrange (empty array means all shapes)"),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to arrange (defaults to the current selection; use 'all' for every shape)",
+          ),
           spacing: z.number().optional().describe("Spacing between shapes in pixels"),
           columns: z.number().optional().describe("Number of columns (for grid pattern)"),
         }),
-        execute: async ({ pattern, shapeIndices, spacing, columns }) => {
-          const validation = validateArrangeShapes({ pattern, shapeIndices, spacing, columns }, safeCurrentObjects)
+        execute: async ({ pattern, shapeTarget, spacing, columns }) => {
+          const validation = validateArrangeShapes({ pattern, spacing, columns })
           if (!validation.valid) {
             validationErrors.push(`arrangeShapes: ${validation.error}`)
             return { error: validation.error }
           }
 
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1, defaultToAllIfNone: true })
+          if (error || !indices) {
+            validationErrors.push(`arrangeShapes: ${error}`)
+            return { error }
+          }
+
           operations.push({
             type: "arrange",
             pattern,
-            shapeIndices: shapeIndices || [],
+            shapeIndices: indices,
             spacing: spacing || 50,
             columns,
+            centerX: visibleArea.centerX,
+            centerY: visibleArea.centerY,
           })
 
-          return { success: true, pattern, shapeIndices, spacing, columns }
+          return { success: true, pattern, shapeIndices: indices, spacing: spacing || 50, columns }
+        },
+      }),
+      alignShapes: tool({
+        description:
+          "Align two or more shapes (left, right, top, bottom, center, or middle). Defaults to the current selection.",
+        inputSchema: z.object({
+          alignment: z
+            .enum(["left", "right", "top", "bottom", "center", "middle"])
+            .describe("How to align the shapes"),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to align (defaults to the current selection; use 'all' for every shape)",
+          ),
+        }),
+        execute: async ({ alignment, shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, {
+            requireMultiple: true,
+            defaultToAllIfNone: true,
+          })
+
+          if (error || !indices) {
+            validationErrors.push(`alignShapes: ${error}`)
+            return { error }
+          }
+
+          operations.push({ type: "align", alignment, shapeIndices: indices })
+
+          return { success: true, alignment, shapeIndices: indices }
+        },
+      }),
+      distributeShapes: tool({
+        description:
+          "Distribute spacing between shapes horizontally or vertically. Defaults to the current selection.",
+        inputSchema: z.object({
+          direction: z.enum(["horizontal", "vertical"]).describe("Distribute horizontally or vertically"),
+          spacing: z.number().optional().describe("Exact spacing between shapes in pixels"),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to distribute (defaults to the current selection; use 'all' for every shape)",
+          ),
+        }),
+        execute: async ({ direction, spacing, shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, {
+            requireMultiple: true,
+            defaultToAllIfNone: true,
+          })
+
+          if (error || !indices) {
+            validationErrors.push(`distributeShapes: ${error}`)
+            return { error }
+          }
+
+          operations.push({ type: "distribute", direction, spacing, shapeIndices: indices })
+
+          return { success: true, direction, spacing, shapeIndices: indices }
+        },
+      }),
+      updateStyle: tool({
+        description:
+          "Update fill, stroke, or text styling for one or more shapes. Defaults to the current selection.",
+        inputSchema: z.object({
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to style (defaults to the current selection; use 'all' for every shape)",
+          ),
+          fillColor: z.string().optional().describe("New fill color (hex code or common color name)"),
+          strokeColor: z.string().optional().describe("New stroke color (hex code or common color name)"),
+          strokeWidth: z.number().optional().describe("New stroke width in pixels"),
+          textColor: z.string().optional().describe("New text color for text objects"),
+        }),
+        execute: async ({ shapeTarget, fillColor, strokeColor, strokeWidth, textColor }) => {
+          if (!fillColor && !strokeColor && strokeWidth === undefined && !textColor) {
+            const error = "Provide at least one style property to update."
+            validationErrors.push(`updateStyle: ${error}`)
+            return { error }
+          }
+
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`updateStyle: ${error}`)
+            return { error }
+          }
+
+          const firstShape = safeCurrentObjects[indices[0]]
+          const resolvedFill = fillColor ? normalizeColorInput(fillColor, firstShape?.fill_color || "#3b82f6") : undefined
+          const resolvedStroke = strokeColor
+            ? normalizeColorInput(strokeColor, firstShape?.stroke_color || "#1f2937")
+            : undefined
+          const resolvedText = textColor ? normalizeColorInput(textColor, "#111827") : undefined
+
+          operations.push({
+            type: "updateStyle",
+            shapeIndices: indices,
+            fillColor: resolvedFill,
+            strokeColor: resolvedStroke,
+            strokeWidth,
+            textColor: resolvedText,
+          })
+
+          return {
+            success: true,
+            shapeIndices: indices,
+            fillColor: resolvedFill,
+            strokeColor: resolvedStroke,
+            strokeWidth,
+            textColor: resolvedText,
+          }
+        },
+      }),
+      duplicateShapes: tool({
+        description:
+          "Duplicate one or more shapes (defaults to the current selection) and offset them for easy visibility.",
+        inputSchema: z.object({
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to duplicate (defaults to the current selection; use 'all' for every shape)",
+          ),
+          offsetX: z.number().optional().describe("Horizontal offset for duplicates (default 20px)"),
+          offsetY: z.number().optional().describe("Vertical offset for duplicates (default 20px)"),
+        }),
+        execute: async ({ shapeTarget, offsetX, offsetY }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`duplicateShapes: ${error}`)
+            return { error }
+          }
+
+          operations.push({
+            type: "duplicate",
+            shapeIndices: indices,
+            offsetX: offsetX ?? 20,
+            offsetY: offsetY ?? 20,
+          })
+
+          return { success: true, shapeIndices: indices, offsetX: offsetX ?? 20, offsetY: offsetY ?? 20 }
+        },
+      }),
+      bringShapesToFront: tool({
+        description: "Move shapes to the front of the canvas stacking order.",
+        inputSchema: z.object({
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to bring forward (defaults to the current selection)",
+          ),
+        }),
+        execute: async ({ shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`bringShapesToFront: ${error}`)
+            return { error }
+          }
+
+          operations.push({ type: "bringToFront", shapeIndices: indices })
+          return { success: true, shapeIndices: indices }
+        },
+      }),
+      sendShapesToBack: tool({
+        description: "Move shapes to the back of the canvas stacking order.",
+        inputSchema: z.object({
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to send backward (defaults to the current selection)",
+          ),
+        }),
+        execute: async ({ shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`sendShapesToBack: ${error}`)
+            return { error }
+          }
+
+          operations.push({ type: "sendToBack", shapeIndices: indices })
+          return { success: true, shapeIndices: indices }
+        },
+      }),
+      bringShapesForward: tool({
+        description: "Move shapes one layer forward in the stacking order.",
+        inputSchema: z.object({
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to move forward (defaults to the current selection)",
+          ),
+        }),
+        execute: async ({ shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`bringShapesForward: ${error}`)
+            return { error }
+          }
+
+          operations.push({ type: "bringForward", shapeIndices: indices })
+          return { success: true, shapeIndices: indices }
+        },
+      }),
+      sendShapesBackward: tool({
+        description: "Move shapes one layer backward in the stacking order.",
+        inputSchema: z.object({
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to move backward (defaults to the current selection)",
+          ),
+        }),
+        execute: async ({ shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`sendShapesBackward: ${error}`)
+            return { error }
+          }
+
+          operations.push({ type: "sendBackward", shapeIndices: indices })
+          return { success: true, shapeIndices: indices }
         },
       }),
 
@@ -1474,24 +1741,9 @@ function validateDeleteShape(
   return { valid: true }
 }
 
-function validateArrangeShapes(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
+function validateArrangeShapes(args: any): { valid: boolean; error?: string } {
   if (!args.pattern || !["grid", "row", "column", "circle"].includes(args.pattern)) {
     return { valid: false, error: "Pattern must be one of: grid, row, column, circle." }
-  }
-
-  if (args.shapeIndices && !Array.isArray(args.shapeIndices)) {
-    return { valid: false, error: "shapeIndices must be an array." }
-  }
-
-  if (args.shapeIndices && args.shapeIndices.length > 0) {
-    for (const index of args.shapeIndices) {
-      if (typeof index !== "number" || index < 0 || index >= currentObjects.length) {
-        return {
-          valid: false,
-          error: `Invalid shape index ${index} in shapeIndices. Canvas has ${currentObjects.length} shapes.`,
-        }
-      }
-    }
   }
 
   if (args.spacing !== undefined && (typeof args.spacing !== "number" || args.spacing < 0)) {

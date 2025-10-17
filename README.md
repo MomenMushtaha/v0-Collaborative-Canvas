@@ -31,8 +31,8 @@ A real-time collaborative canvas application with AI-powered design assistance, 
 
 ### AI Canvas Agent
 - **Natural language commands** - Create and manipulate objects using chat
-- **8 AI commands** - getCanvasState, createShape, createText, moveShape, resizeShape, rotateShape, deleteShape, arrangeShapes
-- **Complex operations** - Multi-step layouts (grid, row, column, circle patterns)
+- **11 AI commands** - getCanvasState, createShape, createText, moveShape, resizeShape, rotateShape, deleteShape, arrangeShapes, createLoginForm, createNavigationBar, createCardLayout
+- **Complex operations** - Multi-step layouts (forms, navigation bars, card grids, arrangement patterns)
 - **Viewport-aware positioning** - AI places objects in visible canvas area
 - **Shared AI state** - All users see AI-generated objects in real-time
 
@@ -78,7 +78,7 @@ lib/
 4. **Operation queuing** - Operations queued during disconnect and replayed on reconnection
 
 ### AI Agent Architecture
-1. **Tool-based execution** - AI uses 8 defined tools to manipulate canvas
+1. **Tool-based execution** - AI uses 11 defined tools to manipulate canvas
 2. **Viewport context** - Client sends viewport state for intelligent positioning
 3. **Shared operations queue** - AI operations broadcast to all users via `ai_operations_queue` table
 4. **Natural language processing** - GPT-4o-mini interprets user intent and generates tool calls

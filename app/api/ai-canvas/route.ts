@@ -3,6 +3,49 @@ import { createServerClient } from "@/lib/supabase/server"
 import { generateText, tool } from "ai"
 import { z } from "zod"
 
+const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/
+
+const COLOR_NAME_MAP: Record<string, string> = {
+  black: "#000000",
+  white: "#ffffff",
+  red: "#ef4444",
+  blue: "#3b82f6",
+  green: "#22c55e",
+  yellow: "#eab308",
+  purple: "#a855f7",
+  pink: "#ec4899",
+  orange: "#f97316",
+  cyan: "#06b6d4",
+  teal: "#14b8a6",
+  indigo: "#6366f1",
+  gray: "#6b7280",
+  slate: "#64748b",
+  zinc: "#52525b",
+  emerald: "#10b981",
+  sky: "#0ea5e9",
+  amber: "#f59e0b",
+  violet: "#8b5cf6",
+  rose: "#f43f5e",
+}
+
+function isValidColorInput(color?: string): boolean {
+  if (color === undefined) return true
+  if (typeof color !== "string") return false
+  const trimmed = color.trim()
+  if (HEX_COLOR_REGEX.test(trimmed)) return true
+  return COLOR_NAME_MAP[trimmed.toLowerCase()] !== undefined
+}
+
+function normalizeColorInput(color: string | undefined, fallback: string): string {
+  if (!color) return fallback
+  const trimmed = color.trim()
+  if (HEX_COLOR_REGEX.test(trimmed)) {
+    return trimmed.toLowerCase()
+  }
+  const normalized = trimmed.toLowerCase()
+  return COLOR_NAME_MAP[normalized] || fallback
+}
+
 export const maxDuration = 30
 
 export async function POST(request: Request) {
@@ -124,42 +167,10 @@ export async function POST(request: Request) {
             return { error: validation.error }
           }
 
-          const colorMap: Record<string, string> = {
-            black: "#000000",
-            white: "#ffffff",
-            red: "#ef4444",
-            blue: "#3b82f6",
-            green: "#22c55e",
-            yellow: "#eab308",
-            purple: "#a855f7",
-            pink: "#ec4899",
-            orange: "#f97316",
-            cyan: "#06b6d4",
-            teal: "#14b8a6",
-            indigo: "#6366f1",
-            gray: "#6b7280",
-          }
+          const resolvedColor = normalizeColorInput(color, "#000000")
+          pushTextOperation({ text, x, y, fontSize: fontSize || 16, color: resolvedColor })
 
-          let finalColor = color || "#000000"
-          if (!finalColor.startsWith("#")) {
-            const normalizedColor = finalColor.toLowerCase().trim()
-            finalColor = colorMap[normalizedColor] || "#000000"
-          }
-
-          if (!/^#[0-9A-Fa-f]{6}$/.test(finalColor)) {
-            finalColor = "#000000"
-          }
-
-          operations.push({
-            type: "createText",
-            text,
-            x,
-            y,
-            fontSize: fontSize || 16,
-            color: finalColor,
-          })
-
-          return { success: true, text, x, y, fontSize: fontSize || 16, color: finalColor }
+          return { success: true, text, x, y, fontSize: fontSize || 16, color: resolvedColor }
         },
       }),
       createShape: tool({
@@ -179,49 +190,18 @@ export async function POST(request: Request) {
             return { error: validation.error }
           }
 
-          const colorMap: Record<string, string> = {
-            red: "#ef4444",
-            blue: "#3b82f6",
-            green: "#22c55e",
-            yellow: "#eab308",
-            purple: "#a855f7",
-            pink: "#ec4899",
-            orange: "#f97316",
-            cyan: "#06b6d4",
-            teal: "#14b8a6",
-            indigo: "#6366f1",
-            gray: "#6b7280",
-            black: "#000000",
-            white: "#ffffff",
-          }
-
-          let finalColor = color || "#3b82f6"
-          if (!finalColor.startsWith("#")) {
-            const normalizedColor = finalColor.toLowerCase().trim()
-            finalColor = colorMap[normalizedColor] || "#3b82f6"
-          }
-
-          if (!/^#[0-9A-Fa-f]{6}$/.test(finalColor)) {
-            finalColor = "#3b82f6"
-          }
-
-          operations.push({
-            type: "create",
-            object: {
-              id: crypto.randomUUID(),
-              type: shape,
-              x,
-              y,
-              width,
-              height,
-              rotation: 0,
-              fill_color: finalColor,
-              stroke_color: finalColor,
-              stroke_width: 2,
-            },
+          const fillColor = normalizeColorInput(color, "#3b82f6")
+          pushShapeOperation({
+            shape,
+            x,
+            y,
+            width,
+            height,
+            fill: fillColor,
+            stroke: fillColor,
           })
 
-          return { success: true, shape, x, y, width, height, color: finalColor }
+          return { success: true, shape, x, y, width, height, color: fillColor }
         },
       }),
       moveShape: tool({
@@ -372,6 +352,354 @@ export async function POST(request: Request) {
           return { success: true, pattern, shapeIndices, spacing, columns }
         },
       }),
+      createLoginForm: tool({
+        description:
+          "Create a complete login form layout with container, input fields, labels, and a call-to-action button.",
+        inputSchema: z.object({
+          title: z.string().optional().describe("Heading text for the form (default: 'Sign In')"),
+          subtitle: z.string().optional().describe("Supportive subtitle text"),
+          buttonText: z.string().optional().describe("Text for the submit button"),
+          width: z
+            .number()
+            .optional()
+            .describe("Overall form width (240-640px, default 360)"),
+          accentColor: z.string().optional().describe("Accent color for the primary button"),
+          includeRememberMe: z.boolean().optional().describe("Whether to include a 'Remember me' helper row"),
+        }),
+        execute: async ({ title, subtitle, buttonText, width, accentColor, includeRememberMe }) => {
+          const resolvedAccent = normalizeColorInput(accentColor, "#2563eb")
+          const formWidth = clampValue(width ?? 360, 240, 640)
+          const baseHeight = subtitle ? 360 : 320
+          const formHeight = baseHeight + (includeRememberMe === false ? -24 : 0)
+          const formPosition = getCenteredPosition(formWidth, formHeight)
+
+          pushShapeOperation({
+            shape: "rectangle",
+            x: formPosition.x,
+            y: formPosition.y,
+            width: formWidth,
+            height: formHeight,
+            fill: "white",
+            stroke: "#e5e7eb",
+          })
+
+          const headingY = formPosition.y + 32
+          pushTextOperation({
+            text: title || "Sign In",
+            x: formPosition.x + 24,
+            y: headingY,
+            fontSize: 26,
+            color: "#111827",
+          })
+
+          const subtitleText = subtitle ?? "Access your account to continue"
+          if (subtitleText) {
+            pushTextOperation({
+              text: subtitleText,
+              x: formPosition.x + 24,
+              y: headingY + 32,
+              fontSize: 16,
+              color: "#6b7280",
+            })
+          }
+
+          const fieldWidth = formWidth - 48
+          const fieldHeight = 48
+          const fieldX = formPosition.x + 24
+          const firstFieldTop = headingY + (subtitleText ? 72 : 56)
+
+          pushTextOperation({
+            text: "Email",
+            x: fieldX,
+            y: firstFieldTop,
+            fontSize: 14,
+            color: "#4b5563",
+          })
+
+          pushShapeOperation({
+            shape: "rectangle",
+            x: fieldX,
+            y: firstFieldTop + 20,
+            width: fieldWidth,
+            height: fieldHeight,
+            fill: "#f9fafb",
+            stroke: "#d1d5db",
+          })
+
+          pushTextOperation({
+            text: "Password",
+            x: fieldX,
+            y: firstFieldTop + fieldHeight + 52,
+            fontSize: 14,
+            color: "#4b5563",
+          })
+
+          const passwordFieldTop = firstFieldTop + fieldHeight + 72
+          pushShapeOperation({
+            shape: "rectangle",
+            x: fieldX,
+            y: passwordFieldTop,
+            width: fieldWidth,
+            height: fieldHeight,
+            fill: "#f9fafb",
+            stroke: "#d1d5db",
+          })
+
+          if (includeRememberMe !== false) {
+            pushTextOperation({
+              text: "Remember me",
+              x: fieldX,
+              y: passwordFieldTop + fieldHeight + 20,
+              fontSize: 14,
+              color: "#6b7280",
+            })
+
+            pushTextOperation({
+              text: "Forgot password?",
+              x: fieldX + fieldWidth - 140,
+              y: passwordFieldTop + fieldHeight + 20,
+              fontSize: 14,
+              color: resolvedAccent,
+            })
+          }
+
+          const buttonHeight = 52
+          const buttonY = formPosition.y + formHeight - buttonHeight - 24
+          pushShapeOperation({
+            shape: "rectangle",
+            x: fieldX,
+            y: buttonY,
+            width: fieldWidth,
+            height: buttonHeight,
+            fill: resolvedAccent,
+            stroke: resolvedAccent,
+          })
+
+          pushTextOperation({
+            text: buttonText || "Sign In",
+            x: fieldX + fieldWidth / 2 - 36,
+            y: buttonY + 16,
+            fontSize: 18,
+            color: "white",
+          })
+
+          return {
+            success: true,
+            components: ["container", "email field", "password field", "cta button"],
+            width: formWidth,
+            height: formHeight,
+          }
+        },
+      }),
+      createNavigationBar: tool({
+        description:
+          "Create a responsive navigation bar with brand text, menu items, and optional call-to-action button.",
+        inputSchema: z.object({
+          brand: z.string().optional().describe("Brand or logo text (default: 'CanvasCollab')"),
+          menuItems: z.array(z.string()).optional().describe("List of navigation menu items"),
+          ctaText: z.string().optional().describe("Optional call-to-action button text"),
+          width: z
+            .number()
+            .optional()
+            .describe("Navigation width (480-1400px, default 920)"),
+          backgroundColor: z.string().optional().describe("Background color for the navigation bar"),
+          accentColor: z.string().optional().describe("Accent color for the CTA button"),
+        }),
+        execute: async ({ brand, menuItems, ctaText, width, backgroundColor, accentColor }) => {
+          const navWidth = clampValue(width ?? 920, 480, 1400)
+          const navHeight = 84
+          const navX = clampValue(
+            visibleArea.centerX - navWidth / 2,
+            visibleArea.left,
+            Math.max(visibleArea.right - navWidth, visibleArea.left),
+          )
+          const navY = clampValue(visibleArea.top + 40, visibleArea.top, Math.max(visibleArea.bottom - navHeight, visibleArea.top))
+          const resolvedBackground = normalizeColorInput(backgroundColor, "white")
+          const resolvedAccent = normalizeColorInput(accentColor, "#2563eb")
+
+          pushShapeOperation({
+            shape: "rectangle",
+            x: navX,
+            y: navY,
+            width: navWidth,
+            height: navHeight,
+            fill: resolvedBackground,
+            stroke: "#e5e7eb",
+          })
+
+          pushTextOperation({
+            text: brand || "CanvasCollab",
+            x: navX + 32,
+            y: navY + 30,
+            fontSize: 22,
+            color: "#111827",
+          })
+
+          const items = (menuItems && menuItems.length > 0 ? menuItems : ["Home", "About", "Features", "Contact"]).slice(0, 6)
+          const menuAreaStart = navX + 200
+          const menuAreaEnd = ctaText ? navX + navWidth - 180 : navX + navWidth - 80
+          const itemCount = items.length
+          const verticalCenter = navY + navHeight / 2 - 10
+
+          if (itemCount === 1) {
+            pushTextOperation({
+              text: items[0],
+              x: menuAreaStart,
+              y: verticalCenter,
+              fontSize: 16,
+              color: "#374151",
+            })
+          } else {
+            const spacing = itemCount > 1 ? (menuAreaEnd - menuAreaStart) / (itemCount - 1) : 0
+            items.forEach((item, index) => {
+              pushTextOperation({
+                text: item,
+                x: menuAreaStart + spacing * index,
+                y: verticalCenter,
+                fontSize: 16,
+                color: "#374151",
+              })
+            })
+          }
+
+          if (ctaText) {
+            const buttonWidth = 144
+            const buttonHeight = 48
+            const buttonX = navX + navWidth - buttonWidth - 24
+            const buttonY = navY + (navHeight - buttonHeight) / 2
+
+            pushShapeOperation({
+              shape: "rectangle",
+              x: buttonX,
+              y: buttonY,
+              width: buttonWidth,
+              height: buttonHeight,
+              fill: resolvedAccent,
+              stroke: resolvedAccent,
+            })
+
+            pushTextOperation({
+              text: ctaText,
+              x: buttonX + 20,
+              y: buttonY + 16,
+              fontSize: 16,
+              color: "white",
+            })
+          }
+
+          return {
+            success: true,
+            menuItems: items,
+            hasCta: Boolean(ctaText),
+            width: navWidth,
+          }
+        },
+      }),
+      createCardLayout: tool({
+        description:
+          "Generate a grid of cards with image placeholders, titles, descriptions, and supporting layout spacing.",
+        inputSchema: z.object({
+          cards: z
+            .number()
+            .optional()
+            .describe("Number of cards to create (1-6, default 3)"),
+          columns: z
+            .number()
+            .optional()
+            .describe("Number of columns in the grid (1-3)"),
+          cardWidth: z
+            .number()
+            .optional()
+            .describe("Card width in pixels (160-320, default 220)"),
+          cardHeight: z
+            .number()
+            .optional()
+            .describe("Card height in pixels (200-400, default 260)"),
+          accentColor: z.string().optional().describe("Accent color for highlight elements"),
+        }),
+        execute: async ({ cards, columns, cardWidth, cardHeight, accentColor }) => {
+          const totalCards = Math.max(1, Math.min(6, Math.round(cards ?? 3)))
+          const gridColumns = Math.max(1, Math.min(3, Math.round(columns ?? Math.min(3, totalCards))))
+          const resolvedCardWidth = clampValue(cardWidth ?? 220, 160, 320)
+          const resolvedCardHeight = clampValue(cardHeight ?? 260, 200, 400)
+          const gap = 24
+          const rows = Math.ceil(totalCards / gridColumns)
+          const gridWidth = gridColumns * resolvedCardWidth + (gridColumns - 1) * gap
+          const gridHeight = rows * resolvedCardHeight + (rows - 1) * gap
+          const gridPosition = getCenteredPosition(gridWidth, gridHeight, 0, 40)
+          const accent = normalizeColorInput(accentColor, "#2563eb")
+
+          for (let index = 0; index < totalCards; index++) {
+            const row = Math.floor(index / gridColumns)
+            const column = index % gridColumns
+            const cardX = gridPosition.x + column * (resolvedCardWidth + gap)
+            const cardY = gridPosition.y + row * (resolvedCardHeight + gap)
+
+            pushShapeOperation({
+              shape: "rectangle",
+              x: cardX,
+              y: cardY,
+              width: resolvedCardWidth,
+              height: resolvedCardHeight,
+              fill: "white",
+              stroke: "#e5e7eb",
+            })
+
+            const mediaHeight = Math.min(140, resolvedCardHeight * 0.45)
+            pushShapeOperation({
+              shape: "rectangle",
+              x: cardX,
+              y: cardY,
+              width: resolvedCardWidth,
+              height: mediaHeight,
+              fill: "#f3f4f6",
+              stroke: "#e5e7eb",
+            })
+
+            pushShapeOperation({
+              shape: "rectangle",
+              x: cardX,
+              y: cardY + mediaHeight,
+              width: resolvedCardWidth,
+              height: 6,
+              fill: accent,
+              stroke: accent,
+            })
+
+            pushTextOperation({
+              text: `Card Title ${index + 1}`,
+              x: cardX + 16,
+              y: cardY + mediaHeight + 24,
+              fontSize: 18,
+              color: "#111827",
+            })
+
+            pushTextOperation({
+              text: "Short supporting description goes here.",
+              x: cardX + 16,
+              y: cardY + mediaHeight + 52,
+              fontSize: 14,
+              color: "#6b7280",
+            })
+
+            pushTextOperation({
+              text: "Learn more",
+              x: cardX + 16,
+              y: cardY + resolvedCardHeight - 36,
+              fontSize: 14,
+              color: accent,
+            })
+          }
+
+          return {
+            success: true,
+            cards: totalCards,
+            columns: gridColumns,
+            width: resolvedCardWidth,
+            height: resolvedCardHeight,
+          }
+        },
+      }),
     }
 
     const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
@@ -399,6 +727,103 @@ export async function POST(request: Request) {
           centerX: 960,
           centerY: 150,
         }
+
+    const clampValue = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+    const clampShapePosition = (x: number, y: number, width: number, height: number) => {
+      const maxX = Math.max(0, 2000 - width)
+      const maxY = Math.max(0, 2000 - height)
+      return {
+        x: clampValue(x, 0, maxX),
+        y: clampValue(y, 0, maxY),
+      }
+    }
+
+    const clampTextPosition = (x: number, y: number) => ({
+      x: clampValue(x, 0, 2000),
+      y: clampValue(y, 0, 2000),
+    })
+
+    const getCenteredPosition = (width: number, height: number, offsetX = 0, offsetY = 0) => {
+      const centerX = clampValue(visibleArea.centerX, visibleArea.left, visibleArea.right)
+      const centerY = clampValue(visibleArea.centerY, visibleArea.top, visibleArea.bottom)
+      const minX = visibleArea.left
+      const maxX = Math.max(visibleArea.left, visibleArea.right - width)
+      const minY = visibleArea.top
+      const maxY = Math.max(visibleArea.top, visibleArea.bottom - height)
+      return {
+        x: clampValue(centerX - width / 2 + offsetX, minX, maxX),
+        y: clampValue(centerY - height / 2 + offsetY, minY, maxY),
+      }
+    }
+
+    const pushShapeOperation = ({
+      shape,
+      x,
+      y,
+      width,
+      height,
+      fill,
+      stroke,
+      strokeWidth = 2,
+      rotation = 0,
+    }: {
+      shape: "rectangle" | "circle" | "triangle" | "line"
+      x: number
+      y: number
+      width: number
+      height: number
+      fill?: string
+      stroke?: string
+      strokeWidth?: number
+      rotation?: number
+    }) => {
+      const { x: clampedX, y: clampedY } = clampShapePosition(x, y, width, height)
+      const fillColor = normalizeColorInput(fill, "#3b82f6")
+      const strokeColor = normalizeColorInput(stroke ?? fillColor, stroke ?? fillColor)
+
+      operations.push({
+        type: "create",
+        object: {
+          id: crypto.randomUUID(),
+          type: shape,
+          x: clampedX,
+          y: clampedY,
+          width,
+          height,
+          rotation,
+          fill_color: fillColor,
+          stroke_color: strokeColor,
+          stroke_width: strokeWidth,
+        },
+      })
+    }
+
+    const pushTextOperation = ({
+      text,
+      x,
+      y,
+      fontSize = 16,
+      color,
+    }: {
+      text: string
+      x: number
+      y: number
+      fontSize?: number
+      color?: string
+    }) => {
+      const { x: clampedX, y: clampedY } = clampTextPosition(x, y)
+      const resolvedColor = normalizeColorInput(color, "#000000")
+
+      operations.push({
+        type: "createText",
+        text,
+        x: clampedX,
+        y: clampedY,
+        fontSize,
+        color: resolvedColor,
+      })
+    }
 
     const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
 
@@ -450,6 +875,9 @@ AVAILABLE FUNCTIONS:
 6. deleteShape - Delete specific shapes or clear all
 7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
 8. createText - Create a text layer on the canvas
+9. createLoginForm - Build a complete login form with fields and button
+10. createNavigationBar - Add a navigation header with menu links and optional CTA
+11. createCardLayout - Generate a grid of rich content cards
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -509,7 +937,9 @@ Examples:
 - "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
 - "How many shapes?" → getCanvasState(query: "count")
 - "Delete all red shapes" → Find all red shapes and delete each one
-- "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')`
+- "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')
+- "Build a login form" → createLoginForm(title: 'Sign in', buttonText: 'Continue')
+- "Create a product card layout" → createCardLayout(cards: 3, columns: 3)`
 
     const result = await generateText({
       model: "openai/gpt-4o-mini",
@@ -591,6 +1021,13 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
 
   if (args.x < 0 || args.x > 2000 || args.y < 0 || args.y > 2000) {
     return { valid: false, error: "Position must be within canvas bounds (0-2000)." }
+  }
+
+  if (!isValidColorInput(args.color)) {
+    return {
+      valid: false,
+      error: "Color must be a valid hex code (e.g., #ff0000) or supported color name (e.g., red).",
+    }
   }
 
   return { valid: true }
@@ -791,8 +1228,11 @@ function validateCreateText(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Font size must be a positive number." }
   }
 
-  if (args.color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(args.color)) {
-    return { valid: false, error: "Invalid color format. Must be a hex code." }
+  if (!isValidColorInput(args.color)) {
+    return {
+      valid: false,
+      error: "Invalid color format. Provide a hex code (e.g., #000000) or known color name (e.g., blue).",
+    }
   }
 
   return { valid: true }

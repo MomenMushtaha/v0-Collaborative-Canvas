@@ -790,6 +790,34 @@ export function CollaborativeCanvas({
   )
 }
 
+function resolveOperationIndex(operation: any, objects: CanvasObject[]): { index?: number; error?: string } {
+  if (operation.shapeId) {
+    const idIndex = objects.findIndex((obj) => obj.id === operation.shapeId)
+    if (idIndex !== -1) {
+      return { index: idIndex }
+    }
+    if (operation.shapeIndex === undefined) {
+      return { error: `Shape with id ${operation.shapeId} was not found.` }
+    }
+  }
+
+  if (typeof operation.shapeIndex === "number") {
+    if (!Number.isInteger(operation.shapeIndex)) {
+      return { error: `Invalid non-integer shapeIndex ${operation.shapeIndex}.` }
+    }
+    if (objects.length === 0) {
+      return { error: "No shapes available on the canvas." }
+    }
+    const resolvedIndex = operation.shapeIndex === -1 ? objects.length - 1 : operation.shapeIndex
+    if (resolvedIndex < 0 || resolvedIndex >= objects.length) {
+      return { error: `Shape index ${operation.shapeIndex} is out of bounds for ${objects.length} shapes.` }
+    }
+    return { index: resolvedIndex }
+  }
+
+  return { error: "Operation is missing a valid shape target." }
+}
+
 function applyOperation(objects: CanvasObject[], operation: any): { objects: CanvasObject[]; error?: string } {
   let updatedObjects = [...objects]
 
@@ -826,11 +854,11 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       }
 
       case "move": {
-        const moveIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-        if (moveIndex < 0 || moveIndex >= updatedObjects.length) {
+        const { index: moveIndex, error: moveError } = resolveOperationIndex(operation, updatedObjects)
+        if (moveIndex === undefined) {
           return {
             objects,
-            error: `Cannot move shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+            error: moveError || "Cannot move shape because the target could not be resolved.",
           }
         }
         const obj = updatedObjects[moveIndex]
@@ -847,11 +875,11 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       }
 
       case "resize": {
-        const resizeIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-        if (resizeIndex < 0 || resizeIndex >= updatedObjects.length) {
+        const { index: resizeIndex, error: resizeError } = resolveOperationIndex(operation, updatedObjects)
+        if (resizeIndex === undefined) {
           return {
             objects,
-            error: `Cannot resize shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+            error: resizeError || "Cannot resize shape because the target could not be resolved.",
           }
         }
         const obj = updatedObjects[resizeIndex]
@@ -872,11 +900,11 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       }
 
       case "rotate": {
-        const rotateIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-        if (rotateIndex < 0 || rotateIndex >= updatedObjects.length) {
+        const { index: rotateIndex, error: rotateError } = resolveOperationIndex(operation, updatedObjects)
+        if (rotateIndex === undefined) {
           return {
             objects,
-            error: `Cannot rotate shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+            error: rotateError || "Cannot rotate shape because the target could not be resolved.",
           }
         }
         const obj = updatedObjects[rotateIndex]
@@ -893,11 +921,11 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
           console.log("[v0] Deleting all shapes")
           updatedObjects = []
         } else {
-          const deleteIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-          if (deleteIndex < 0 || deleteIndex >= updatedObjects.length) {
+          const { index: deleteIndex, error: deleteError } = resolveOperationIndex(operation, updatedObjects)
+          if (deleteIndex === undefined) {
             return {
               objects,
-              error: `Cannot delete shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+              error: deleteError || "Cannot delete shape because the target could not be resolved.",
             }
           }
           console.log("[v0] Deleting shape", deleteIndex)

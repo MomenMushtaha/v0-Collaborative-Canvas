@@ -42,7 +42,7 @@ export interface CanvasState {
 }
 
 export interface HistoryCommand {
-  type: "create" | "update" | "delete"
+  type: "create" | "update" | "delete" | "restore"
   objectIds: string[]
   beforeState?: CanvasObject[]
   afterState?: CanvasObject[]

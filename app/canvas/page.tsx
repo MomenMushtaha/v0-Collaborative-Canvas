@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { CollaborativeCanvas } from "@/components/collaborative-canvas"
@@ -36,6 +36,7 @@ export default function CanvasPage() {
   const [gridSize, setGridSize] = useState(20)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [showHistory, setShowHistory] = useState(false)
+  const [pendingHistoryRestore, setPendingHistoryRestore] = useState<CanvasObject[] | null>(null)
   const [lastSnapshotTime, setLastSnapshotTime] = useState(Date.now())
   const [commentMode, setCommentMode] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
@@ -165,8 +166,30 @@ export default function CanvasPage() {
 
   const handleRestoreHistory = (objects: CanvasObject[]) => {
     setCurrentObjects(objects)
-    console.log("[v0] Restored history snapshot with", objects.length, "objects")
+    setPendingHistoryRestore(objects)
+    setLastSnapshotTime(Date.now())
+    console.log("[v0] Restoring history snapshot with", objects.length, "objects")
   }
+
+  const handleHistoryRestoreComplete = useCallback(
+    (result: "success" | "error") => {
+      setPendingHistoryRestore(null)
+
+      if (result === "success") {
+        toast({
+          title: "Version restored",
+          description: "The canvas has been updated to the selected snapshot.",
+        })
+      } else {
+        toast({
+          title: "Restore failed",
+          description: "We couldn't apply that snapshot. Please try again.",
+          variant: "destructive",
+        })
+      }
+    },
+    [toast],
+  )
 
   const handleCommentCreate = async (x: number, y: number, content: string) => {
     if (!user) return
@@ -268,6 +291,8 @@ export default function CanvasPage() {
           onSendBackward={setOnSendBackward}
           lassoMode={lassoMode}
           onSelectAllOfType={setOnSelectAllOfType}
+          historyRestore={pendingHistoryRestore}
+          onHistoryRestoreComplete={handleHistoryRestoreComplete}
         />
       </div>
       <AiChat

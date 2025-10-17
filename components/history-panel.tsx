@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { History, RefreshCw, RotateCcw, Save, X } from "lucide-react"
+import { cn } from "@/lib/utils"
 import {
   loadHistorySnapshots,
   restoreHistorySnapshot,
@@ -31,7 +32,13 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
   const [isSaving, setIsSaving] = useState(false)
   const [description, setDescription] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const { toast } = useToast()
+
+  const lastUpdatedLabel = useMemo(() => {
+    if (!lastUpdated) return null
+    return formatTimeAgo(lastUpdated)
+  }, [lastUpdated])
 
   const loadSnapshots = useCallback(async () => {
     try {
@@ -43,7 +50,7 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
           ...snapshot,
           object_count:
             snapshot.object_count ??
-            (Array.isArray(snapshot.snapshot) ? snapshot.snapshot.length : snapshot.object_count ?? 0),
+            (Array.isArray(snapshot.snapshot) ? snapshot.snapshot.length : (snapshot.object_count ?? 0)),
         })),
       )
       setLastUpdated(new Date().toISOString())
@@ -53,7 +60,7 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
     } finally {
       setIsLoading(false)
     }
-  }, [canvasId, toast])
+  }, [canvasId])
 
   useEffect(() => {
     loadSnapshots()
@@ -147,12 +154,7 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
             placeholder="Add a note (optional)"
             className="h-8 text-xs"
           />
-          <Button
-            onClick={handleSaveSnapshot}
-            size="sm"
-            className="h-8 px-3 gap-1"
-            disabled={!canSaveSnapshot}
-          >
+          <Button onClick={handleSaveSnapshot} size="sm" className="h-8 px-3 gap-1" disabled={!canSaveSnapshot}>
             <Save className="h-3 w-3" />
             {isSaving ? "Saving..." : "Save"}
           </Button>
@@ -186,7 +188,10 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium truncate">{snapshot.created_by_name}</div>
-                    <div className="text-xs text-muted-foreground" title={new Date(snapshot.created_at).toLocaleString()}>
+                    <div
+                      className="text-xs text-muted-foreground"
+                      title={new Date(snapshot.created_at).toLocaleString()}
+                    >
                       {formatTimeAgo(snapshot.created_at)}
                     </div>
                   </div>
@@ -214,8 +219,12 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
       {/* Footer */}
       <div className="flex-shrink-0 px-4 py-3 border-t border-border/50 bg-gradient-to-t from-muted/20 to-transparent">
         <div className="text-xs text-muted-foreground text-center space-y-1">
-          <p>Showing last {snapshots.length} version{snapshots.length !== 1 ? "s" : ""}</p>
-          {lastUpdatedLabel && <p className="text-[10px] text-muted-foreground/80">Last refreshed {lastUpdatedLabel}</p>}
+          <p>
+            Showing last {snapshots.length} version{snapshots.length !== 1 ? "s" : ""}
+          </p>
+          {lastUpdatedLabel && (
+            <p className="text-[10px] text-muted-foreground/80">Last refreshed {lastUpdatedLabel}</p>
+          )}
         </div>
       </div>
     </div>

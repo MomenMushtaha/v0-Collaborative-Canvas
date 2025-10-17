@@ -58,11 +58,10 @@ export function LayersPanel({
 
   const getObjectLabel = (obj: CanvasObject) => {
     if (obj.type === "text") {
-      const preview = obj.content?.substring(0, 30) || "Text"
-      return preview.length < (obj.content?.length || 0) ? `${preview}...` : preview
+      return "Text"
     }
 
-    // Just return the capitalized shape name
+    // Return the capitalized shape name
     return obj.shape?.charAt(0).toUpperCase() + obj.shape?.slice(1) || "Object"
   }
 

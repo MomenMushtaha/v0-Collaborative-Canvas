@@ -924,9 +924,7 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       }
 
       case "distribute": {
-        const indices = Array.isArray(operation.shapeIndices)
-          ? operation.shapeIndices
-          : updatedObjects.map((_: any, i: number) => i)
+        const indices = operation.shapeIndices || updatedObjects.map((_: any, i: number) => i)
         const shapesToDistribute = indices.map((i: number) => updatedObjects[i]).filter(Boolean)
 
         if (shapesToDistribute.length >= 2) {
@@ -945,9 +943,7 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       }
 
       case "align": {
-        const indices = Array.isArray(operation.shapeIndices)
-          ? operation.shapeIndices
-          : updatedObjects.map((_: any, i: number) => i)
+        const indices = operation.shapeIndices || updatedObjects.map((_: any, i: number) => i)
         const shapesToAlign = indices.map((i: number) => updatedObjects[i]).filter(Boolean)
 
         if (shapesToAlign.length >= 2) {
@@ -1013,183 +1009,6 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
 
       case "createForm": {
         updatedObjects = createForm(updatedObjects, operation)
-        break
-      }
-
-      case "updateStyle": {
-        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
-          return { objects, error: "No shapes provided for style update." }
-        }
-
-        const targetIndices = Array.from(new Set(operation.shapeIndices))
-        const invalidIndex = targetIndices.find((idx: number) => idx < 0 || idx >= updatedObjects.length)
-
-        if (invalidIndex !== undefined) {
-          return {
-            objects,
-            error: `Cannot style shape at index ${invalidIndex}. Only ${updatedObjects.length} shapes exist.`,
-          }
-        }
-
-        const hasFill = typeof operation.fillColor === "string"
-        const hasStroke = typeof operation.strokeColor === "string"
-        const hasStrokeWidth = typeof operation.strokeWidth === "number"
-        const hasTextColor = typeof operation.textColor === "string"
-
-        if (!hasFill && !hasStroke && !hasStrokeWidth && !hasTextColor) {
-          return { objects, error: "No style changes were provided." }
-        }
-
-        updatedObjects = updatedObjects.map((obj, idx) => {
-          if (!targetIndices.includes(idx)) {
-            return obj
-          }
-
-          const updates: Partial<CanvasObject> = {}
-
-          if (hasFill) {
-            updates.fill_color = operation.fillColor
-          }
-
-          if (hasStroke) {
-            updates.stroke_color = operation.strokeColor
-          }
-
-          if (hasStrokeWidth) {
-            updates.stroke_width = operation.strokeWidth
-          }
-
-          if (hasTextColor && obj.type === "text") {
-            updates.fill_color = operation.textColor
-            updates.stroke_color = operation.textColor
-          }
-
-          return { ...obj, ...updates }
-        })
-
-        break
-      }
-
-      case "duplicate": {
-        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
-          return { objects, error: "No shapes provided to duplicate." }
-        }
-
-        const uniqueIndices = Array.from(new Set(operation.shapeIndices))
-        const invalidIndex = uniqueIndices.find((idx: number) => idx < 0 || idx >= updatedObjects.length)
-
-        if (invalidIndex !== undefined) {
-          return {
-            objects,
-            error: `Cannot duplicate shape at index ${invalidIndex}. Only ${updatedObjects.length} shapes exist.`,
-          }
-        }
-
-        const offsetX = typeof operation.offsetX === "number" ? operation.offsetX : 20
-        const offsetY = typeof operation.offsetY === "number" ? operation.offsetY : 20
-
-        const duplicates = uniqueIndices
-          .map((idx) => updatedObjects[idx])
-          .filter(Boolean)
-          .map((source) => ({
-            ...source,
-            id: crypto.randomUUID(),
-            x: source.x + offsetX,
-            y: source.y + offsetY,
-          }))
-
-        updatedObjects = [...updatedObjects, ...duplicates]
-
-        break
-      }
-
-      case "bringToFront": {
-        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
-          return { objects, error: "No shapes provided to bring to front." }
-        }
-
-        const indexSet = new Set(operation.shapeIndices)
-        const selected = updatedObjects.filter((_, idx) => indexSet.has(idx))
-        if (selected.length === 0) {
-          return { objects, error: "None of the specified shapes could be found." }
-        }
-
-        const remaining = updatedObjects.filter((_, idx) => !indexSet.has(idx))
-        updatedObjects = [...remaining, ...selected]
-
-        break
-      }
-
-      case "sendToBack": {
-        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
-          return { objects, error: "No shapes provided to send to back." }
-        }
-
-        const indexSet = new Set(operation.shapeIndices)
-        const selected = updatedObjects.filter((_, idx) => indexSet.has(idx))
-        if (selected.length === 0) {
-          return { objects, error: "None of the specified shapes could be found." }
-        }
-
-        const remaining = updatedObjects.filter((_, idx) => !indexSet.has(idx))
-        updatedObjects = [...selected, ...remaining]
-
-        break
-      }
-
-      case "bringForward": {
-        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
-          return { objects, error: "No shapes provided to bring forward." }
-        }
-
-        const idSet = new Set(
-          operation.shapeIndices
-            .map((idx: number) => updatedObjects[idx])
-            .filter(Boolean)
-            .map((obj: CanvasObject) => obj.id),
-        )
-
-        if (idSet.size === 0) {
-          return { objects, error: "None of the specified shapes could be found." }
-        }
-
-        for (let i = updatedObjects.length - 2; i >= 0; i--) {
-          const current = updatedObjects[i]
-          const next = updatedObjects[i + 1]
-          if (idSet.has(current.id) && !idSet.has(next.id)) {
-            updatedObjects[i] = next
-            updatedObjects[i + 1] = current
-          }
-        }
-
-        break
-      }
-
-      case "sendBackward": {
-        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
-          return { objects, error: "No shapes provided to send backward." }
-        }
-
-        const idSet = new Set(
-          operation.shapeIndices
-            .map((idx: number) => updatedObjects[idx])
-            .filter(Boolean)
-            .map((obj: CanvasObject) => obj.id),
-        )
-
-        if (idSet.size === 0) {
-          return { objects, error: "None of the specified shapes could be found." }
-        }
-
-        for (let i = 1; i < updatedObjects.length; i++) {
-          const current = updatedObjects[i]
-          const previous = updatedObjects[i - 1]
-          if (idSet.has(current.id) && !idSet.has(previous.id)) {
-            updatedObjects[i] = previous
-            updatedObjects[i - 1] = current
-          }
-        }
-
         break
       }
 

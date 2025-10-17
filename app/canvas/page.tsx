@@ -42,6 +42,20 @@ export default function CanvasPage() {
   const [comments, setComments] = useState<Comment[]>([])
   const [lassoMode, setLassoMode] = useState(false)
   const [onSelectAllOfType, setOnSelectAllOfType] = useState<(() => void) | undefined>()
+
+  const [presencePanelCollapsed, setPresencePanelCollapsed] = useState(false)
+  const [layersPanelCollapsed, setLayersPanelCollapsed] = useState(false)
+  const [stylePanelCollapsed, setStylePanelCollapsed] = useState(false)
+
+  const PANEL_SPACING = 16 // Gap between panels
+  const COLLAPSED_HEIGHT = 48 // Height of collapsed panel button
+  const PRESENCE_EXPANDED_HEIGHT = 260
+  const LAYERS_EXPANDED_HEIGHT = 280
+
+  const presenceTop = 80 // Below toolbar
+  const layersTop = presenceTop + (presencePanelCollapsed ? COLLAPSED_HEIGHT : PRESENCE_EXPANDED_HEIGHT) + PANEL_SPACING
+  const styleTop = layersTop + (layersPanelCollapsed ? COLLAPSED_HEIGHT : LAYERS_EXPANDED_HEIGHT) + PANEL_SPACING
+
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()

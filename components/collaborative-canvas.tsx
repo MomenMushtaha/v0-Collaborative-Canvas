@@ -480,17 +480,7 @@ export function CollaborativeCanvas({
           console.log(`[v0] Processing operation ${i + 1}/${aiOperations.length}:`, operation.type)
 
           try {
-            const result = applyOperation(updatedObjects, operation, {
-              selectedObjectIds,
-              setSelectedObjectIds,
-              onGridChange,
-              gridEnabled,
-              snapEnabled,
-              gridSize,
-              onCommentCreate,
-              onViewportChange,
-              currentViewport: viewport,
-            })
+            const result = applyOperation(updatedObjects, operation)
             if (result.error) {
               failedOperations.push(`${operation.type}: ${result.error}`)
               console.warn(`[v0] Operation failed:`, result.error)
@@ -800,37 +790,8 @@ export function CollaborativeCanvas({
   )
 }
 
-interface OperationContext {
-  selectedObjectIds: string[]
-  setSelectedObjectIds?: (ids: string[]) => void
-  onGridChange?: (enabled: boolean, snap: boolean, size: number) => void
-  gridEnabled: boolean
-  snapEnabled: boolean
-  gridSize: number
-  onCommentCreate?: (x: number, y: number, content: string) => void
-  onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void
-  currentViewport?: { x: number; y: number; zoom: number }
-}
-
-function applyOperation(
-  objects: CanvasObject[],
-  operation: any,
-  context: OperationContext,
-): { objects: CanvasObject[]; error?: string } {
+function applyOperation(objects: CanvasObject[], operation: any): { objects: CanvasObject[]; error?: string } {
   let updatedObjects = [...objects]
-
-  const selectedIndices = context.selectedObjectIds
-    .map((id) => updatedObjects.findIndex((obj) => obj.id === id))
-    .filter((idx) => idx >= 0)
-
-  const resolveIndices = (indices?: number[]) => {
-    if (Array.isArray(indices) && indices.length > 0) {
-      return indices
-        .map((idx) => (idx === -1 ? updatedObjects.length - 1 : idx))
-        .filter((idx) => idx >= 0 && idx < updatedObjects.length)
-    }
-    return selectedIndices
-  }
 
   try {
     switch (operation.type) {
@@ -861,51 +822,6 @@ function applyOperation(
         }
         updatedObjects.push(newTextObject)
         console.log("[v0] Created text object:", operation.text)
-        break
-      }
-
-      case "updateText": {
-        const updateIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
-        if (updateIndex < 0 || updateIndex >= updatedObjects.length) {
-          return {
-            objects,
-            error: `Cannot update text at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
-          }
-        }
-
-        const target = updatedObjects[updateIndex]
-        if (target.type !== "text") {
-          return { objects, error: `Shape at index ${updateIndex} is not a text object.` }
-        }
-
-        let newText = target.text_content || ""
-        if (typeof operation.text === "string") {
-          newText = operation.text
-        }
-        if (typeof operation.append === "string") {
-          newText = `${newText}${operation.append}`
-        }
-
-        const updates: Partial<CanvasObject> = {
-          text_content: newText,
-        }
-
-        if (typeof operation.fontSize === "number") {
-          updates.font_size = operation.fontSize
-          updates.height = operation.fontSize
-        }
-
-        if (typeof operation.color === "string") {
-          updates.fill_color = operation.color
-          updates.stroke_color = operation.color
-        }
-
-        if (typeof operation.fontFamily === "string") {
-          updates.font_family = operation.fontFamily
-        }
-
-        updatedObjects[updateIndex] = { ...target, ...updates }
-        console.log("[v0] Updated text object", updateIndex)
         break
       }
 
@@ -972,136 +888,6 @@ function applyOperation(
         break
       }
 
-      case "style": {
-        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
-        if (targetIndices.length === 0) {
-          return { objects, error: "No valid shapes found to style." }
-        }
-
-        targetIndices.forEach((index) => {
-          const current = updatedObjects[index]
-          const updates: Partial<CanvasObject> = {}
-
-          if (typeof operation.fillColor === "string") {
-            updates.fill_color = operation.fillColor
-          }
-          if (typeof operation.strokeColor === "string") {
-            updates.stroke_color = operation.strokeColor
-          }
-          if (typeof operation.strokeWidth === "number") {
-            updates.stroke_width = operation.strokeWidth
-          }
-
-          updatedObjects[index] = { ...current, ...updates }
-        })
-
-        console.log("[v0] Styled", targetIndices.length, "shape(s)")
-        break
-      }
-
-      case "visibility": {
-        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
-        if (targetIndices.length === 0) {
-          return { objects, error: "No valid shapes found to toggle visibility." }
-        }
-
-        updatedObjects = updatedObjects.map((obj, index) =>
-          targetIndices.includes(index) ? { ...obj, visible: operation.visible } : obj,
-        )
-        console.log("[v0] Updated visibility for", targetIndices.length, "shape(s)")
-        break
-      }
-
-      case "lock": {
-        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
-        if (targetIndices.length === 0) {
-          return { objects, error: "No valid shapes found to lock or unlock." }
-        }
-
-        updatedObjects = updatedObjects.map((obj, index) =>
-          targetIndices.includes(index) ? { ...obj, locked: operation.locked } : obj,
-        )
-        console.log("[v0] Updated lock state for", targetIndices.length, "shape(s)")
-        break
-      }
-
-      case "duplicate": {
-        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
-        if (targetIndices.length === 0) {
-          return { objects, error: "No valid shapes found to duplicate." }
-        }
-
-        const offsetX = typeof operation.offsetX === "number" ? operation.offsetX : 20
-        const offsetY = typeof operation.offsetY === "number" ? operation.offsetY : 20
-
-        const duplicates: CanvasObject[] = targetIndices.map((index) => {
-          const original = updatedObjects[index]
-          return {
-            ...original,
-            id: crypto.randomUUID(),
-            x: original.x + offsetX,
-            y: original.y + offsetY,
-          }
-        })
-
-        updatedObjects = [...updatedObjects, ...duplicates]
-        console.log("[v0] Duplicated", duplicates.length, "shape(s)")
-        return { objects: updatedObjects, selectedIds: duplicates.map((obj) => obj.id) }
-      }
-
-      case "layer": {
-        const targetIndices = resolveOperationIndices(updatedObjects, operation.shapeIndices)
-        if (targetIndices.length === 0) {
-          return { objects, error: "No valid shapes found to reorder." }
-        }
-
-        const targetIds = targetIndices.map((index) => updatedObjects[index]?.id).filter(Boolean)
-        if (targetIds.length === 0) {
-          return { objects, error: "Unable to resolve shape IDs for reordering." }
-        }
-
-        const selectedObjects = updatedObjects.filter((obj) => targetIds.includes(obj.id))
-        const otherObjects = updatedObjects.filter((obj) => !targetIds.includes(obj.id))
-
-        switch (operation.action) {
-          case "bringToFront":
-            updatedObjects = [...otherObjects, ...selectedObjects]
-            break
-          case "sendToBack":
-            updatedObjects = [...selectedObjects, ...otherObjects]
-            break
-          case "bringForward": {
-            const reordered = [...updatedObjects]
-            for (let i = reordered.length - 2; i >= 0; i--) {
-              if (targetIds.includes(reordered[i].id) && !targetIds.includes(reordered[i + 1].id)) {
-                const temp = reordered[i]
-                reordered[i] = reordered[i + 1]
-                reordered[i + 1] = temp
-              }
-            }
-            updatedObjects = reordered
-            break
-          }
-          case "sendBackward": {
-            const reordered = [...updatedObjects]
-            for (let i = 1; i < reordered.length; i++) {
-              if (targetIds.includes(reordered[i].id) && !targetIds.includes(reordered[i - 1].id)) {
-                const temp = reordered[i]
-                reordered[i] = reordered[i - 1]
-                reordered[i - 1] = temp
-              }
-            }
-            updatedObjects = reordered
-            break
-          }
-          default:
-            return { objects, error: `Unknown layer action: ${operation.action}` }
-        }
-
-        console.log("[v0] Reordered", targetIds.length, "shape(s) with action", operation.action)
-        break
-      }
-
       case "delete": {
         if (operation.all) {
           console.log("[v0] Deleting all shapes")
@@ -1124,11 +910,10 @@ function applyOperation(
         console.log("[v0] Arranging shapes with pattern:", operation.pattern)
         const arrangeOp = {
           ...operation,
-          shapeIndices: resolveIndices(operation.shapeIndices),
-          spacing: operation.spacing ?? 100,
-          centerX: operation.centerX ?? 1000,
-          centerY: operation.centerY ?? 1000,
-          columns: operation.columns ?? Math.ceil(Math.sqrt(updatedObjects.length)),
+          spacing: operation.spacing || 100,
+          centerX: operation.centerX || 1000,
+          centerY: operation.centerY || 1000,
+          columns: operation.columns || Math.ceil(Math.sqrt(updatedObjects.length)),
         }
         const result = handleArrange(updatedObjects, arrangeOp)
         if (result.error) {
@@ -1139,7 +924,7 @@ function applyOperation(
       }
 
       case "distribute": {
-        const indices = resolveIndices(operation.shapeIndices)
+        const indices = operation.shapeIndices || updatedObjects.map((_: any, i: number) => i)
         const shapesToDistribute = indices.map((i: number) => updatedObjects[i]).filter(Boolean)
 
         if (shapesToDistribute.length >= 2) {
@@ -1158,7 +943,7 @@ function applyOperation(
       }
 
       case "align": {
-        const indices = resolveIndices(operation.shapeIndices)
+        const indices = operation.shapeIndices || updatedObjects.map((_: any, i: number) => i)
         const shapesToAlign = indices.map((i: number) => updatedObjects[i]).filter(Boolean)
 
         if (shapesToAlign.length >= 2) {
@@ -1193,163 +978,6 @@ function applyOperation(
             }
             return obj
           })
-        }
-        break
-      }
-
-      case "style": {
-        const indices = resolveIndices(operation.shapeIndices)
-        if (indices.length === 0) {
-          return { objects, error: "No shapes available to style." }
-        }
-
-        const fillColor = operation.fillColor
-        const strokeColor = operation.strokeColor
-        const strokeWidth = operation.strokeWidth
-        const fontSize = operation.fontSize
-
-        updatedObjects = updatedObjects.map((obj, idx) => {
-          if (!indices.includes(idx)) {
-            return obj
-          }
-
-          const updates: Partial<CanvasObject> = {}
-
-          if (fillColor) {
-            updates.fill_color = fillColor
-            if (obj.type === "text") {
-              updates.stroke_color = fillColor
-            }
-          }
-
-          if (strokeColor) {
-            updates.stroke_color = strokeColor
-          }
-
-          if (typeof strokeWidth === "number") {
-            updates.stroke_width = strokeWidth
-          }
-
-          if (typeof fontSize === "number" && obj.type === "text") {
-            updates.font_size = fontSize
-            updates.height = fontSize
-          }
-
-          return Object.keys(updates).length > 0 ? { ...obj, ...updates } : obj
-        })
-
-        break
-      }
-
-      case "duplicate": {
-        const indices = resolveIndices(operation.shapeIndices)
-        if (indices.length === 0) {
-          return { objects, error: "No shapes available to duplicate." }
-        }
-
-        const offsetX = typeof operation.offsetX === "number" ? operation.offsetX : 20
-        const offsetY = typeof operation.offsetY === "number" ? operation.offsetY : 20
-        const newIds: string[] = []
-
-        indices.forEach((idx: number) => {
-          const original = updatedObjects[idx]
-          if (!original) return
-
-          const clone: CanvasObject = {
-            ...original,
-            id: crypto.randomUUID(),
-            x: original.x + offsetX,
-            y: original.y + offsetY,
-          }
-          updatedObjects.push(clone)
-          newIds.push(clone.id)
-        })
-
-        if (newIds.length > 0) {
-          context.setSelectedObjectIds?.(newIds)
-        }
-
-        break
-      }
-
-      case "reorder": {
-        const indices = resolveIndices(operation.shapeIndices)
-        if (indices.length === 0) {
-          return { objects, error: "No shapes available to reorder." }
-        }
-
-        const indexSet = new Set(indices)
-        switch (operation.action) {
-          case "bringToFront": {
-            const moving = updatedObjects.filter((_, idx) => indexSet.has(idx))
-            const remaining = updatedObjects.filter((_, idx) => !indexSet.has(idx))
-            updatedObjects = [...remaining, ...moving]
-            break
-          }
-          case "sendToBack": {
-            const moving = updatedObjects.filter((_, idx) => indexSet.has(idx))
-            const remaining = updatedObjects.filter((_, idx) => !indexSet.has(idx))
-            updatedObjects = [...moving, ...remaining]
-            break
-          }
-          case "bringForward": {
-            const newOrder = [...updatedObjects]
-            for (let i = newOrder.length - 2; i >= 0; i--) {
-              if (indexSet.has(i) && !indexSet.has(i + 1)) {
-                const temp = newOrder[i]
-                newOrder[i] = newOrder[i + 1]
-                newOrder[i + 1] = temp
-              }
-            }
-            updatedObjects = newOrder
-            break
-          }
-          case "sendBackward": {
-            const newOrder = [...updatedObjects]
-            for (let i = 1; i < newOrder.length; i++) {
-              if (indexSet.has(i) && !indexSet.has(i - 1)) {
-                const temp = newOrder[i]
-                newOrder[i] = newOrder[i - 1]
-                newOrder[i - 1] = temp
-              }
-            }
-            updatedObjects = newOrder
-            break
-          }
-          default:
-            return { objects, error: `Unknown reorder action: ${operation.action}` }
-        }
-
-        break
-      }
-
-      case "grid": {
-        context.onGridChange?.(
-          operation.enabled ?? context.gridEnabled,
-          operation.snap ?? context.snapEnabled,
-          operation.size ?? context.gridSize,
-        )
-        break
-      }
-
-      case "viewport": {
-        const currentViewport = context.currentViewport || { x: 0, y: 0, zoom: 1 }
-        const nextViewport = {
-          x: typeof operation.x === "number" ? operation.x : currentViewport.x,
-          y: typeof operation.y === "number" ? operation.y : currentViewport.y,
-          zoom: typeof operation.zoom === "number" ? operation.zoom : currentViewport.zoom,
-        }
-        context.onViewportChange?.(nextViewport)
-        break
-      }
-
-      case "comment": {
-        if (
-          typeof operation.x === "number" &&
-          typeof operation.y === "number" &&
-          typeof operation.content === "string"
-        ) {
-          context.onCommentCreate?.(operation.x, operation.y, operation.content)
         }
         break
       }

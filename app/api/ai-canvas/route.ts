@@ -203,77 +203,6 @@ export async function POST(request: Request) {
     const operations: any[] = []
     const validationErrors: string[] = []
     const shapeIndexSchema = z.union([z.number(), z.literal("selected")])
-    const shapeIndicesSchema = z.union([
-      z.literal("selected"),
-      z.array(z.union([z.number(), z.literal("selected")])).min(1),
-    ])
-
-    const resolveShapeIndexInput = (shapeIndex: number | "selected" | undefined) => {
-      if (shapeIndex === "selected") {
-        return selectedIndices.length > 0 ? selectedIndices[0] : null
-      }
-      if (typeof shapeIndex === "number") {
-        return shapeIndex
-      }
-      return null
-    }
-
-    const resolveShapeIndicesInput = (
-      shapeIndices: Array<number | "selected"> | "selected" | undefined,
-    ): number[] => {
-      if (shapeIndices === undefined) {
-        return [...selectedIndices]
-      }
-
-      const indices: number[] = []
-
-      const appendIndices = (values: number[]) => {
-        values.forEach((value) => {
-          if (!indices.includes(value)) {
-            indices.push(value)
-          }
-        })
-      }
-
-      if (shapeIndices === "selected") {
-        appendIndices(selectedIndices)
-      } else if (Array.isArray(shapeIndices)) {
-        shapeIndices.forEach((value) => {
-          if (value === "selected") {
-            appendIndices(selectedIndices)
-          } else if (typeof value === "number") {
-            indices.push(value)
-          }
-        })
-      }
-
-      return indices
-    }
-
-    const validateShapeIndices = (indices: number[]): { valid: boolean; error?: string } => {
-      if (indices.length === 0) {
-        return { valid: false, error: "No target shapes specified or selected." }
-      }
-
-      for (const idx of indices) {
-        if (idx === -1) {
-          // Allow -1 to reference the last shape (including newly created ones later in the sequence)
-          continue
-        }
-
-        if (idx < 0 || idx >= safeCurrentObjects.length) {
-          return {
-            valid: false,
-            error: `Invalid shape index ${idx}. Canvas has ${safeCurrentObjects.length} shapes (indices 0-${Math.max(
-              0,
-              safeCurrentObjects.length - 1,
-            )}).`,
-          }
-        }
-      }
-
-      return { valid: true }
-    }
 
     const tools = {
       getCanvasState: tool({
@@ -380,14 +309,14 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "move",
-            shapeIndex: validation.resolvedIndex!,
+            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
             x,
             y,
             deltaX,
             deltaY,
           })
 
-          return { success: true, shapeIndex: validation.resolvedIndex, x, y, deltaX, deltaY }
+          return { success: true, shapeIndex, x, y, deltaX, deltaY }
         },
       }),
       resizeShape: tool({
@@ -409,13 +338,13 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "resize",
-            shapeIndex: validation.resolvedIndex!,
+            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
             width,
             height,
             scale,
           })
 
-          return { success: true, shapeIndex: validation.resolvedIndex, width, height, scale }
+          return { success: true, shapeIndex, width, height, scale }
         },
       }),
       rotateShape: tool({
@@ -439,12 +368,12 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "rotate",
-            shapeIndex: validation.resolvedIndex!,
+            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
             degrees: degrees ?? 0,
             absolute: absolute ?? false,
           })
 
-          return { success: true, shapeIndex: validation.resolvedIndex, degrees, absolute }
+          return { success: true, shapeIndex, degrees, absolute }
         },
       }),
       deleteShape: tool({
@@ -464,204 +393,12 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "delete",
-            shapeIndex: validation.resolvedIndex,
+            shapeIndex:
+              shapeIndex === undefined ? undefined : shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
             all: all ?? false,
           })
 
-          return { success: true, shapeIndex: validation.resolvedIndex, all }
-        },
-      }),
-      updateText: tool({
-        description: "Update the contents or styling of a text object",
-        inputSchema: z.object({
-          shapeIndex: shapeIndexSchema.describe(
-            "Index of the text object to edit (use 'selected' for the current selection, -1 for the last object)",
-          ),
-          text: z.string().optional().describe("Replace the text content with this string"),
-          append: z.string().optional().describe("Append this string to the current text"),
-          fontSize: z.number().optional().describe("Update the font size in pixels"),
-          color: z.string().optional().describe("Text color as a hex code or named color"),
-          fontFamily: z.string().optional().describe("Set a specific font family"),
-        }),
-        execute: async ({ shapeIndex, text, append, fontSize, color, fontFamily }) => {
-          const validation = validateUpdateText(
-            { shapeIndex, text, append, fontSize, color, fontFamily },
-            safeCurrentObjects,
-            selectedIndices,
-          )
-          if (!validation.valid) {
-            validationErrors.push(`updateText: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          const resolvedIndex = validation.shapeIndex
-          const finalColor = color ? normalizeColorInput(color, "#000000") : undefined
-
-          operations.push({
-            type: "updateText",
-            shapeIndex: resolvedIndex,
-            text,
-            append,
-            fontSize,
-            color: finalColor,
-            fontFamily,
-          })
-
-          return { success: true, shapeIndex: resolvedIndex, text, append, fontSize, color: finalColor, fontFamily }
-        },
-      }),
-      updateStyle: tool({
-        description: "Update fill or stroke styling for one or more shapes",
-        inputSchema: z.object({
-          shapeIndices: shapeIndicesSchema.optional().describe(
-            "Indices of shapes to update (use 'selected' or include -1 for last shape)",
-          ),
-          fillColor: z.string().optional().describe("New fill color as hex code or name"),
-          strokeColor: z.string().optional().describe("New stroke color as hex code or name"),
-          strokeWidth: z.number().optional().describe("Stroke width in pixels"),
-        }),
-        execute: async ({ shapeIndices, fillColor, strokeColor, strokeWidth }) => {
-          const indices = resolveShapeIndicesInput(shapeIndices)
-          const validation = validateShapeIndices(indices)
-          if (!validation.valid) {
-            validationErrors.push(`updateStyle: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          if (!fillColor && !strokeColor && strokeWidth === undefined) {
-            const error = "Must provide fillColor, strokeColor, or strokeWidth"
-            validationErrors.push(`updateStyle: ${error}`)
-            return { error }
-          }
-
-          const updates: Record<string, unknown> = { shapeIndices: indices }
-          if (fillColor) {
-            updates.fillColor = normalizeColorInput(fillColor, "#3b82f6")
-          }
-          if (strokeColor) {
-            updates.strokeColor = normalizeColorInput(strokeColor, "#1f2937")
-          }
-          if (strokeWidth !== undefined) {
-            updates.strokeWidth = strokeWidth
-          }
-
-          operations.push({ type: "style", ...updates })
-
-          return { success: true, ...updates }
-        },
-      }),
-      setVisibility: tool({
-        description: "Show or hide specific shapes",
-        inputSchema: z.object({
-          shapeIndices: shapeIndicesSchema.optional().describe("Shapes to update (defaults to current selection)"),
-          visible: z.boolean().describe("Whether the shapes should be visible"),
-        }),
-        execute: async ({ shapeIndices, visible }) => {
-          const indices = resolveShapeIndicesInput(shapeIndices)
-          const validation = validateShapeIndices(indices)
-          if (!validation.valid) {
-            validationErrors.push(`setVisibility: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({ type: "visibility", shapeIndices: indices, visible })
-          return { success: true, shapeIndices: indices, visible }
-        },
-      }),
-      setLock: tool({
-        description: "Lock or unlock specific shapes to prevent editing",
-        inputSchema: z.object({
-          shapeIndices: shapeIndicesSchema.optional().describe("Shapes to update (defaults to current selection)"),
-          locked: z.boolean().describe("Whether the shapes should be locked"),
-        }),
-        execute: async ({ shapeIndices, locked }) => {
-          const indices = resolveShapeIndicesInput(shapeIndices)
-          const validation = validateShapeIndices(indices)
-          if (!validation.valid) {
-            validationErrors.push(`setLock: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({ type: "lock", shapeIndices: indices, locked })
-          return { success: true, shapeIndices: indices, locked }
-        },
-      }),
-      duplicateShapes: tool({
-        description: "Duplicate selected shapes with an optional offset",
-        inputSchema: z.object({
-          shapeIndices: shapeIndicesSchema.optional().describe("Shapes to duplicate (defaults to current selection)"),
-          offsetX: z.number().optional().describe("Horizontal offset for duplicated shapes"),
-          offsetY: z.number().optional().describe("Vertical offset for duplicated shapes"),
-        }),
-        execute: async ({ shapeIndices, offsetX, offsetY }) => {
-          const indices = resolveShapeIndicesInput(shapeIndices)
-          const validation = validateShapeIndices(indices)
-          if (!validation.valid) {
-            validationErrors.push(`duplicateShapes: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "duplicate",
-            shapeIndices: indices,
-            offsetX: offsetX ?? 20,
-            offsetY: offsetY ?? 20,
-          })
-
-          return { success: true, shapeIndices: indices, offsetX: offsetX ?? 20, offsetY: offsetY ?? 20 }
-        },
-      }),
-      reorderShapes: tool({
-        description: "Change the z-order of shapes (bring to front/back or move one layer)",
-        inputSchema: z.object({
-          shapeIndices: shapeIndicesSchema.optional().describe("Shapes to reorder (defaults to current selection)"),
-          action: z
-            .enum(["bringToFront", "sendToBack", "bringForward", "sendBackward"])
-            .describe("Layer action to perform"),
-        }),
-        execute: async ({ shapeIndices, action }) => {
-          const indices = resolveShapeIndicesInput(shapeIndices)
-          const validation = validateShapeIndices(indices)
-          if (!validation.valid) {
-            validationErrors.push(`reorderShapes: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({ type: "layer", shapeIndices: indices, action })
-          return { success: true, shapeIndices: indices, action }
-        },
-      }),
-      copyShapes: tool({
-        description: "Copy shapes to the clipboard so they can be pasted later",
-        inputSchema: z.object({
-          shapeIndices: shapeIndicesSchema.optional().describe("Shapes to copy (defaults to current selection)"),
-        }),
-        execute: async ({ shapeIndices }) => {
-          const indices = resolveShapeIndicesInput(shapeIndices)
-          const validation = validateShapeIndices(indices)
-          if (!validation.valid) {
-            validationErrors.push(`copyShapes: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({ type: "copy", shapeIndices: indices })
-          return { success: true, shapeIndices: indices }
-        },
-      }),
-      pasteShapes: tool({
-        description: "Paste shapes previously copied to the clipboard",
-        inputSchema: z.object({
-          offsetX: z.number().optional().describe("Horizontal offset for pasted shapes"),
-          offsetY: z.number().optional().describe("Vertical offset for pasted shapes"),
-        }),
-        execute: async ({ offsetX, offsetY }) => {
-          operations.push({
-            type: "paste",
-            offsetX: offsetX ?? 20,
-            offsetY: offsetY ?? 20,
-          })
-
-          return { success: true, offsetX: offsetX ?? 20, offsetY: offsetY ?? 20 }
+          return { success: true, shapeIndex, all }
         },
       }),
       arrangeShapes: tool({
@@ -669,18 +406,14 @@ export async function POST(request: Request) {
         inputSchema: z.object({
           pattern: z.enum(["grid", "row", "column", "circle"]).describe("The arrangement pattern"),
           shapeIndices: z
-            .array(shapeIndexSchema)
+            .array(z.number())
             .optional()
-            .describe("Indices of shapes to arrange (empty array means selected shapes)"),
+            .describe("Indices of shapes to arrange (empty array means all shapes)"),
           spacing: z.number().optional().describe("Spacing between shapes in pixels"),
           columns: z.number().optional().describe("Number of columns (for grid pattern)"),
         }),
         execute: async ({ pattern, shapeIndices, spacing, columns }) => {
-          const validation = validateArrangeShapes(
-            { pattern, shapeIndices, spacing, columns },
-            safeCurrentObjects,
-            selectedIndices,
-          )
+          const validation = validateArrangeShapes({ pattern, shapeIndices, spacing, columns }, safeCurrentObjects)
           if (!validation.valid) {
             validationErrors.push(`arrangeShapes: ${validation.error}`)
             return { error: validation.error }
@@ -689,249 +422,12 @@ export async function POST(request: Request) {
           operations.push({
             type: "arrange",
             pattern,
-            shapeIndices: validation.resolvedIndices!,
+            shapeIndices: shapeIndices || [],
             spacing: spacing || 50,
             columns,
           })
 
-          return {
-            success: true,
-            pattern,
-            shapeIndices: validation.resolvedIndices,
-            spacing: spacing || 50,
-            columns,
-          }
-        },
-      }),
-      duplicateShape: tool({
-        description: "Duplicate one or more shapes with an optional offset",
-        inputSchema: z.object({
-          shapeIndices: z
-            .array(shapeIndexSchema)
-            .optional()
-            .describe("Indices of shapes to duplicate (defaults to currently selected shapes)"),
-          offsetX: z.number().optional().describe("Horizontal offset for duplicates (default: 20)"),
-          offsetY: z.number().optional().describe("Vertical offset for duplicates (default: 20)"),
-        }),
-        execute: async ({ shapeIndices, offsetX, offsetY }) => {
-          const validation = validateDuplicateShape(
-            { shapeIndices, offsetX, offsetY },
-            safeCurrentObjects,
-            selectedIndices,
-          )
-          if (!validation.valid) {
-            validationErrors.push(`duplicateShape: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "duplicate",
-            shapeIndices: validation.resolvedIndices!,
-            offsetX: offsetX ?? 20,
-            offsetY: offsetY ?? 20,
-          })
-
-          return {
-            success: true,
-            shapeIndices: validation.resolvedIndices,
-            offsetX: offsetX ?? 20,
-            offsetY: offsetY ?? 20,
-          }
-        },
-      }),
-      updateStyle: tool({
-        description: "Update fill, stroke, or font styling for one or more shapes",
-        inputSchema: z.object({
-          shapeIndices: z
-            .array(shapeIndexSchema)
-            .optional()
-            .describe("Indices of shapes to style (defaults to currently selected shapes)"),
-          fillColor: z.string().optional().describe("Fill color as hex or common color name"),
-          strokeColor: z.string().optional().describe("Stroke color as hex or common color name"),
-          strokeWidth: z.number().optional().describe("Stroke width in pixels"),
-          fontSize: z.number().optional().describe("Font size in pixels (text objects only)"),
-        }),
-        execute: async ({ shapeIndices, fillColor, strokeColor, strokeWidth, fontSize }) => {
-          const validation = validateUpdateStyle(
-            { shapeIndices, fillColor, strokeColor, strokeWidth, fontSize },
-            safeCurrentObjects,
-            selectedIndices,
-          )
-          if (!validation.valid) {
-            validationErrors.push(`updateStyle: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "style",
-            shapeIndices: validation.resolvedIndices!,
-            fillColor: fillColor ? normalizeColorInput(fillColor, "#3b82f6") : undefined,
-            strokeColor: strokeColor ? normalizeColorInput(strokeColor, "#1f2937") : undefined,
-            strokeWidth,
-            fontSize,
-          })
-
-          return {
-            success: true,
-            shapeIndices: validation.resolvedIndices,
-            fillColor: fillColor ? normalizeColorInput(fillColor, "#3b82f6") : undefined,
-            strokeColor: strokeColor ? normalizeColorInput(strokeColor, "#1f2937") : undefined,
-            strokeWidth,
-            fontSize,
-          }
-        },
-      }),
-      alignShapes: tool({
-        description: "Align multiple shapes along a specified axis",
-        inputSchema: z.object({
-          alignment: z
-            .enum(["left", "right", "top", "bottom", "center", "middle"])
-            .describe("Alignment direction"),
-          shapeIndices: z
-            .array(shapeIndexSchema)
-            .optional()
-            .describe("Indices of shapes to align (defaults to currently selected shapes)"),
-        }),
-        execute: async ({ alignment, shapeIndices }) => {
-          const validation = validateAlignShapes({ alignment, shapeIndices }, safeCurrentObjects, selectedIndices)
-          if (!validation.valid) {
-            validationErrors.push(`alignShapes: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "align",
-            alignment,
-            shapeIndices: validation.resolvedIndices!,
-          })
-
-          return { success: true, alignment, shapeIndices: validation.resolvedIndices }
-        },
-      }),
-      distributeShapes: tool({
-        description: "Distribute shapes evenly horizontally or vertically",
-        inputSchema: z.object({
-          direction: z
-            .enum(["horizontal", "vertical"])
-            .describe("Distribution direction"),
-          shapeIndices: z
-            .array(shapeIndexSchema)
-            .optional()
-            .describe("Indices of shapes to distribute (defaults to currently selected shapes)"),
-        }),
-        execute: async ({ direction, shapeIndices }) => {
-          const validation = validateDistributeShapes({ direction, shapeIndices }, safeCurrentObjects, selectedIndices)
-          if (!validation.valid) {
-            validationErrors.push(`distributeShapes: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "distribute",
-            direction,
-            shapeIndices: validation.resolvedIndices!,
-          })
-
-          return { success: true, direction, shapeIndices: validation.resolvedIndices }
-        },
-      }),
-      reorderShapes: tool({
-        description: "Change the stacking order of shapes",
-        inputSchema: z.object({
-          action: z
-            .enum(["bringToFront", "sendToBack", "bringForward", "sendBackward"])
-            .describe("Reorder action"),
-          shapeIndices: z
-            .array(shapeIndexSchema)
-            .optional()
-            .describe("Indices of shapes to reorder (defaults to currently selected shapes)"),
-        }),
-        execute: async ({ action, shapeIndices }) => {
-          const validation = validateReorderShapes({ action, shapeIndices }, safeCurrentObjects, selectedIndices)
-          if (!validation.valid) {
-            validationErrors.push(`reorderShapes: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "reorder",
-            action,
-            shapeIndices: validation.resolvedIndices!,
-          })
-
-          return { success: true, action, shapeIndices: validation.resolvedIndices }
-        },
-      }),
-      toggleGrid: tool({
-        description: "Update grid visibility, snapping, or size",
-        inputSchema: z.object({
-          enabled: z.boolean().optional().describe("Whether the grid should be shown"),
-          snap: z.boolean().optional().describe("Whether objects should snap to the grid"),
-          size: z.number().optional().describe("Grid size in pixels (10, 20, 30, 50, or 100)"),
-        }),
-        execute: async ({ enabled, snap, size }) => {
-          const validation = validateToggleGrid({ enabled, snap, size })
-          if (!validation.valid) {
-            validationErrors.push(`toggleGrid: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "grid",
-            enabled,
-            snap,
-            size,
-          })
-
-          return { success: true, enabled, snap, size }
-        },
-      }),
-      setViewport: tool({
-        description: "Pan or zoom the viewport to a specific location",
-        inputSchema: z.object({
-          x: z.number().optional().describe("Viewport X position"),
-          y: z.number().optional().describe("Viewport Y position"),
-          zoom: z.number().optional().describe("Zoom level (1.0 = 100%)"),
-        }),
-        execute: async ({ x, y, zoom }) => {
-          const validation = validateSetViewport({ x, y, zoom })
-          if (!validation.valid) {
-            validationErrors.push(`setViewport: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "viewport",
-            x,
-            y,
-            zoom,
-          })
-
-          return { success: true, x, y, zoom }
-        },
-      }),
-      createComment: tool({
-        description: "Create a comment at a specified canvas location",
-        inputSchema: z.object({
-          x: z.number().describe("X coordinate for the comment"),
-          y: z.number().describe("Y coordinate for the comment"),
-          content: z.string().min(1).describe("Comment text"),
-        }),
-        execute: async ({ x, y, content }) => {
-          const validation = validateCreateComment({ x, y, content })
-          if (!validation.valid) {
-            validationErrors.push(`createComment: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "comment",
-            x,
-            y,
-            content,
-          })
-
-          return { success: true, x, y, content }
+          return { success: true, pattern, shapeIndices, spacing, columns }
         },
       }),
       createLoginForm: tool({
@@ -1048,97 +544,6 @@ export async function POST(request: Request) {
           return { success: true, x: centerX, y: centerY, width: cardWidth, height: cardHeight }
         },
       }),
-      toggleGrid: tool({
-        description: "Enable or disable the canvas grid overlay",
-        inputSchema: z.object({
-          enabled: z.boolean().describe("Whether the grid should be enabled"),
-          snap: z.boolean().optional().describe("Optional snap-to-grid state to apply simultaneously"),
-        }),
-        execute: async ({ enabled, snap }) => {
-          operations.push({ type: "toggleGrid", enabled, snap })
-          return { success: true, enabled, snap }
-        },
-      }),
-      toggleSnap: tool({
-        description: "Enable or disable snap-to-grid alignment",
-        inputSchema: z.object({
-          snap: z.boolean().describe("Whether snap-to-grid should be enabled"),
-        }),
-        execute: async ({ snap }) => {
-          operations.push({ type: "toggleSnap", snap })
-          return { success: true, snap }
-        },
-      }),
-      setGridSize: tool({
-        description: "Set the grid size for snapping and display",
-        inputSchema: z.object({
-          size: z.enum(["10", "20", "30", "50", "100"]).or(z.number()).describe("Grid size in pixels"),
-        }),
-        execute: async ({ size }) => {
-          const parsed = typeof size === "number" ? size : Number(size)
-          operations.push({ type: "setGridSize", size: parsed })
-          return { success: true, size: parsed }
-        },
-      }),
-      updateViewport: tool({
-        description: "Pan or zoom the canvas viewport",
-        inputSchema: z.object({
-          x: z.number().optional().describe("Absolute X offset of the viewport"),
-          y: z.number().optional().describe("Absolute Y offset of the viewport"),
-          zoom: z.number().optional().describe("Absolute zoom level (1 = 100%)"),
-          deltaX: z.number().optional().describe("Pan the viewport horizontally by this amount"),
-          deltaY: z.number().optional().describe("Pan the viewport vertically by this amount"),
-          zoomFactor: z.number().optional().describe("Multiply current zoom by this factor"),
-        }),
-        execute: async ({ x, y, zoom, deltaX, deltaY, zoomFactor }) => {
-          operations.push({ type: "viewport", x, y, zoom, deltaX, deltaY, zoomFactor })
-          return { success: true, x, y, zoom, deltaX, deltaY, zoomFactor }
-        },
-      }),
-      createComment: tool({
-        description: "Create a canvas comment at a specific location",
-        inputSchema: z.object({
-          x: z.number().describe("X coordinate for the comment"),
-          y: z.number().describe("Y coordinate for the comment"),
-          content: z.string().describe("Comment text"),
-        }),
-        execute: async ({ x, y, content }) => {
-          operations.push({ type: "comment", x, y, content })
-          return { success: true, x, y, content }
-        },
-      }),
-      selectAll: tool({
-        description: "Select all objects on the canvas",
-        inputSchema: z.object({}).optional(),
-        execute: async () => {
-          operations.push({ type: "selectAll" })
-          return { success: true }
-        },
-      }),
-      selectAllOfType: tool({
-        description: "Select all objects that match the currently selected types",
-        inputSchema: z.object({}).optional(),
-        execute: async () => {
-          operations.push({ type: "selectAllOfType" })
-          return { success: true }
-        },
-      }),
-      undo: tool({
-        description: "Undo the last canvas change",
-        inputSchema: z.object({}).optional(),
-        execute: async () => {
-          operations.push({ type: "undo" })
-          return { success: true }
-        },
-      }),
-      redo: tool({
-        description: "Redo the most recently undone change",
-        inputSchema: z.object({}).optional(),
-        execute: async () => {
-          operations.push({ type: "redo" })
-          return { success: true }
-        },
-      }),
     }
 
     const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
@@ -1190,18 +595,10 @@ AVAILABLE FUNCTIONS:
 5. rotateShape - Rotate existing shapes
 6. deleteShape - Delete specific shapes or clear all
 7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
-8. duplicateShape - Duplicate selected shapes with offsets
-9. updateStyle - Change fill, stroke, or font styling on shapes
-10. alignShapes - Align two or more shapes along an axis
-11. distributeShapes - Evenly distribute three or more shapes
-12. reorderShapes - Change stacking order (front/back/forward/backward)
-13. toggleGrid - Toggle grid visibility, snapping, or size
-14. setViewport - Pan or zoom the canvas viewport
-15. createText - Create a text layer on the canvas
-16. createLoginForm - Build a multi-element login form layout with labels and button
-17. createNavigationBar - Create a navigation bar with menu items
-18. createCardLayout - Create a card with media area, text, and button
-19. createComment - Add a comment marker at a position
+8. createText - Create a text layer on the canvas
+9. createLoginForm - Build a multi-element login form layout with labels and button
+10. createNavigationBar - Create a navigation bar with menu items
+11. createCardLayout - Create a card with media area, text, and button
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -1254,10 +651,6 @@ BEST PRACTICES:
 5. If a request is ambiguous, make a reasonable assumption and explain it
 6. **ALWAYS check if there's a selected shape before assuming which shape to operate on**
 7. **CRITICAL: ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) - this is within the user's accessible viewport**
-8. Use updateStyle for color, stroke, or typography changes instead of recreating shapes
-9. Use reorderShapes to satisfy "bring to front/back" requests
-10. Use toggleGrid and setViewport when users mention grid, snapping, pan, or zoom
-11. Use createComment when users ask to leave feedback markers on the canvas
 
 Examples:
 - "Create a blue square" → createShape(rectangle, x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, 100x100, blue)
@@ -1324,102 +717,6 @@ Examples:
   }
 }
 
-function resolveSingleShapeIndex(
-  input: number | "selected",
-  currentObjects: any[],
-  selectedIndices: number[],
-): { valid: boolean; error?: string; index?: number } {
-  if (currentObjects.length === 0) {
-    return { valid: false, error: "There are no shapes on the canvas." }
-  }
-
-  if (input === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    return { valid: true, index: selectedIndices[0] }
-  }
-
-  if (typeof input !== "number") {
-    return { valid: false, error: "shapeIndex must be a number or 'selected'." }
-  }
-
-  const resolved = input === -1 ? currentObjects.length - 1 : input
-
-  if (resolved < 0 || resolved >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${input}. Canvas has ${currentObjects.length} shapes (indices 0-${Math.max(
-        0,
-        currentObjects.length - 1,
-      )}).`,
-    }
-  }
-
-  return { valid: true, index: resolved }
-}
-
-function resolveMultipleShapeIndices(
-  input: (number | "selected")[] | undefined,
-  currentObjects: any[],
-  selectedIndices: number[],
-  options: { min?: number; allowEmpty?: boolean } = {},
-): { valid: boolean; error?: string; indices?: number[] } {
-  const min = options.min ?? 1
-
-  let rawValues: (number | "selected")[]
-  if (input && input.length > 0) {
-    rawValues = input
-  } else {
-    if (selectedIndices.length === 0) {
-      if (options.allowEmpty) {
-        return { valid: true, indices: [] }
-      }
-      return { valid: false, error: "No shapes are currently selected." }
-    }
-    rawValues = selectedIndices
-  }
-
-  const resolved: number[] = []
-  for (const value of rawValues) {
-    if (value === "selected") {
-      if (selectedIndices.length === 0) {
-        return { valid: false, error: "No shapes are currently selected." }
-      }
-      resolved.push(...selectedIndices)
-      continue
-    }
-
-    if (typeof value !== "number") {
-      return { valid: false, error: "shapeIndices must contain numbers or 'selected'." }
-    }
-
-    const normalized = value === -1 ? currentObjects.length - 1 : value
-    if (normalized < 0 || normalized >= currentObjects.length) {
-      return {
-        valid: false,
-        error: `Invalid shape index ${value}. Canvas has ${currentObjects.length} shapes (indices 0-${Math.max(
-          0,
-          currentObjects.length - 1,
-        )}).`,
-      }
-    }
-
-    resolved.push(normalized)
-  }
-
-  const uniqueIndices = Array.from(new Set(resolved))
-
-  if (!options.allowEmpty && uniqueIndices.length < min) {
-    return {
-      valid: false,
-      error: min === 1 ? "At least one shape is required." : `At least ${min} shapes are required for this action.`,
-    }
-  }
-
-  return { valid: true, indices: uniqueIndices }
-}
-
 function validateCreateShape(args: any): { valid: boolean; error?: string } {
   if (!args.shape || !["rectangle", "circle", "triangle", "line"].includes(args.shape)) {
     return { valid: false, error: "Invalid shape type. Must be rectangle, circle, triangle, or line." }
@@ -1452,10 +749,23 @@ function validateMoveShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndex?: number } {
-  const resolved = resolveSingleShapeIndex(args.shapeIndex, currentObjects, selectedIndices)
-  if (!resolved.valid) {
-    return resolved
+): { valid: boolean; error?: string } {
+  if (args.shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    args.shapeIndex = selectedIndices[0]
+  } else if (typeof args.shapeIndex !== "number") {
+    return { valid: false, error: "shapeIndex must be a number." }
+  }
+
+  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
+
+  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
+    return {
+      valid: false,
+      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes (indices 0-${currentObjects.length - 1}).`,
+    }
   }
 
   if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
@@ -1481,17 +791,30 @@ function validateMoveShape(
     }
   }
 
-  return { valid: true, resolvedIndex: resolved.index }
+  return { valid: true }
 }
 
 function validateResizeShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndex?: number } {
-  const resolved = resolveSingleShapeIndex(args.shapeIndex, currentObjects, selectedIndices)
-  if (!resolved.valid) {
-    return resolved
+): { valid: boolean; error?: string } {
+  if (args.shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    args.shapeIndex = selectedIndices[0]
+  } else if (typeof args.shapeIndex !== "number") {
+    return { valid: false, error: "shapeIndex must be a number." }
+  }
+
+  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
+
+  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
+    return {
+      valid: false,
+      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes (indices 0-${currentObjects.length - 1}).`,
+    }
   }
 
   if (args.width !== undefined && (typeof args.width !== "number" || args.width <= 0 || args.width > 2000)) {
@@ -1510,55 +833,87 @@ function validateResizeShape(
     return { valid: false, error: "Must provide either dimensions (width, height) or scale factor." }
   }
 
-  return { valid: true, resolvedIndex: resolved.index }
+  return { valid: true }
 }
 
 function validateRotateShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndex?: number } {
-  const resolved = resolveSingleShapeIndex(args.shapeIndex, currentObjects, selectedIndices)
-  if (!resolved.valid) {
-    return resolved
+): { valid: boolean; error?: string } {
+  if (args.shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    args.shapeIndex = selectedIndices[0]
+  } else if (typeof args.shapeIndex !== "number") {
+    return { valid: false, error: "shapeIndex must be a number." }
+  }
+
+  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
+
+  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
+    return {
+      valid: false,
+      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes.`,
+    }
   }
 
   if (typeof args.degrees !== "number") {
     return { valid: false, error: "Rotation degrees must be a number." }
   }
 
-  return { valid: true, resolvedIndex: resolved.index }
+  return { valid: true }
 }
 
 function validateDeleteShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndex?: number } {
+): { valid: boolean; error?: string } {
   if (args.all === true) {
     return { valid: true }
   }
 
-  const resolved = resolveSingleShapeIndex(args.shapeIndex, currentObjects, selectedIndices)
-  if (!resolved.valid) {
-    return resolved
+  if (args.shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    args.shapeIndex = selectedIndices[0]
+  } else if (typeof args.shapeIndex !== "number") {
+    return { valid: false, error: "shapeIndex must be a number, or set all: true to delete all shapes." }
   }
 
-  return { valid: true, resolvedIndex: resolved.index }
+  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
+
+  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
+    return {
+      valid: false,
+      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes.`,
+    }
+  }
+
+  return { valid: true }
 }
 
-function validateArrangeShapes(
-  args: any,
-  currentObjects: any[],
-  selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndices?: number[] } {
+function validateArrangeShapes(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
   if (!args.pattern || !["grid", "row", "column", "circle"].includes(args.pattern)) {
     return { valid: false, error: "Pattern must be one of: grid, row, column, circle." }
   }
 
-  const indicesResult = resolveMultipleShapeIndices(args.shapeIndices, currentObjects, selectedIndices, { min: 1 })
-  if (!indicesResult.valid) {
-    return indicesResult
+  if (args.shapeIndices && !Array.isArray(args.shapeIndices)) {
+    return { valid: false, error: "shapeIndices must be an array." }
+  }
+
+  if (args.shapeIndices && args.shapeIndices.length > 0) {
+    for (const index of args.shapeIndices) {
+      if (typeof index !== "number" || index < 0 || index >= currentObjects.length) {
+        return {
+          valid: false,
+          error: `Invalid shape index ${index} in shapeIndices. Canvas has ${currentObjects.length} shapes.`,
+        }
+      }
+    }
   }
 
   if (args.spacing !== undefined && (typeof args.spacing !== "number" || args.spacing < 0)) {
@@ -1569,7 +924,7 @@ function validateArrangeShapes(
     return { valid: false, error: "Columns must be a positive number." }
   }
 
-  return { valid: true, resolvedIndices: indicesResult.indices }
+  return { valid: true }
 }
 
 function validateCreateText(args: any): { valid: boolean; error?: string } {
@@ -1585,218 +940,9 @@ function validateCreateText(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Font size must be a positive number." }
   }
 
-  if (args.color !== undefined && typeof args.color !== "string") {
-    return { valid: false, error: "Color must be provided as a string." }
+  if (args.color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(args.color)) {
+    return { valid: false, error: "Invalid color format. Must be a hex code." }
   }
 
   return { valid: true }
-}
-
-function validateUpdateStyle(
-  args: any,
-  currentObjects: any[],
-  selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndices?: number[] } {
-  if (
-    args.fillColor === undefined &&
-    args.strokeColor === undefined &&
-    args.strokeWidth === undefined &&
-    args.fontSize === undefined
-  ) {
-    return { valid: false, error: "Provide at least one style property to update." }
-  }
-
-  if (args.strokeWidth !== undefined && (typeof args.strokeWidth !== "number" || args.strokeWidth < 0 || args.strokeWidth > 50)) {
-    return { valid: false, error: "Stroke width must be a non-negative number not exceeding 50." }
-  }
-
-  if (args.fontSize !== undefined && (typeof args.fontSize !== "number" || args.fontSize <= 0 || args.fontSize > 400)) {
-    return { valid: false, error: "Font size must be a positive number not exceeding 400." }
-  }
-
-  const indicesResult = resolveMultipleShapeIndices(args.shapeIndices, currentObjects, selectedIndices, { min: 1 })
-  if (!indicesResult.valid) {
-    return indicesResult
-  }
-
-  return { valid: true, resolvedIndices: indicesResult.indices }
-}
-
-function validateDuplicateShape(
-  args: any,
-  currentObjects: any[],
-  selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndices?: number[] } {
-  if (args.offsetX !== undefined && typeof args.offsetX !== "number") {
-    return { valid: false, error: "offsetX must be a number if provided." }
-  }
-
-  if (args.offsetY !== undefined && typeof args.offsetY !== "number") {
-    return { valid: false, error: "offsetY must be a number if provided." }
-  }
-
-  const indicesResult = resolveMultipleShapeIndices(args.shapeIndices, currentObjects, selectedIndices, { min: 1 })
-  if (!indicesResult.valid) {
-    return indicesResult
-  }
-
-  return { valid: true, resolvedIndices: indicesResult.indices }
-}
-
-function validateAlignShapes(
-  args: any,
-  currentObjects: any[],
-  selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndices?: number[] } {
-  if (!args.alignment || !["left", "right", "top", "bottom", "center", "middle"].includes(args.alignment)) {
-    return { valid: false, error: "Alignment must be one of: left, right, top, bottom, center, middle." }
-  }
-
-  const indicesResult = resolveMultipleShapeIndices(args.shapeIndices, currentObjects, selectedIndices, { min: 2 })
-  if (!indicesResult.valid) {
-    return indicesResult
-  }
-
-  return { valid: true, resolvedIndices: indicesResult.indices }
-}
-
-function validateDistributeShapes(
-  args: any,
-  currentObjects: any[],
-  selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndices?: number[] } {
-  if (!args.direction || !["horizontal", "vertical"].includes(args.direction)) {
-    return { valid: false, error: "Direction must be 'horizontal' or 'vertical'." }
-  }
-
-  const indicesResult = resolveMultipleShapeIndices(args.shapeIndices, currentObjects, selectedIndices, { min: 3 })
-  if (!indicesResult.valid) {
-    return indicesResult
-  }
-
-  return { valid: true, resolvedIndices: indicesResult.indices }
-}
-
-function validateReorderShapes(
-  args: any,
-  currentObjects: any[],
-  selectedIndices: number[],
-): { valid: boolean; error?: string; resolvedIndices?: number[] } {
-  if (!args.action || !["bringToFront", "sendToBack", "bringForward", "sendBackward"].includes(args.action)) {
-    return {
-      valid: false,
-      error: "Action must be one of: bringToFront, sendToBack, bringForward, sendBackward.",
-    }
-  }
-
-  const indicesResult = resolveMultipleShapeIndices(args.shapeIndices, currentObjects, selectedIndices, { min: 1 })
-  if (!indicesResult.valid) {
-    return indicesResult
-  }
-
-  return { valid: true, resolvedIndices: indicesResult.indices }
-}
-
-function validateToggleGrid(args: any): { valid: boolean; error?: string } {
-  if (args.enabled === undefined && args.snap === undefined && args.size === undefined) {
-    return { valid: false, error: "Provide enabled, snap, or size to update grid settings." }
-  }
-
-  if (args.size !== undefined && ![10, 20, 30, 50, 100].includes(args.size)) {
-    return { valid: false, error: "Grid size must be one of: 10, 20, 30, 50, 100." }
-  }
-
-  if (args.enabled !== undefined && typeof args.enabled !== "boolean") {
-    return { valid: false, error: "enabled must be a boolean." }
-  }
-
-  if (args.snap !== undefined && typeof args.snap !== "boolean") {
-    return { valid: false, error: "snap must be a boolean." }
-  }
-
-  return { valid: true }
-}
-
-function validateSetViewport(args: any): { valid: boolean; error?: string } {
-  if (args.x === undefined && args.y === undefined && args.zoom === undefined) {
-    return { valid: false, error: "Provide x, y, or zoom to update the viewport." }
-  }
-
-  if (args.x !== undefined && typeof args.x !== "number") {
-    return { valid: false, error: "Viewport x must be a number." }
-  }
-
-  if (args.y !== undefined && typeof args.y !== "number") {
-    return { valid: false, error: "Viewport y must be a number." }
-  }
-
-  if (args.zoom !== undefined && (typeof args.zoom !== "number" || args.zoom < 0.1 || args.zoom > 5)) {
-    return { valid: false, error: "Zoom must be a number between 0.1 and 5." }
-  }
-
-  return { valid: true }
-}
-
-function validateCreateComment(args: any): { valid: boolean; error?: string } {
-  if (typeof args.x !== "number" || typeof args.y !== "number") {
-    return { valid: false, error: "Comment position must be numbers." }
-  }
-
-  if (args.x < 0 || args.x > 2000 || args.y < 0 || args.y > 2000) {
-    return { valid: false, error: "Comment position must be within canvas bounds (0-2000)." }
-  }
-
-  if (typeof args.content !== "string" || args.content.trim().length === 0) {
-    return { valid: false, error: "Comment content must be a non-empty string." }
-  }
-
-  return { valid: true }
-}
-
-function validateUpdateText(
-  args: any,
-  currentObjects: any[],
-  selectedIndices: number[],
-): { valid: boolean; error?: string; shapeIndex?: number } {
-  let resolvedIndex: number | null = null
-
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    resolvedIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex === "number") {
-    resolvedIndex = args.shapeIndex
-  }
-
-  if (resolvedIndex === null || resolvedIndex === undefined) {
-    return { valid: false, error: "shapeIndex must be provided." }
-  }
-
-  if (resolvedIndex !== -1) {
-    if (resolvedIndex < 0 || resolvedIndex >= currentObjects.length) {
-      return {
-        valid: false,
-        error: `Invalid shape index ${resolvedIndex}. Canvas has ${currentObjects.length} shapes.`,
-      }
-    }
-
-    const target = currentObjects[resolvedIndex]
-    if (target && target.type !== "text") {
-      return { valid: false, error: "Target shape is not a text object." }
-    }
-  } else if (currentObjects.length === 0) {
-    // No shapes exist yet, so referencing the last shape would fail
-    return { valid: false, error: "There are no shapes on the canvas to edit." }
-  }
-
-  if (!args.text && !args.append && args.fontSize === undefined && !args.color && !args.fontFamily) {
-    return { valid: false, error: "Must provide text, append, fontSize, color, or fontFamily to update." }
-  }
-
-  if (args.fontSize !== undefined && (typeof args.fontSize !== "number" || args.fontSize <= 0)) {
-    return { valid: false, error: "Font size must be a positive number." }
-  }
-
-  return { valid: true, shapeIndex: resolvedIndex }
 }

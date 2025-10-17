@@ -268,9 +268,12 @@ export function useCanvas({
           ctx.strokeStyle = obj.stroke_color
           ctx.lineWidth = obj.stroke_width
           ctx.beginPath()
-          ctx.moveTo(obj.x, obj.y)
+          // Top vertex (center top)
+          ctx.moveTo(obj.x + obj.width / 2, obj.y)
+          // Bottom-left vertex
+          ctx.lineTo(obj.x, obj.y + obj.height)
+          // Bottom-right vertex
           ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
-          ctx.lineTo(obj.x + obj.width, obj.y)
           ctx.closePath()
           ctx.fill()
           ctx.stroke()

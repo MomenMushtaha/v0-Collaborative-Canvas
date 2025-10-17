@@ -204,38 +204,6 @@ export default function CanvasPage() {
     }
   }
 
-  const handleSaveSnapshot = useCallback(
-    async (name?: string) => {
-      if (!user) {
-        toast({
-          title: "Unable to save snapshot",
-          description: "You must be signed in to create a version snapshot.",
-          variant: "destructive",
-        })
-        return
-      }
-
-      const snapshotName = name?.trim() || "Manual snapshot"
-
-      try {
-        await saveHistorySnapshot("default", currentObjects, user.id, user.name, snapshotName)
-        setLastSnapshotTime(Date.now())
-        toast({
-          title: "Snapshot saved",
-          description: `Saved \"${snapshotName}\" to version history.`,
-        })
-      } catch (error) {
-        console.error("[v0] Failed to save manual snapshot:", error)
-        toast({
-          title: "Snapshot failed",
-          description: "We couldn't save that snapshot. Please try again.",
-          variant: "destructive",
-        })
-      }
-    },
-    [currentObjects, toast, user],
-  )
-
   const handleCommentClick = (x: number, y: number) => {
     const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
     const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
@@ -325,7 +293,6 @@ export default function CanvasPage() {
           onSelectAllOfType={setOnSelectAllOfType}
           historyRestore={pendingHistoryRestore}
           onHistoryRestoreComplete={handleHistoryRestoreComplete}
-          onSaveSnapshot={handleSaveSnapshot}
         />
       </div>
       <AiChat
@@ -335,7 +302,6 @@ export default function CanvasPage() {
         userId={user.id}
         userName={user.name}
         canvasId="default"
-        viewport={viewport}
       />
       {showHistory && (
         <HistoryPanel

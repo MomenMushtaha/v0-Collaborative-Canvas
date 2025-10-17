@@ -176,9 +176,6 @@ export async function POST(request: Request) {
 
     const selectedContext = canvasContext.filter((obj: any) => obj.isSelected)
     const selectedIndices = selectedContext.map((obj: any) => obj.index)
-    const selectedIds = selectedContext
-      .map((obj: any) => (typeof obj.id === "string" ? obj.id : undefined))
-      .filter((id: string | undefined): id is string => Boolean(id))
 
     const canvasStats = {
       totalShapes: safeCurrentObjects.length,
@@ -198,16 +195,6 @@ export async function POST(request: Request) {
         {} as Record<string, number>,
       ),
     }
-
-    const indexToId = safeCurrentObjects.map((obj: any, idx: number) => {
-      if (typeof obj?.id === "string" && obj.id.length > 0) {
-        return obj.id
-      }
-      if (obj?.id !== undefined && obj?.id !== null) {
-        return String(obj.id)
-      }
-      return `object-${idx}`
-    })
 
     const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
     const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
@@ -265,15 +252,6 @@ export async function POST(request: Request) {
 
       const normalized = input.toLowerCase().trim()
       return NAMED_COLORS[normalized] || fallback
-    }
-
-    const isValidColorInput = (input: string | undefined) => {
-      if (!input) return false
-      if (/^#[0-9A-Fa-f]{6}$/.test(input)) {
-        return true
-      }
-      const normalized = input.toLowerCase().trim()
-      return Boolean(NAMED_COLORS[normalized])
     }
 
     const operations: any[] = []
@@ -335,85 +313,6 @@ export async function POST(request: Request) {
       }
 
       return { indices: unique }
-    }
-
-    const resolveTargetIdsForOperation = (
-      args: any,
-    ): { ids: string[]; indices: number[]; error?: string } => {
-      const ids = new Set<string>()
-      const indices = new Set<number>()
-
-      const addId = (rawId: any) => {
-        if (typeof rawId !== "string") {
-          return false
-        }
-        const normalizedId = rawId
-        const idx = indexToId.indexOf(normalizedId)
-        if (idx === -1) {
-          return false
-        }
-        ids.add(normalizedId)
-        indices.add(idx)
-        return true
-      }
-
-      const addIndex = (index: any) => {
-        if (typeof index !== "number" || index < 0 || index >= indexToId.length) {
-          return { ok: false, error: `Invalid shape index ${index}. Canvas has ${indexToId.length} shapes.` }
-        }
-        ids.add(indexToId[index])
-        indices.add(index)
-        return { ok: true }
-      }
-
-      if (typeof args?.targetId === "string") {
-        if (!addId(args.targetId)) {
-          return { ids: [], error: `Unknown target id ${args.targetId}` }
-        }
-      }
-
-      if (Array.isArray(args?.targetIds)) {
-        for (const id of args.targetIds) {
-          if (!addId(id)) {
-            return { ids: [], error: `Unknown target id ${id}` }
-          }
-        }
-      }
-
-      if (args?.shapeIndex === "selected") {
-        if (selectedIds.length === 0) {
-          return { ids: [], indices: [], error: "No shapes are currently selected." }
-        }
-        selectedIds.forEach((id) => addId(id))
-      } else if (args?.shapeIndex !== undefined) {
-        const result = addIndex(args.shapeIndex)
-        if (!result.ok) {
-          return { ids: [], indices: [], error: result.error }
-        }
-      }
-
-      if (Array.isArray(args?.shapeIndices)) {
-        for (const index of args.shapeIndices) {
-          const result = addIndex(index)
-          if (!result.ok) {
-            return { ids: [], indices: [], error: result.error }
-          }
-        }
-      }
-
-      if (args?.useSelection) {
-        if (selectedIds.length === 0) {
-          return { ids: [], indices: [], error: "No shapes are currently selected." }
-        }
-        selectedIds.forEach((id) => addId(id))
-      }
-
-      const resolved = Array.from(ids)
-      if (resolved.length === 0) {
-        return { ids: [], indices: [], error: "Specify at least one target shape." }
-      }
-
-      return { ids: resolved, indices: Array.from(indices) }
     }
 
     const tools = {
@@ -1686,107 +1585,6 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
 
   if (args.x < 0 || args.x > 2000 || args.y < 0 || args.y > 2000) {
     return { valid: false, error: "Position must be within canvas bounds (0-2000)." }
-  }
-
-  return { valid: true }
-}
-
-function validateAlignShapes(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
-  if (!args.alignment || !["left", "right", "top", "bottom", "center", "middle"].includes(args.alignment)) {
-    return { valid: false, error: "Alignment must be left, right, top, bottom, center, or middle." }
-  }
-
-  if (!Array.isArray(args.shapeIndices) || args.shapeIndices.length < 2) {
-    return { valid: false, error: "Aligning shapes requires at least two shape indices." }
-  }
-
-  for (const index of args.shapeIndices) {
-    if (typeof index !== "number" || index < 0 || index >= currentObjects.length) {
-      return { valid: false, error: `Invalid shape index ${index}.` }
-    }
-  }
-
-  return { valid: true }
-}
-
-function validateDistributeShapes(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
-  if (!args.direction || !["horizontal", "vertical"].includes(args.direction)) {
-    return { valid: false, error: "Direction must be horizontal or vertical." }
-  }
-
-  if (!Array.isArray(args.shapeIndices) || args.shapeIndices.length < 3) {
-    return { valid: false, error: "Distributing shapes requires at least three shape indices." }
-  }
-
-  for (const index of args.shapeIndices) {
-    if (typeof index !== "number" || index < 0 || index >= currentObjects.length) {
-      return { valid: false, error: `Invalid shape index ${index}.` }
-    }
-  }
-
-  return { valid: true }
-}
-
-function validateViewportUpdate(args: any): { valid: boolean; error?: string } {
-  const numericKeys = ["x", "y", "zoom", "deltaX", "deltaY", "deltaZoom"]
-  for (const key of numericKeys) {
-    if (args[key] !== undefined && (typeof args[key] !== "number" || !Number.isFinite(args[key]))) {
-      return { valid: false, error: `${key} must be a finite number.` }
-    }
-  }
-
-  if (args.zoom !== undefined && args.zoom <= 0) {
-    return { valid: false, error: "Zoom must be greater than 0." }
-  }
-
-  return { valid: true }
-}
-
-function validateGridSettings(args: any): { valid: boolean; error?: string } {
-  if (args.size !== undefined) {
-    if (typeof args.size !== "number" || !Number.isFinite(args.size)) {
-      return { valid: false, error: "Grid size must be a finite number." }
-    }
-
-    if (args.size <= 0 || args.size > 500) {
-      return { valid: false, error: "Grid size must be between 1 and 500." }
-    }
-  }
-
-  if (args.enabled !== undefined && typeof args.enabled !== "boolean") {
-    return { valid: false, error: "Grid enabled must be a boolean." }
-  }
-
-  if (args.snap !== undefined && typeof args.snap !== "boolean") {
-    return { valid: false, error: "Snap must be a boolean." }
-  }
-
-  return { valid: true }
-}
-
-function validateComment(args: any): { valid: boolean; error?: string } {
-  if (typeof args.x !== "number" || typeof args.y !== "number") {
-    return { valid: false, error: "Comment position must include numeric x and y." }
-  }
-
-  if (args.x < 0 || args.x > 2000 || args.y < 0 || args.y > 2000) {
-    return { valid: false, error: "Comment position must be within the canvas bounds (0-2000)." }
-  }
-
-  if (!args.content || typeof args.content !== "string" || args.content.trim().length === 0) {
-    return { valid: false, error: "Comment content cannot be empty." }
-  }
-
-  return { valid: true }
-}
-
-function validateExportRequest(args: any): { valid: boolean; error?: string } {
-  if (!args.format || !["png", "svg"].includes(args.format)) {
-    return { valid: false, error: "Export format must be png or svg." }
-  }
-
-  if (args.selectionOnly !== undefined && typeof args.selectionOnly !== "boolean") {
-    return { valid: false, error: "selectionOnly must be a boolean." }
   }
 
   return { valid: true }

@@ -2,6 +2,7 @@
 
 import type { UserPresence } from "@/lib/types"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useMemo } from "react"
 
 interface PresencePanelProps {
   currentUser: {
@@ -19,8 +20,20 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
     return now - lastSeenTime < 10000 // 10 seconds
   }
 
-  const onlineUsers = otherUsers.filter((user) => isUserOnline(user.last_seen))
-  const offlineUsers = otherUsers.filter((user) => !isUserOnline(user.last_seen))
+  const uniqueUsers = useMemo(() => {
+    const userMap = new Map<string, UserPresence>()
+    otherUsers.forEach((user) => {
+      const existing = userMap.get(user.user_id)
+      // Keep the most recent entry for each user_id
+      if (!existing || new Date(user.last_seen) > new Date(existing.last_seen)) {
+        userMap.set(user.user_id, user)
+      }
+    })
+    return Array.from(userMap.values())
+  }, [otherUsers])
+
+  const onlineUsers = uniqueUsers.filter((user) => isUserOnline(user.last_seen))
+  const offlineUsers = uniqueUsers.filter((user) => !isUserOnline(user.last_seen))
 
   return (
     <div className="absolute right-4 top-20 z-10 w-64 max-h-[260px] rounded-xl border border-border/50 bg-background/95 shadow-xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">

@@ -12,7 +12,7 @@ interface StylePanelProps {
 export function StylePanel({ selectedObjects, onStyleChange }: StylePanelProps) {
   if (selectedObjects.length === 0) {
     return (
-      <div className="absolute right-4 top-[618px] z-10 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl transition-all duration-200 hover:shadow-2xl">
+      <div className="absolute right-4 top-[640px] z-10 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl transition-all duration-200 hover:shadow-2xl">
         <div className="bg-gradient-to-b from-muted/30 to-transparent px-4 py-3 text-center">
           <p className="text-sm text-muted-foreground">Select an object to edit its style</p>
         </div>
@@ -26,7 +26,7 @@ export function StylePanel({ selectedObjects, onStyleChange }: StylePanelProps) 
   const strokeColor = firstObject.stroke_color || "#1e40af"
 
   return (
-    <div className="absolute right-4 top-[618px] z-10 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl transition-all duration-200 hover:shadow-2xl overflow-hidden">
+    <div className="absolute right-4 top-[640px] z-10 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl transition-all duration-200 hover:shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="bg-gradient-to-b from-muted/30 to-transparent px-4 py-3 text-center border-b border-border/50">
         <h3 className="text-sm font-semibold tracking-wide">Style</h3>

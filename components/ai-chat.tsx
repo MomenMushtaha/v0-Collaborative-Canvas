@@ -140,7 +140,7 @@ export function AiChat({
     return (
       <button
         onClick={() => setIsExpanded(true)}
-        className="fixed bottom-4 right-4 flex items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-cyan-600 px-6 py-3 text-white shadow-lg transition-all hover:shadow-xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
+        className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-xl border border-border/50 bg-gradient-to-r from-blue-600 to-cyan-600 px-6 py-3 text-white shadow-xl backdrop-blur-md transition-all duration-200 hover:shadow-2xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
       >
         <Sparkles className="h-5 w-5" />
         <span className="font-medium">AI Assistant</span>
@@ -149,7 +149,7 @@ export function AiChat({
   }
 
   return (
-    <div className="fixed bottom-4 right-4 flex w-96 flex-col rounded-lg border border-border bg-background shadow-2xl overflow-hidden">
+    <div className="fixed bottom-4 right-4 z-50 flex w-96 flex-col rounded-lg border border-border bg-background shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-3.5 text-white rounded-t-lg">
         <div className="flex items-center gap-2">

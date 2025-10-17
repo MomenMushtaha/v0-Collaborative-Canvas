@@ -68,10 +68,16 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
 
       console.log("[v0] Loaded other users:", data?.length || 0)
       const userMap = new Map<string, UserPresence>()
+
       data?.forEach((user) => {
-        console.log("[v0] Other user:", user.user_name, user.user_id)
-        userMap.set(user.user_id, user)
+        const existing = userMap.get(user.user_id)
+        // Only add/update if this is a newer record or first time seeing this user
+        if (!existing || new Date(user.last_seen) > new Date(existing.last_seen)) {
+          console.log("[v0] Other user:", user.user_name, user.user_id)
+          userMap.set(user.user_id, user)
+        }
       })
+
       setOtherUsers(userMap)
     }
 

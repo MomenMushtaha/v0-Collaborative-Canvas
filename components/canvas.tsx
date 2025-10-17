@@ -187,7 +187,7 @@ export function Canvas({
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
       {/* Toolbar */}
-      <div className="absolute left-4 top-20 z-10 flex gap-2 rounded-lg border bg-card p-2 shadow-lg">
+      <div className="absolute left-4 top-20 z-10 flex gap-2 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md p-2 shadow-xl transition-all duration-200 hover:shadow-2xl">
         <Button
           variant={tool === "select" ? "default" : "ghost"}
           size="icon"
@@ -257,7 +257,7 @@ export function Canvas({
       </div>
 
       {/* Zoom display */}
-      <div className="absolute bottom-4 right-[224px] z-10 rounded-lg border bg-card px-3 py-2 text-sm shadow-lg">
+      <div className="absolute bottom-4 right-[224px] z-10 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md px-3 py-2 text-sm shadow-xl transition-all duration-200 hover:shadow-2xl">
         <span className="text-muted-foreground">Zoom: </span>
         <span className="font-medium">{Math.round(viewportZoom * 100)}%</span>
       </div>

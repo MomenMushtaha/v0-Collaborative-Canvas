@@ -43,10 +43,10 @@ export function Toolbar({
   onGridChange,
 }: ToolbarProps) {
   return (
-    <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b bg-card px-4">
+    <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b border-border/50 bg-background/95 backdrop-blur-md shadow-sm transition-all duration-200 px-4">
       <div className="flex items-center gap-4">
         <h1 className="text-lg font-semibold">CollabCanvas</h1>
-        <span className="text-sm text-muted-foreground">MVP</span>
+        <span className="text-sm text-muted-foreground">Early Prototype</span>
 
         <div className="flex items-center gap-1 border-l pl-4">
           <Button variant="ghost" size="icon" onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">

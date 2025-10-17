@@ -75,7 +75,7 @@ export function LayersPanel({
           variant="outline"
           size="sm"
           onClick={() => setIsCollapsed(false)}
-          className="bg-background/95 backdrop-blur shadow-lg hover:shadow-xl transition-all hover:scale-105 border-2"
+          className="bg-background/95 backdrop-blur-md shadow-lg hover:shadow-xl transition-all hover:scale-105 border border-border/50"
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -84,10 +84,10 @@ export function LayersPanel({
   }
 
   return (
-    <div className="fixed right-4 top-[360px] z-40 w-64 rounded-xl border-2 bg-background/95 backdrop-blur shadow-xl overflow-hidden">
+    <div className="fixed right-4 top-[360px] z-40 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-200 hover:shadow-2xl">
       {/* Header */}
-      <div className="flex items-center justify-between border-b bg-gradient-to-r from-muted/50 to-muted/30 px-4 py-3">
-        <h3 className="text-sm font-semibold tracking-wide">Layers</h3>
+      <div className="flex items-center justify-between border-b bg-gradient-to-b from-muted/30 to-transparent px-4 py-3">
+        <h3 className="text-sm font-semibold tracking-tight flex-1 text-center">Layers</h3>
         <Button
           variant="ghost"
           size="sm"
@@ -210,7 +210,7 @@ export function LayersPanel({
       </ScrollArea>
 
       {/* Footer */}
-      <div className="border-t bg-gradient-to-r from-muted/30 to-muted/50 px-4 py-2.5">
+      <div className="border-t border-border/50 bg-gradient-to-t from-muted/20 to-transparent px-4 py-2.5">
         <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
           <div className="h-1.5 w-1.5 rounded-full bg-primary/60" />
           <span className="font-medium">

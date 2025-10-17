@@ -1108,119 +1108,350 @@ function handleArrange(objects: CanvasObject[], operation: any): { objects: Canv
   return { objects: updatedObjects }
 }
 
-function createLoginForm(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y } = operation
-  const updatedObjects = [...objects]
+const CANVAS_LIMIT = 2000
 
-  // Username field (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 150,
-    y: y - 100,
-    width: 300,
-    height: 40,
-    rotation: 0,
-    color: "#e5e7eb",
-  })
-
-  // Password field (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 150,
-    y: y - 40,
-    width: 300,
-    height: 40,
-    rotation: 0,
-    color: "#e5e7eb",
-  })
-
-  // Login button (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 75,
-    y: y + 20,
-    width: 150,
-    height: 40,
-    rotation: 0,
-    color: "#3b82f6",
-  })
-
-  return updatedObjects
+function clampRectToCanvas(x: number, y: number, width: number, height: number) {
+  const clampedX = Math.max(0, Math.min(CANVAS_LIMIT - width, x))
+  const clampedY = Math.max(0, Math.min(CANVAS_LIMIT - height, y))
+  return { x: clampedX, y: clampedY }
 }
 
-function createDashboard(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y } = operation
+function createLoginForm(objects: CanvasObject[], operation: any): CanvasObject[] {
   const updatedObjects = [...objects]
+  const width = Math.min(Math.max(operation.width ?? 360, 260), 640)
+  const height = Math.min(Math.max(operation.height ?? 320, 260), 640)
+  const centerX = operation.x ?? CANVAS_LIMIT / 2
+  const centerY = operation.y ?? CANVAS_LIMIT / 2
+  const desiredLeft = centerX - width / 2
+  const desiredTop = centerY - height / 2
+  const { x, y } = clampRectToCanvas(desiredLeft, desiredTop, width, height)
 
-  // Header (rectangle)
+  const backgroundColor = operation.backgroundColor ?? "#ffffff"
+  const borderColor = operation.borderColor ?? "#e5e7eb"
+  const fieldColor = operation.fieldColor ?? "#f3f4f6"
+  const buttonColor = operation.buttonColor ?? "#3b82f6"
+  const textColor = operation.textColor ?? "#111827"
+  const mutedTextColor = operation.mutedTextColor ?? "#6b7280"
+  const buttonTextColor = operation.buttonTextColor ?? "#ffffff"
+  const titleText = operation.titleText ?? "Welcome back"
+  const subtitleText = operation.subtitleText ?? "Please sign in to continue"
+  const usernameLabel = operation.usernameLabel ?? "Email"
+  const passwordLabel = operation.passwordLabel ?? "Password"
+  const buttonText = operation.buttonText ?? "Sign In"
+  const helpText = operation.helpText ?? "Forgot password?"
+
+  const contentLeft = x + 20
+  const contentWidth = width - 40
+  const titleHeight = 36
+  const subtitleHeight = 28
+  const fieldHeight = 44
+  const fieldSpacing = 70
+  const firstFieldTop = y + 120
+  const secondFieldTop = firstFieldTop + fieldSpacing
+  const buttonWidth = Math.min(contentWidth, 220)
+  const buttonLeft = x + (width - buttonWidth) / 2
+  const buttonTop = y + height - 70
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
     x,
     y,
-    width: 800,
-    height: 60,
+    width,
+    height,
     rotation: 0,
-    color: "#1f2937",
+    fill_color: backgroundColor,
+    stroke_color: borderColor,
+    stroke_width: 2,
   })
 
-  // Sidebar (rectangle)
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: contentLeft,
+    y: y + 24,
+    width: contentWidth,
+    height: titleHeight,
+    rotation: 0,
+    fill_color: textColor,
+    stroke_color: textColor,
+    stroke_width: 0,
+    text_content: titleText,
+    font_size: 28,
+    font_family: "Inter",
+  })
+
+  if (subtitleText) {
+    updatedObjects.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: contentLeft,
+      y: y + 60,
+      width: contentWidth,
+      height: subtitleHeight,
+      rotation: 0,
+      fill_color: mutedTextColor,
+      stroke_color: mutedTextColor,
+      stroke_width: 0,
+      text_content: subtitleText,
+      font_size: 18,
+      font_family: "Inter",
+    })
+  }
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: contentLeft,
+    y: firstFieldTop - 30,
+    width: contentWidth,
+    height: 24,
+    rotation: 0,
+    fill_color: mutedTextColor,
+    stroke_color: mutedTextColor,
+    stroke_width: 0,
+    text_content: usernameLabel,
+    font_size: 16,
+    font_family: "Inter",
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: contentLeft,
+    y: firstFieldTop,
+    width: contentWidth,
+    height: fieldHeight,
+    rotation: 0,
+    fill_color: fieldColor,
+    stroke_color: borderColor,
+    stroke_width: 1,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: contentLeft,
+    y: secondFieldTop - 30,
+    width: contentWidth,
+    height: 24,
+    rotation: 0,
+    fill_color: mutedTextColor,
+    stroke_color: mutedTextColor,
+    stroke_width: 0,
+    text_content: passwordLabel,
+    font_size: 16,
+    font_family: "Inter",
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: contentLeft,
+    y: secondFieldTop,
+    width: contentWidth,
+    height: fieldHeight,
+    rotation: 0,
+    fill_color: fieldColor,
+    stroke_color: borderColor,
+    stroke_width: 1,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 48,
+    rotation: 0,
+    fill_color: buttonColor,
+    stroke_color: buttonColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 48,
+    rotation: 0,
+    fill_color: buttonTextColor,
+    stroke_color: buttonTextColor,
+    stroke_width: 0,
+    text_content: buttonText,
+    font_size: 18,
+    font_family: "Inter",
+  })
+
+  if (helpText) {
+    updatedObjects.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: contentLeft,
+      y: buttonTop + 56,
+      width: contentWidth,
+      height: 24,
+      rotation: 0,
+      fill_color: buttonColor,
+      stroke_color: buttonColor,
+      stroke_width: 0,
+      text_content: helpText,
+      font_size: 16,
+      font_family: "Inter",
+    })
+  }
+
+  return updatedObjects
+}
+
+function createDashboard(objects: CanvasObject[], operation: any): CanvasObject[] {
+  const updatedObjects = [...objects]
+  const width = Math.min(Math.max(operation.width ?? 800, 400), 1200)
+  const height = Math.min(Math.max(operation.height ?? 600, 360), 1200)
+  const { x, y } = clampRectToCanvas(operation.x ?? 160, operation.y ?? 80, width, height)
+
+  const headerHeight = 60
+  const sidebarWidth = Math.min(Math.max(operation.sidebarWidth ?? 220, 160), width / 2)
+  const headerColor = operation.headerColor ?? "#1f2937"
+  const sidebarColor = operation.sidebarColor ?? "#374151"
+  const contentColor = operation.contentColor ?? "#f3f4f6"
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
     x,
-    y: y + 60,
-    width: 200,
-    height: 540,
+    y,
+    width,
+    height: headerHeight,
     rotation: 0,
-    color: "#374151",
+    fill_color: headerColor,
+    stroke_color: headerColor,
+    stroke_width: 0,
   })
 
-  // Main content (rectangle)
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
-    x: x + 200,
-    y: y + 60,
-    width: 600,
-    height: 540,
+    x,
+    y: y + headerHeight,
+    width: sidebarWidth,
+    height: height - headerHeight,
     rotation: 0,
-    color: "#f3f4f6",
+    fill_color: sidebarColor,
+    stroke_color: sidebarColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: x + sidebarWidth,
+    y: y + headerHeight,
+    width: width - sidebarWidth,
+    height: height - headerHeight,
+    rotation: 0,
+    fill_color: contentColor,
+    stroke_color: contentColor,
+    stroke_width: 0,
   })
 
   return updatedObjects
 }
 
 function createNavBar(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { items, x, y } = operation
   const updatedObjects = [...objects]
+  const items = Math.max(2, Math.min(operation.items ?? 4, 8))
+  const width = Math.min(Math.max(operation.width ?? items * 140 + 80, 360), 960)
+  const height = Math.min(Math.max(operation.height ?? 64, 48), 120)
+  const initialX = operation.x ?? 40
+  const initialY = operation.y ?? 40
+  const { x, y } = clampRectToCanvas(initialX, initialY, width, height)
 
-  // Nav bar background (rectangle)
+  const backgroundColor = operation.backgroundColor ?? "#111827"
+  const itemColor = operation.itemColor ?? "#1f2937"
+  const activeItemColor = operation.activeItemColor ?? "#3b82f6"
+  const textColor = operation.textColor ?? "#f9fafb"
+  const brandText = operation.brandText ?? "Product"
+  const menuItems: string[] = Array.isArray(operation.menuItems)
+    ? operation.menuItems.slice(0, items)
+    : Array.from({ length: items }, (_, index) => (index === 0 ? "Home" : `Item ${index + 1}`))
+
+  const horizontalPadding = 24
+  const brandAreaWidth = Math.min(180, Math.max(120, Math.round(width * 0.22)))
+  const menuAreaLeft = x + horizontalPadding + brandAreaWidth
+  const menuAvailableWidth = width - horizontalPadding * 2 - brandAreaWidth
+  const gap = 16
+  let itemWidth = (menuAvailableWidth - gap * (items - 1)) / items
+  itemWidth = Math.max(80, Math.min(140, itemWidth))
+  const totalItemsWidth = itemWidth * items + gap * (items - 1)
+  const startX = menuAreaLeft + Math.max(0, (menuAvailableWidth - totalItemsWidth) / 2)
+  const itemHeight = Math.min(height - 20, 44)
+  const itemTop = y + (height - itemHeight) / 2
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
     x,
     y,
-    width: items * 120 + 40,
-    height: 50,
+    width,
+    height,
     rotation: 0,
-    color: "#1f2937",
+    fill_color: backgroundColor,
+    stroke_color: backgroundColor,
+    stroke_width: 0,
   })
 
-  // Nav items (rectangles)
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: x + horizontalPadding,
+    y: y + (height - 40) / 2,
+    width: brandAreaWidth - 16,
+    height: 40,
+    rotation: 0,
+    fill_color: textColor,
+    stroke_color: textColor,
+    stroke_width: 0,
+    text_content: brandText,
+    font_size: 24,
+    font_family: "Inter",
+  })
+
   for (let i = 0; i < items; i++) {
+    const itemX = startX + i * (itemWidth + gap)
+    const label = menuItems[i] || `Item ${i + 1}`
+    const fill = i === 0 ? activeItemColor : itemColor
+
     updatedObjects.push({
       id: crypto.randomUUID(),
       type: "rectangle",
-      x: x + 20 + i * 120,
-      y: y + 10,
-      width: 100,
-      height: 30,
+      x: itemX,
+      y: itemTop,
+      width: itemWidth,
+      height: itemHeight,
       rotation: 0,
-      color: "#3b82f6",
+      fill_color: fill,
+      stroke_color: fill,
+      stroke_width: 0,
+    })
+
+    updatedObjects.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: itemX,
+      y: itemTop,
+      width: itemWidth,
+      height: itemHeight,
+      rotation: 0,
+      fill_color: textColor,
+      stroke_color: textColor,
+      stroke_width: 0,
+      text_content: label,
+      font_size: 16,
+      font_family: "Inter",
     })
   }
 
@@ -1228,51 +1459,26 @@ function createNavBar(objects: CanvasObject[], operation: any): CanvasObject[] {
 }
 
 function createCard(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y, width, height } = operation
   const updatedObjects = [...objects]
+  const width = Math.min(Math.max(operation.width ?? 320, 240), 520)
+  const height = Math.min(Math.max(operation.height ?? 220, 180), 420)
+  const centerX = operation.x ?? CANVAS_LIMIT / 2
+  const centerY = operation.y ?? CANVAS_LIMIT / 2
+  const desiredLeft = centerX - width / 2
+  const desiredTop = centerY - height / 2
+  const { x, y } = clampRectToCanvas(desiredLeft, desiredTop, width, height)
 
-  // Card background (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y - height / 2,
-    width,
-    height,
-    rotation: 0,
-    color: "#ffffff",
-  })
-
-  // Card header (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y - height / 2,
-    width,
-    height: 60,
-    rotation: 0,
-    color: "#3b82f6",
-  })
-
-  // Card footer (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y + height / 2 - 50,
-    width,
-    height: 50,
-    rotation: 0,
-    color: "#f3f4f6",
-  })
-
-  return updatedObjects
-}
-
-function createButton(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y, width, height, color } = operation
-  const updatedObjects = [...objects]
+  const accentHeight = Math.min(Math.max(operation.mediaHeight ?? Math.round(height * 0.45), 80), height - 90)
+  const backgroundColor = operation.backgroundColor ?? "#ffffff"
+  const borderColor = operation.borderColor ?? "#e5e7eb"
+  const accentColor = operation.accentColor ?? "#dbeafe"
+  const textColor = operation.textColor ?? "#111827"
+  const mutedTextColor = operation.mutedTextColor ?? "#6b7280"
+  const buttonColor = operation.buttonColor ?? operation.accentColor ?? "#3b82f6"
+  const buttonTextColor = operation.buttonTextColor ?? "#ffffff"
+  const titleText = operation.titleText ?? "Card title"
+  const descriptionText = operation.descriptionText ?? "Add supporting details here."
+  const buttonText = operation.buttonText ?? "Learn more"
 
   updatedObjects.push({
     id: crypto.randomUUID(),
@@ -1282,52 +1488,237 @@ function createButton(objects: CanvasObject[], operation: any): CanvasObject[] {
     width,
     height,
     rotation: 0,
-    color,
+    fill_color: backgroundColor,
+    stroke_color: borderColor,
+    stroke_width: 2,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x,
+    y,
+    width,
+    height: accentHeight,
+    rotation: 0,
+    fill_color: accentColor,
+    stroke_color: accentColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: x + 20,
+    y: y + accentHeight + 16,
+    width: width - 40,
+    height: 32,
+    rotation: 0,
+    fill_color: textColor,
+    stroke_color: textColor,
+    stroke_width: 0,
+    text_content: titleText,
+    font_size: 22,
+    font_family: "Inter",
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: x + 20,
+    y: y + accentHeight + 56,
+    width: width - 40,
+    height: 48,
+    rotation: 0,
+    fill_color: mutedTextColor,
+    stroke_color: mutedTextColor,
+    stroke_width: 0,
+    text_content: descriptionText,
+    font_size: 16,
+    font_family: "Inter",
+  })
+
+  const buttonWidth = Math.min(width - 40, 200)
+  const buttonLeft = x + width - buttonWidth - 20
+  const buttonTop = y + height - 60
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 44,
+    rotation: 0,
+    fill_color: buttonColor,
+    stroke_color: buttonColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 44,
+    rotation: 0,
+    fill_color: buttonTextColor,
+    stroke_color: buttonTextColor,
+    stroke_width: 0,
+    text_content: buttonText,
+    font_size: 16,
+    font_family: "Inter",
+  })
+
+  return updatedObjects
+}
+
+function createButton(objects: CanvasObject[], operation: any): CanvasObject[] {
+  const updatedObjects = [...objects]
+  const width = Math.min(Math.max(operation.width ?? 160, 80), 400)
+  const height = Math.min(Math.max(operation.height ?? 48, 32), 160)
+  const centerX = operation.x ?? CANVAS_LIMIT / 2
+  const centerY = operation.y ?? CANVAS_LIMIT / 2
+  const desiredLeft = centerX - width / 2
+  const desiredTop = centerY - height / 2
+  const { x, y } = clampRectToCanvas(desiredLeft, desiredTop, width, height)
+
+  const color = operation.color ?? "#3b82f6"
+  const textColor = operation.textColor ?? "#ffffff"
+  const label = operation.text ?? "Button"
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x,
+    y,
+    width,
+    height,
+    rotation: 0,
+    fill_color: color,
+    stroke_color: color,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x,
+    y,
+    width,
+    height,
+    rotation: 0,
+    fill_color: textColor,
+    stroke_color: textColor,
+    stroke_width: 0,
+    text_content: label,
+    font_size: Math.min(20, Math.max(14, height - 18)),
+    font_family: "Inter",
   })
 
   return updatedObjects
 }
 
 function createForm(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { fields, x, y } = operation
   const updatedObjects = [...objects]
+  const fields = Math.max(1, Math.min(operation.fields ?? 2, 5))
+  const width = Math.min(Math.max(operation.width ?? 420, 280), 640)
+  const height = Math.min(Math.max(operation.height ?? fields * 70 + 160, 240), 720)
+  const centerX = operation.x ?? CANVAS_LIMIT / 2
+  const centerY = operation.y ?? CANVAS_LIMIT / 2
+  const desiredLeft = centerX - width / 2
+  const desiredTop = centerY - height / 2
+  const { x, y } = clampRectToCanvas(desiredLeft, desiredTop, width, height)
 
-  // Form background (rectangle)
+  const backgroundColor = operation.backgroundColor ?? "#ffffff"
+  const borderColor = operation.borderColor ?? "#e5e7eb"
+  const fieldColor = operation.fieldColor ?? "#f3f4f6"
+  const buttonColor = operation.buttonColor ?? "#3b82f6"
+  const textColor = operation.textColor ?? "#111827"
+  const buttonText = operation.buttonText ?? "Submit"
+
+  const contentLeft = x + 24
+  const contentWidth = width - 48
+  const fieldHeight = 44
+  const spacing = (height - 160) / Math.max(1, fields)
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
-    x: x - 200,
-    y: y - (fields * 60) / 2 - 40,
-    width: 400,
-    height: fields * 60 + 100,
+    x,
+    y,
+    width,
+    height,
     rotation: 0,
-    color: "#ffffff",
+    fill_color: backgroundColor,
+    stroke_color: borderColor,
+    stroke_width: 2,
   })
 
-  // Input fields (rectangles)
   for (let i = 0; i < fields; i++) {
+    const fieldTop = y + 80 + i * spacing
+    updatedObjects.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: contentLeft,
+      y: fieldTop - 28,
+      width: contentWidth,
+      height: 24,
+      rotation: 0,
+      fill_color: textColor,
+      stroke_color: textColor,
+      stroke_width: 0,
+      text_content: operation.fieldLabels?.[i] || `Field ${i + 1}`,
+      font_size: 16,
+      font_family: "Inter",
+    })
+
     updatedObjects.push({
       id: crypto.randomUUID(),
       type: "rectangle",
-      x: x - 180,
-      y: y - (fields * 60) / 2 + i * 60,
-      width: 360,
-      height: 40,
+      x: contentLeft,
+      y: fieldTop,
+      width: contentWidth,
+      height: fieldHeight,
       rotation: 0,
-      color: "#e5e7eb",
+      fill_color: fieldColor,
+      stroke_color: borderColor,
+      stroke_width: 1,
     })
   }
 
-  // Submit button (rectangle)
+  const buttonWidth = Math.min(contentWidth, 220)
+  const buttonLeft = x + (width - buttonWidth) / 2
+  const buttonTop = y + height - 80
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
-    x: x - 75,
-    y: y + (fields * 60) / 2 + 20,
-    width: 150,
-    height: 40,
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 48,
     rotation: 0,
-    color: "#3b82f6",
+    fill_color: buttonColor,
+    stroke_color: buttonColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 48,
+    rotation: 0,
+    fill_color: "#ffffff",
+    stroke_color: "#ffffff",
+    stroke_width: 0,
+    text_content: buttonText,
+    font_size: 18,
+    font_family: "Inter",
   })
 
   return updatedObjects

@@ -30,6 +30,7 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
     editingTextId,
     saveTextEdit,
     cancelTextEdit,
+    measureText, // Get measureText from hook
   } = useCanvas({
     canvasId,
     objects,
@@ -39,6 +40,9 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
 
   const textInputRef = useRef<HTMLTextAreaElement>(null)
   const [textValue, setTextValue] = useState("")
+  const [textareaDimensions, setTextareaDimensions] = useState({ width: 200, height: 50 })
+  const resizeTimerRef = useRef<NodeJS.Timeout>()
+  const [showPlaceholder, setShowPlaceholder] = useState(false)
   const [canvasMetrics, setCanvasMetrics] = useState({
     offsetX: 0,
     offsetY: 0,
@@ -69,14 +73,42 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
       const obj = objects.find((o) => o.id === editingTextId)
       if (obj && obj.type === "text") {
         setTextValue(obj.text_content || "")
+        setShowPlaceholder(!obj.text_content)
+        setTextareaDimensions({ width: obj.width, height: obj.height })
         setTimeout(() => {
           textInputRef.current?.focus()
           textInputRef.current?.select()
         }, 0)
         updateCanvasMetrics()
       }
+    } else {
+      setShowPlaceholder(false)
     }
   }, [editingTextId, objects, updateCanvasMetrics])
+
+  useEffect(() => {
+    if (editingTextId && textValue && measureText) {
+      // Clear any pending resize
+      if (resizeTimerRef.current) {
+        clearTimeout(resizeTimerRef.current)
+      }
+
+      // Debounce the resize calculation
+      resizeTimerRef.current = setTimeout(() => {
+        const obj = objects.find((o) => o.id === editingTextId)
+        if (obj && obj.type === "text") {
+          const { width, height } = measureText(textValue, obj.font_size || 16, obj.font_family || "Arial")
+          setTextareaDimensions({ width, height })
+        }
+      }, 150) // Wait 150ms after user stops typing before resizing
+
+      return () => {
+        if (resizeTimerRef.current) {
+          clearTimeout(resizeTimerRef.current)
+        }
+      }
+    }
+  }, [textValue, editingTextId, objects, measureText])
 
   useEffect(() => {
     updateCanvasMetrics()
@@ -114,22 +146,13 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
     const scaledZoomX = viewportZoom * canvasMetrics.scaleX
     const scaledZoomY = viewportZoom * canvasMetrics.scaleY
     const scaledFontSize = (editingTextObject.font_size || 16) * scaledZoomY
-    const paddingTop = Math.max(
-      0,
-      (editingTextObject.height * scaledZoomY - scaledFontSize * 1.2) / 2,
-    )
+    const paddingTop = Math.max(0, (textareaDimensions.height * scaledZoomY - scaledFontSize * 1.2) / 2)
 
     return {
-      left: `${
-        canvasMetrics.offsetX +
-        (viewportX + editingTextObject.x * viewportZoom) * canvasMetrics.scaleX
-      }px`,
-      top: `${
-        canvasMetrics.offsetY +
-        (viewportY + editingTextObject.y * viewportZoom) * canvasMetrics.scaleY
-      }px`,
-      width: `${editingTextObject.width * scaledZoomX}px`,
-      height: `${editingTextObject.height * scaledZoomY}px`,
+      left: `${canvasMetrics.offsetX + (viewportX + editingTextObject.x * viewportZoom) * canvasMetrics.scaleX}px`,
+      top: `${canvasMetrics.offsetY + (viewportY + editingTextObject.y * viewportZoom) * canvasMetrics.scaleY}px`,
+      width: `${textareaDimensions.width * scaledZoomX}px`,
+      height: `${textareaDimensions.height * scaledZoomY}px`,
       fontSize: `${scaledFontSize}px`,
       fontFamily: editingTextObject.font_family || "Arial",
       paddingTop: `${paddingTop}px`,
@@ -141,7 +164,7 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
       margin: 0,
       boxSizing: "border-box",
     }
-  }, [canvasMetrics, editingTextObject, viewportX, viewportY, viewportZoom])
+  }, [canvasMetrics, editingTextObject, viewportX, viewportY, viewportZoom, textareaDimensions])
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
@@ -234,25 +257,47 @@ export function Canvas({ canvasId, objects, onObjectsChange, onCursorMove, onSel
       />
 
       {editingTextId && editingTextObject && (
-        <textarea
-          ref={textInputRef}
-          value={textValue}
-          onChange={(e) => setTextValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault()
+        <div
+          className="absolute z-20"
+          style={{
+            left: textAreaStyle?.left,
+            top: textAreaStyle?.top,
+            width: textAreaStyle?.width,
+            height: textAreaStyle?.height,
+          }}
+        >
+          <textarea
+            ref={textInputRef}
+            value={textValue}
+            onChange={(e) => {
+              setTextValue(e.target.value)
+              setShowPlaceholder(e.target.value.length === 0)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                saveTextEdit(editingTextId, textValue)
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                cancelTextEdit()
+              }
+            }}
+            onBlur={() => {
               saveTextEdit(editingTextId, textValue)
-            } else if (e.key === "Escape") {
-              e.preventDefault()
-              cancelTextEdit()
-            }
-          }}
-          onBlur={() => {
-            saveTextEdit(editingTextId, textValue)
-          }}
-          className="absolute z-20 resize-none border-2 border-blue-500 bg-white/90 text-center text-black outline-none overflow-hidden"
-          style={textAreaStyle}
-        />
+            }}
+            placeholder={showPlaceholder ? "Type here..." : ""}
+            className="h-full w-full resize-none border-none bg-transparent text-center text-black outline-none overflow-hidden placeholder:text-gray-400 placeholder:opacity-50"
+            style={{
+              fontSize: textAreaStyle?.fontSize,
+              fontFamily: textAreaStyle?.fontFamily,
+              paddingTop: textAreaStyle?.paddingTop,
+              lineHeight: textAreaStyle?.lineHeight,
+              color: textAreaStyle?.color,
+              caretColor: textAreaStyle?.caretColor,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
       )}
 
       {/* Multiplayer cursors overlay */}

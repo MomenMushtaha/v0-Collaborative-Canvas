@@ -7,6 +7,7 @@ import { CollaborativeCanvas } from "@/components/collaborative-canvas"
 import { Toolbar } from "@/components/toolbar"
 import { AiChat } from "@/components/ai-chat"
 import type { CanvasObject } from "@/lib/types"
+import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 
 export default function CanvasPage() {
   const [user, setUser] = useState<{ id: string; name: string } | null>(null)
@@ -14,6 +15,12 @@ export default function CanvasPage() {
   const [aiOperations, setAiOperations] = useState<any[]>([])
   const [currentObjects, setCurrentObjects] = useState<CanvasObject[]>([])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+  const [onUndo, setOnUndo] = useState<(() => void) | undefined>()
+  const [onRedo, setOnRedo] = useState<(() => void) | undefined>()
+  const [onAlign, setOnAlign] = useState<((type: AlignmentType) => void) | undefined>()
+  const [onDistribute, setOnDistribute] = useState<((type: DistributeType) => void) | undefined>()
   const router = useRouter()
   const supabase = createClient()
 
@@ -51,9 +58,21 @@ export default function CanvasPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <Toolbar userName={user.name} onSignOut={handleSignOut} />
-      <div className="flex-1">
+    <div className="relative h-screen w-screen overflow-hidden">
+      <div className="absolute left-0 right-0 top-0 z-10">
+        <Toolbar
+          userName={user.name}
+          onSignOut={handleSignOut}
+          onUndo={onUndo}
+          onRedo={onRedo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          selectedCount={selectedObjectIds.length}
+          onAlign={onAlign}
+          onDistribute={onDistribute}
+        />
+      </div>
+      <div className="h-full w-full">
         <CollaborativeCanvas
           canvasId="default"
           userId={user.id}
@@ -62,6 +81,12 @@ export default function CanvasPage() {
           onAiOperationsProcessed={() => setAiOperations([])}
           onObjectsChange={setCurrentObjects}
           onSelectionChange={setSelectedObjectIds}
+          onUndo={setOnUndo}
+          onRedo={setOnRedo}
+          canUndo={setCanUndo}
+          canRedo={setCanRedo}
+          onAlign={setOnAlign}
+          onDistribute={setOnDistribute}
         />
       </div>
       <AiChat

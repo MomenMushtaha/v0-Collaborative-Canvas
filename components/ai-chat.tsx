@@ -15,6 +15,7 @@ interface AiChatProps {
   userId: string
   userName: string
   canvasId: string
+  viewport: { x: number; y: number; zoom: number }
 }
 
 interface Message {
@@ -28,7 +29,15 @@ interface OperationProgress {
   operation: string
 }
 
-export function AiChat({ currentObjects, selectedObjectIds, onOperations, userId, userName, canvasId }: AiChatProps) {
+export function AiChat({
+  currentObjects,
+  selectedObjectIds,
+  onOperations,
+  userId,
+  userName,
+  canvasId,
+  viewport,
+}: AiChatProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -54,6 +63,8 @@ export function AiChat({ currentObjects, selectedObjectIds, onOperations, userId
     setIsLoading(true)
     setOperationProgress(null)
 
+    const aiRequestStart = performance.now()
+
     try {
       console.log("[v0] Sending AI request:", userMessage)
       const response = await fetch("/api/ai-canvas", {
@@ -64,6 +75,7 @@ export function AiChat({ currentObjects, selectedObjectIds, onOperations, userId
           canvasId,
           userId,
           userName,
+          viewport,
           currentObjects: currentObjects.map((obj) => ({
             type: obj.type,
             x: obj.x,
@@ -78,6 +90,9 @@ export function AiChat({ currentObjects, selectedObjectIds, onOperations, userId
         }),
       })
 
+      const aiResponseTime = performance.now() - aiRequestStart
+      console.log(`[v0] [PERF] AI response time: ${aiResponseTime.toFixed(0)}ms`)
+
       console.log("[v0] Response status:", response.status)
 
       if (!response.ok) {
@@ -88,6 +103,10 @@ export function AiChat({ currentObjects, selectedObjectIds, onOperations, userId
 
       const data = await response.json()
       console.log("[v0] AI response data:", data)
+
+      if (data.operations && data.operations.length > 0) {
+        console.log(`[v0] [PERF] AI generated ${data.operations.length} operations in ${aiResponseTime.toFixed(0)}ms`)
+      }
 
       let assistantMessage = data.message
       if (data.validationErrors && data.validationErrors.length > 0) {
@@ -121,7 +140,7 @@ export function AiChat({ currentObjects, selectedObjectIds, onOperations, userId
     return (
       <button
         onClick={() => setIsExpanded(true)}
-        className="fixed bottom-6 right-6 flex items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-cyan-600 px-6 py-3 text-white shadow-lg transition-all hover:shadow-xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
+        className="fixed bottom-24 right-4 flex items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-cyan-600 px-6 py-3 text-white shadow-lg transition-all hover:shadow-xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
       >
         <Sparkles className="h-5 w-5" />
         <span className="font-medium">AI Assistant</span>
@@ -130,7 +149,7 @@ export function AiChat({ currentObjects, selectedObjectIds, onOperations, userId
   }
 
   return (
-    <div className="fixed bottom-6 right-6 flex w-96 flex-col rounded-lg border border-border bg-background shadow-2xl overflow-hidden">
+    <div className="fixed bottom-24 right-4 flex w-96 flex-col rounded-lg border border-border bg-background shadow-2xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-3.5 text-white rounded-t-lg">
         <div className="flex items-center gap-2">

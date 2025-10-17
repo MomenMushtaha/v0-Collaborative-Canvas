@@ -94,6 +94,64 @@ export async function POST(request: Request) {
       ),
     }
 
+    const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
+    const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
+
+    const visibleArea = viewport
+      ? {
+          left: Math.max(0, Math.round(-viewport.x / viewport.zoom)),
+          top: Math.max(0, Math.round(-viewport.y / viewport.zoom)),
+          right: Math.min(2000, Math.round((-viewport.x + canvasWidth) / viewport.zoom)),
+          bottom: Math.min(2000, Math.round((-viewport.y + canvasHeight) / viewport.zoom)),
+          centerX: Math.round((-viewport.x + canvasWidth / 2) / viewport.zoom),
+          centerY: Math.round((-viewport.y + 150) / viewport.zoom),
+        }
+      : {
+          left: 0,
+          top: 0,
+          right: 1920,
+          bottom: 1080,
+          centerX: 960,
+          centerY: 150,
+        }
+
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+    const clampCenter = (value: number | undefined, size: number, fallback: number) =>
+      clamp(value ?? fallback, size / 2, 2000 - size / 2)
+    const clampTopLeft = (value: number | undefined, size: number, fallback: number) =>
+      clamp(value ?? fallback, 0, 2000 - size)
+
+    const NAMED_COLORS: Record<string, string> = {
+      black: "#000000",
+      white: "#ffffff",
+      red: "#ef4444",
+      blue: "#3b82f6",
+      green: "#22c55e",
+      yellow: "#eab308",
+      purple: "#a855f7",
+      pink: "#ec4899",
+      orange: "#f97316",
+      cyan: "#06b6d4",
+      teal: "#14b8a6",
+      indigo: "#6366f1",
+      gray: "#6b7280",
+      slate: "#1f2937",
+      navy: "#1d4ed8",
+    }
+
+    const normalizeColorInput = (input: string | undefined, fallback: string) => {
+      if (!input) {
+        return fallback
+      }
+
+      if (/^#[0-9A-Fa-f]{6}$/.test(input)) {
+        return input
+      }
+
+      const normalized = input.toLowerCase().trim()
+      return NAMED_COLORS[normalized] || fallback
+    }
+
     const operations: any[] = []
     const validationErrors: string[] = []
 
@@ -124,31 +182,7 @@ export async function POST(request: Request) {
             return { error: validation.error }
           }
 
-          const colorMap: Record<string, string> = {
-            black: "#000000",
-            white: "#ffffff",
-            red: "#ef4444",
-            blue: "#3b82f6",
-            green: "#22c55e",
-            yellow: "#eab308",
-            purple: "#a855f7",
-            pink: "#ec4899",
-            orange: "#f97316",
-            cyan: "#06b6d4",
-            teal: "#14b8a6",
-            indigo: "#6366f1",
-            gray: "#6b7280",
-          }
-
-          let finalColor = color || "#000000"
-          if (!finalColor.startsWith("#")) {
-            const normalizedColor = finalColor.toLowerCase().trim()
-            finalColor = colorMap[normalizedColor] || "#000000"
-          }
-
-          if (!/^#[0-9A-Fa-f]{6}$/.test(finalColor)) {
-            finalColor = "#000000"
-          }
+          const finalColor = normalizeColorInput(color, "#000000")
 
           operations.push({
             type: "createText",
@@ -179,31 +213,7 @@ export async function POST(request: Request) {
             return { error: validation.error }
           }
 
-          const colorMap: Record<string, string> = {
-            red: "#ef4444",
-            blue: "#3b82f6",
-            green: "#22c55e",
-            yellow: "#eab308",
-            purple: "#a855f7",
-            pink: "#ec4899",
-            orange: "#f97316",
-            cyan: "#06b6d4",
-            teal: "#14b8a6",
-            indigo: "#6366f1",
-            gray: "#6b7280",
-            black: "#000000",
-            white: "#ffffff",
-          }
-
-          let finalColor = color || "#3b82f6"
-          if (!finalColor.startsWith("#")) {
-            const normalizedColor = finalColor.toLowerCase().trim()
-            finalColor = colorMap[normalizedColor] || "#3b82f6"
-          }
-
-          if (!/^#[0-9A-Fa-f]{6}$/.test(finalColor)) {
-            finalColor = "#3b82f6"
-          }
+          const finalColor = normalizeColorInput(color, "#3b82f6")
 
           operations.push({
             type: "create",
@@ -372,33 +382,147 @@ export async function POST(request: Request) {
           return { success: true, pattern, shapeIndices, spacing, columns }
         },
       }),
+      createLoginForm: tool({
+        description:
+          "Create a polished login form with title, username/password fields, and a primary action button arranged vertically.",
+        inputSchema: z.object({
+          x: z.number().optional().describe("Center X coordinate for the form"),
+          y: z.number().optional().describe("Center Y coordinate for the form"),
+          title: z.string().optional().describe("Heading text to display above the form"),
+          subtitle: z
+            .string()
+            .optional()
+            .describe("Optional supporting text shown below the title"),
+          primaryColor: z
+            .string()
+            .optional()
+            .describe("Accent color for the button (hex code or common color name)"),
+        }),
+        execute: async ({ x, y, title, subtitle, primaryColor }) => {
+          const formWidth = 360
+          const formHeight = 320
+          const centerX = clampCenter(x, formWidth, visibleArea.centerX)
+          const centerY = clampCenter(y, formHeight, visibleArea.centerY)
+          const buttonColor = normalizeColorInput(primaryColor, "#3b82f6")
+
+          operations.push({
+            type: "createLoginForm",
+            x: centerX,
+            y: centerY,
+            width: formWidth,
+            height: formHeight,
+            titleText: title || "Welcome back",
+            subtitleText: subtitle || "Please sign in to continue",
+            usernameLabel: "Email",
+            passwordLabel: "Password",
+            buttonText: "Sign In",
+            backgroundColor: "#ffffff",
+            fieldColor: "#f3f4f6",
+            buttonColor,
+            buttonTextColor: "#ffffff",
+            textColor: "#111827",
+            mutedTextColor: "#6b7280",
+            helpText: "Forgot password?",
+          })
+
+          return { success: true, x: centerX, y: centerY, width: formWidth, height: formHeight }
+        },
+      }),
+      createNavigationBar: tool({
+        description:
+          "Create a horizontal navigation bar with a brand label and evenly spaced menu items across the top of the canvas.",
+        inputSchema: z.object({
+          items: z
+            .number()
+            .int()
+            .min(2)
+            .max(8)
+            .optional()
+            .describe("How many navigation items to include (2-8)"),
+          x: z.number().optional().describe("Center X coordinate for the navigation bar"),
+          y: z
+            .number()
+            .optional()
+            .describe("Top Y coordinate for the navigation bar (defaults to top of view)"),
+          brand: z.string().optional().describe("Brand or product name to show on the left"),
+          accentColor: z
+            .string()
+            .optional()
+            .describe("Highlight color for the active navigation item"),
+        }),
+        execute: async ({ items, x, y, brand, accentColor }) => {
+          const navItems = clamp(items ?? 4, 2, 8)
+          const navWidth = Math.max(420, Math.min(960, navItems * 140))
+          const navHeight = 64
+          const centerX = clampCenter(x, navWidth, visibleArea.centerX)
+          const topY = clampTopLeft(y, navHeight, visibleArea.top)
+          const leftX = clamp(centerX - navWidth / 2, 0, 2000 - navWidth)
+          const highlightColor = normalizeColorInput(accentColor, "#3b82f6")
+
+          operations.push({
+            type: "createNavBar",
+            x: leftX,
+            y: topY,
+            width: navWidth,
+            height: navHeight,
+            items: navItems,
+            brandText: brand || "Product",
+            menuItems: Array.from({ length: navItems }, (_, index) =>
+              index === 0 ? "Home" : `Item ${index + 1}`,
+            ),
+            backgroundColor: "#111827",
+            itemColor: "#1f2937",
+            activeItemColor: highlightColor,
+            textColor: "#f9fafb",
+          })
+
+          return { success: true, x: leftX, y: topY, width: navWidth, height: navHeight, items: navItems }
+        },
+      }),
+      createCardLayout: tool({
+        description:
+          "Create a content card with an image placeholder, title, description text, and call-to-action button.",
+        inputSchema: z.object({
+          x: z.number().optional().describe("Center X coordinate for the card"),
+          y: z.number().optional().describe("Center Y coordinate for the card"),
+          title: z.string().optional().describe("Title text inside the card"),
+          description: z
+            .string()
+            .optional()
+            .describe("Supporting description text for the card"),
+          buttonText: z.string().optional().describe("Call-to-action label for the card button"),
+          accentColor: z
+            .string()
+            .optional()
+            .describe("Accent color for the media area and button"),
+        }),
+        execute: async ({ x, y, title, description, buttonText, accentColor }) => {
+          const cardWidth = 320
+          const cardHeight = 220
+          const centerX = clampCenter(x, cardWidth, visibleArea.centerX)
+          const centerY = clampCenter(y, cardHeight, visibleArea.centerY)
+          const accent = normalizeColorInput(accentColor, "#3b82f6")
+
+          operations.push({
+            type: "createCard",
+            x: centerX,
+            y: centerY,
+            width: cardWidth,
+            height: cardHeight,
+            titleText: title || "Card title",
+            descriptionText: description || "Add supporting details here.",
+            buttonText: buttonText || "Learn more",
+            accentColor: accent,
+            backgroundColor: "#ffffff",
+            textColor: "#111827",
+            mutedTextColor: "#6b7280",
+            buttonTextColor: "#ffffff",
+          })
+
+          return { success: true, x: centerX, y: centerY, width: cardWidth, height: cardHeight }
+        },
+      }),
     }
-
-    const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
-    const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
-
-    // Calculate the actual accessible area considering zoom constraints
-    // Users start at viewport (0, 0) with zoom 1, and can zoom in up to 3x
-    // The accessible area is roughly the top-right quadrant of the 2000x2000 canvas
-    const visibleArea = viewport
-      ? {
-          left: Math.max(0, Math.round(-viewport.x / viewport.zoom)),
-          top: Math.max(0, Math.round(-viewport.y / viewport.zoom)),
-          right: Math.min(2000, Math.round((-viewport.x + canvasWidth) / viewport.zoom)),
-          bottom: Math.min(2000, Math.round((-viewport.y + canvasHeight) / viewport.zoom)),
-          // Place objects in the top center of visible area, with some padding from the top
-          centerX: Math.round((-viewport.x + canvasWidth / 2) / viewport.zoom),
-          centerY: Math.round((-viewport.y + 150) / viewport.zoom), // 150px from top for better visibility
-        }
-      : {
-          // Default to top-right accessible area when no viewport info
-          left: 0,
-          top: 0,
-          right: 1920,
-          bottom: 1080,
-          centerX: 960,
-          centerY: 150,
-        }
 
     const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
 
@@ -450,6 +574,9 @@ AVAILABLE FUNCTIONS:
 6. deleteShape - Delete specific shapes or clear all
 7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
 8. createText - Create a text layer on the canvas
+9. createLoginForm - Build a multi-element login form layout with labels and button
+10. createNavigationBar - Create a navigation bar with menu items
+11. createCardLayout - Create a card with media area, text, and button
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}

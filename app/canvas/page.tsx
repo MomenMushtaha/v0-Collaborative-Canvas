@@ -304,7 +304,14 @@ export default function CanvasPage() {
         canvasId="default"
       />
       {showHistory && (
-        <HistoryPanel canvasId="default" onRestore={handleRestoreHistory} onClose={() => setShowHistory(false)} />
+        <HistoryPanel
+          canvasId="default"
+          currentObjects={currentObjects}
+          userId={user.id}
+          userName={user.name}
+          onRestore={handleRestoreHistory}
+          onClose={() => setShowHistory(false)}
+        />
       )}
       <CommentsPanel
         canvasId="default"

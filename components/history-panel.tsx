@@ -3,24 +3,34 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { History, RefreshCcw, RotateCcw, X } from "lucide-react"
-import { loadHistorySnapshots, restoreHistorySnapshot, formatTimeAgo, type HistorySnapshot } from "@/lib/history-utils"
+import { Input } from "@/components/ui/input"
+import { History, RefreshCw, RotateCcw, Save, X } from "lucide-react"
+import {
+  loadHistorySnapshots,
+  restoreHistorySnapshot,
+  formatTimeAgo,
+  saveHistorySnapshot,
+  type HistorySnapshot,
+} from "@/lib/history-utils"
 import type { CanvasObject } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 
 interface HistoryPanelProps {
   canvasId: string
+  currentObjects: CanvasObject[]
+  userId: string
+  userName: string
   onRestore: (objects: CanvasObject[]) => void
   onClose: () => void
 }
 
-export function HistoryPanel({ canvasId, onRestore, onClose }: HistoryPanelProps) {
+export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRestore, onClose }: HistoryPanelProps) {
   const [snapshots, setSnapshots] = useState<HistorySnapshot[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRestoring, setIsRestoring] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [description, setDescription] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const { toast } = useToast()
 
   const loadSnapshots = useCallback(async () => {
@@ -39,12 +49,7 @@ export function HistoryPanel({ canvasId, onRestore, onClose }: HistoryPanelProps
       setLastUpdated(new Date().toISOString())
     } catch (error) {
       console.error("[v0] Failed to load history:", error)
-      setError("Unable to load version history. Please try again.")
-      toast({
-        title: "Could not load history",
-        description: "Check your connection and try again.",
-        variant: "destructive",
-      })
+      setError("Failed to load version history. Please try again.")
     } finally {
       setIsLoading(false)
     }
@@ -64,7 +69,7 @@ export function HistoryPanel({ canvasId, onRestore, onClose }: HistoryPanelProps
       console.error("[v0] Failed to restore snapshot:", error)
       toast({
         title: "Restore failed",
-        description: "We couldn't apply that version. Please try again.",
+        description: "Unable to restore this version. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -72,10 +77,39 @@ export function HistoryPanel({ canvasId, onRestore, onClose }: HistoryPanelProps
     }
   }
 
-  const lastUpdatedLabel = useMemo(() => {
-    if (!lastUpdated) return null
-    return formatTimeAgo(lastUpdated)
-  }, [lastUpdated])
+  const handleSaveSnapshot = async () => {
+    if (currentObjects.length === 0) {
+      setError("Add objects to the canvas before saving a snapshot.")
+      return
+    }
+
+    try {
+      setIsSaving(true)
+      setError(null)
+      await saveHistorySnapshot(
+        canvasId,
+        currentObjects,
+        userId,
+        userName,
+        description.trim() ? description.trim() : undefined,
+      )
+      toast({ title: "Snapshot saved", description: "A new version has been added to history." })
+      setDescription("")
+      await loadSnapshots()
+    } catch (error) {
+      console.error("[v0] Failed to save snapshot:", error)
+      setError("Failed to save snapshot. Please try again.")
+      toast({
+        title: "Snapshot failed",
+        description: "We couldn't save this version. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const canSaveSnapshot = currentObjects.length > 0 && !isSaving
 
   return (
     <div className="fixed right-4 top-20 z-40 w-80 max-h-[600px] rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">
@@ -90,24 +124,43 @@ export function HistoryPanel({ canvasId, onRestore, onClose }: HistoryPanelProps
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => void loadSnapshots()}
+              onClick={loadSnapshots}
               className="h-6 w-6"
               disabled={isLoading}
-              aria-label="Refresh history"
+              title="Refresh history"
             >
-              <RefreshCcw className={cn("h-3 w-3", isLoading && "animate-spin")} />
+              <RefreshCw className="h-3 w-3" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onClose} className="h-6 w-6" aria-label="Close history panel">
+            <Button variant="ghost" size="icon" onClick={onClose} className="h-6 w-6" title="Close">
               <X className="h-3 w-3" />
             </Button>
           </div>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">Restore previous canvas states</p>
-          {lastUpdatedLabel && (
-            <span className="text-[10px] text-muted-foreground/80">Updated {lastUpdatedLabel}</span>
-          )}
+      </div>
+
+      {/* Save snapshot */}
+      <div className="px-4 py-3 border-b border-border/50 bg-muted/10 space-y-2">
+        <div className="flex items-center gap-2">
+          <Input
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Add a note (optional)"
+            className="h-8 text-xs"
+          />
+          <Button
+            onClick={handleSaveSnapshot}
+            size="sm"
+            className="h-8 px-3 gap-1"
+            disabled={!canSaveSnapshot}
+          >
+            <Save className="h-3 w-3" />
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
         </div>
+        <p className="text-[11px] text-muted-foreground">
+          Capture the current state to revisit it later. Snapshots include all objects on the canvas.
+        </p>
+        {error && <p className="text-[11px] text-destructive">{error}</p>}
       </div>
 
       {/* Content */}

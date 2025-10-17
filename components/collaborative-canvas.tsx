@@ -5,14 +5,7 @@ import { MultiplayerCursors } from "@/components/multiplayer-cursors"
 import { PresencePanel } from "@/components/presence-panel"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
-import {
-  useMemo,
-  useEffect,
-  useState,
-  useCallback,
-  type Dispatch,
-  type SetStateAction,
-} from "react"
+import { useMemo, useEffect, useState, useCallback, type Dispatch, type SetStateAction } from "react"
 import type { CanvasObject } from "@/lib/types"
 import { useAIQueue } from "@/hooks/use-ai-queue"
 import { ConnectionStatus } from "@/components/connection-status"
@@ -186,6 +179,25 @@ export function CollaborativeCanvas({
     }
   }, [selectedObjectIds, objects, syncObjects])
 
+  const handleDuplicate = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+    const duplicatedObjects = selectedObjs.map((obj) => ({
+      ...obj,
+      id: crypto.randomUUID(),
+      x: obj.x + 20, // Offset by 20px
+      y: obj.y + 20, // Offset by 20px
+    }))
+
+    const updatedObjects = [...objects, ...duplicatedObjects]
+    syncObjects(updatedObjects)
+
+    // Select the newly duplicated objects
+    setSelectedObjectIds(duplicatedObjects.map((obj) => obj.id))
+    console.log("[v0] Duplicated", selectedObjectIds.length, "object(s)")
+  }, [selectedObjectIds, objects, syncObjects])
+
   const handleStyleChange = useCallback(
     (updates: Partial<CanvasObject>) => {
       if (selectedObjectIds.length === 0) return
@@ -217,6 +229,7 @@ export function CollaborativeCanvas({
     onUndo: handleUndo,
     onRedo: handleRedo,
     onDelete: handleDelete,
+    onDuplicate: handleDuplicate, // Added duplicate handler
     onSelectAll: handleSelectAll,
     canUndo: historyCanUndo,
     canRedo: historyCanRedo,

@@ -21,6 +21,9 @@ export interface CanvasObject {
   locked?: boolean // lock to prevent editing
   shape?: "rectangle" | "circle" | "triangle" | "line" // shape type for non-text objects
   content?: string // text content for text objects
+  last_modified_by?: string
+  last_modified_by_name?: string
+  last_modified_at?: string
 }
 
 export interface UserPresence {
@@ -47,4 +50,11 @@ export interface HistoryCommand {
   beforeState?: CanvasObject[]
   afterState?: CanvasObject[]
   timestamp: number
+}
+
+export interface ObjectMetadata {
+  lastEditedBy: string
+  lastEditedByName: string
+  lastEditedAt: number
+  lastEditedColor?: string
 }

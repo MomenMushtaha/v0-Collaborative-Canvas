@@ -2,18 +2,19 @@
 
 ## Overview
 
-CollabCanvas uses a **Last-Write-Wins (LWW)** conflict resolution strategy combined with optimistic updates and real-time synchronization to handle concurrent edits in a multi-user collaborative environment.
+CollabCanvas uses a **Lamport-clock-backed Last-Write-Wins (LWW)** conflict resolution strategy combined with optimistic updates and real-time synchronization to handle concurrent edits in a multi-user collaborative environment. Each change carries a monotonically increasing logical timestamp so every client deterministically agrees on the "latest" write—even during rapid-fire conflicts or temporary disconnects.
 
 ## Strategy: Last-Write-Wins (LWW)
 
 ### Core Principle
-When multiple users edit the same object simultaneously, the most recent change (based on timestamp) takes precedence and overwrites previous changes.
+When multiple users edit the same object simultaneously, the change with the highest Lamport timestamp wins. If two edits share the same logical clock, we deterministically fall back to the author identifier so that every client converges on the same result without ping-ponging states.
 
 ### Why LWW?
 - **Simplicity**: Easy to implement and reason about
 - **Performance**: No complex merge algorithms or coordination overhead
 - **Real-time**: Works seamlessly with broadcast-based synchronization
 - **Predictable**: Users see immediate feedback without waiting for conflict resolution
+- **Deterministic**: Lamport clocks + user IDs guarantee a single winner even when updates arrive simultaneously
 
 ### Trade-offs
 - **Potential Data Loss**: Earlier changes may be overwritten by later ones
@@ -40,6 +41,11 @@ saveToDatabase(objectId, newProperties)
 - Sub-50ms local updates (no network latency)
 - Smooth user experience
 - Changes appear instantly
+
+### 1.5 Deterministic Ordering & Attribution
+- **Lamport Clock**: Every local mutation bumps a logical clock that travels with the payload. Remote clients ignore any operation whose clock is older than what they have already applied.
+- **Stable Tie-Breaker**: When clocks match, we compare author IDs to prevent flip-flopping states.
+- **Last Edit Metadata**: Broadcasts include the editor name/color so the canvas can render "Last edit" badges on selected objects for instant human-friendly context.
 
 ### 2. Real-Time Synchronization
 
@@ -77,7 +83,7 @@ Result: All users see x: 200 (User B's change wins)
 **During Disconnect**:
 - Operations are queued locally
 - User continues working offline
-- Queue stored in memory (max 100 operations)
+- Queue stored locally (persisted in `localStorage`, max 100 operations) so a refresh or tab crash does not lose intent
 
 **On Reconnect**:
 - Queued operations replayed in order
@@ -177,6 +183,11 @@ T3: If user was editing same area, AI object appears
 - Selected objects show colored borders (per user)
 - Users can see what others are editing
 - Encourages coordination
+
+### Last Edit Badges
+- Selected objects render a floating "Last edit" chip showing the most recent editor and relative timestamp.
+- Metadata is sourced from the Lamport-aware broadcasts, so the badge updates instantly on every client.
+- Helps teams understand intent without opening a separate activity log.
 
 ### Connection Status
 - Banner shows "Reconnecting..." or "Offline" during disconnects

@@ -4,13 +4,25 @@ import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useCanvas } from "@/hooks/use-canvas"
-import type { CanvasObject } from "@/lib/types"
+import type { CanvasObject, ObjectMetadata } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Square, MousePointer2, Circle, Triangle, Trash2, Minus, Type, Send, X } from "lucide-react"
 
 function areSelectionsEqual(a: string[], b: string[]) {
   if (a.length !== b.length) return false
   return a.every((value, index) => value === b[index])
+}
+
+function formatRelativeTime(timestamp: number) {
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
+  if (diffSeconds < 1) return "just now"
+  if (diffSeconds < 60) return `${diffSeconds}s ago`
+  const diffMinutes = Math.floor(diffSeconds / 60)
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  const diffDays = Math.floor(diffHours / 24)
+  return `${diffDays}d ago`
 }
 
 interface CanvasProps {
@@ -29,6 +41,7 @@ interface CanvasProps {
   onCommentCreate?: (x: number, y: number, content: string) => void
   selectedIds?: string[]
   lassoMode?: boolean
+  objectMetadata?: Record<string, ObjectMetadata>
 }
 
 export function Canvas({
@@ -47,6 +60,7 @@ export function Canvas({
   onCommentCreate,
   selectedIds: externalSelectedIds,
   lassoMode = false,
+  objectMetadata = {},
 }: CanvasProps) {
   const syncingExternalSelection = useRef(false)
   const {
@@ -458,18 +472,48 @@ export function Canvas({
         </div>
       )}
 
-      {/* Multiplayer cursors overlay */}
+      {/* Multiplayer cursors and metadata overlay */}
       <div className="pointer-events-none absolute inset-0">
-        {children && (
-          <div
-            style={{
-              transform: `translate(${viewportX}px, ${viewportY}px) scale(${viewportZoom})`,
-              transformOrigin: "0 0",
-            }}
-          >
-            {children}
-          </div>
-        )}
+        <div
+          style={{
+            transform: `translate(${viewportX}px, ${viewportY}px) scale(${viewportZoom})`,
+            transformOrigin: "0 0",
+          }}
+        >
+          {children}
+          {selectedIds.map((id) => {
+            const obj = objects.find((o) => o.id === id)
+            const metadata = objectMetadata[id]
+            if (!obj || !metadata) {
+              return null
+            }
+
+            const objectWidth = Number.isFinite(obj.width) ? obj.width : 0
+            const objectHeight = Number.isFinite(obj.height) ? obj.height : 0
+            const preferredTop = obj.y - 28
+            const top = preferredTop > 0 ? preferredTop : obj.y + objectHeight + 12
+            const left = obj.x + objectWidth / 2
+
+            return (
+              <div
+                key={`metadata-${id}`}
+                className="absolute -translate-x-1/2"
+                style={{ left, top }}
+              >
+                <div
+                  className="rounded-full px-3 py-1 text-xs font-semibold text-white shadow-lg shadow-black/20"
+                  style={{ backgroundColor: metadata.lastEditedColor || "#0ea5e9" }}
+                >
+                  <span className="mr-2 text-[10px] font-semibold uppercase tracking-wide opacity-80">Last edit</span>
+                  <span>{metadata.lastEditedByName}</span>
+                  <span className="ml-2 text-[10px] font-medium uppercase tracking-wide opacity-80">
+                    {formatRelativeTime(metadata.lastEditedAt)}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

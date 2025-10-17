@@ -101,9 +101,11 @@ export function CollaborativeCanvas({
   const [clipboard, setClipboard] = useState<CanvasObject[]>([]) // Added clipboard state
   const { toast } = useToast()
 
-  const { objects, isLoading, syncObjects, isConnected, queuedOperations } = useRealtimeCanvas({
+  const { objects, isLoading, syncObjects, isConnected, objectMetadata, queuedOperations } = useRealtimeCanvas({
     canvasId,
     userId,
+    userName,
+    userColor,
     onConnectionChange: (connected, queued) => {
       setConnectionState({ isConnected: connected, queuedOps: queued })
     },
@@ -719,6 +721,7 @@ export function CollaborativeCanvas({
         onBringForward={handleBringForward}
         onSendBackward={handleSendBackward}
         lassoMode={lassoMode} // Pass lassoMode to Canvas
+        objectMetadata={objectMetadata}
       >
         <MultiplayerCursors users={otherUsers} />
         {comments.map((comment) => (

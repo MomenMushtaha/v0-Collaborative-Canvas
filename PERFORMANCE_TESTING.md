@@ -22,6 +22,14 @@ CollabCanvas includes automatic performance logging that tracks:
 - Target: <100ms
 - Logged automatically during collaboration
 
+### 1b. Cursor Sync Performance
+\`\`\`
+[v0] [PERF] Cursor sync latency: 18ms
+\`\`\`
+- Measures time from broadcast to visible cursor update
+- Target: <50ms
+- RequestAnimationFrame batching keeps broadcasts at 60fps without flooding the channel
+
 ### 2. Database Write Performance
 \`\`\`
 [v0] [PERF] Database write: 120ms (5 objects)
@@ -117,6 +125,7 @@ CollabCanvas includes automatic performance logging that tracks:
 - Automatic reconnection within 1-5 seconds
 - All queued operations sync successfully
 - No data loss
+- Refreshing the page while offline replays the persisted queue once the socket reconnects
 
 ### Scenario 5: AI Agent Performance
 **Objective:** Test AI command execution speed
@@ -159,6 +168,7 @@ CollabCanvas includes automatic performance logging that tracks:
 - Automatic replay on reconnection
 - Prevents data loss
 - Maintains operation order
+- Persists queue between reloads so in-flight edits survive refreshes or crashes
 
 ## Architecture Performance Characteristics
 
@@ -240,7 +250,7 @@ All performance metrics are automatically logged to the browser console with the
 1. **Connection Status UI** - Visual feedback on connection state
 2. **Performance Logging** - Automatic metrics collection
 3. **Reconnection Logic** - Handles network interruptions
-4. **Operation Queuing** - Prevents data loss during disconnect
+4. **Operation Queuing** - Prevents data loss during disconnect (persisted in `localStorage`, Lamport clock aware)
 5. **Debounced Writes** - Reduces database load
 6. **Optimistic Updates** - Immediate UI feedback
 7. **Efficient Rendering** - Canvas optimization

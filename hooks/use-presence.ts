@@ -17,6 +17,7 @@ interface CursorUpdate {
   color: string
   x: number
   y: number
+  _timestamp?: number
 }
 
 export function usePresence({ canvasId, userId, userName, userColor }: UsePresenceProps) {
@@ -24,6 +25,8 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
   const supabase = createClient()
   const [presenceId, setPresenceId] = useState<string | null>(null)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const pendingCursorRef = useRef<{ x: number; y: number } | null>(null)
+  const rafRef = useRef<number | null>(null)
 
   // Initialize presence
   useEffect(() => {
@@ -94,6 +97,11 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
         },
       })
       .on("broadcast", { event: "cursor" }, ({ payload }: { payload: CursorUpdate }) => {
+        if (payload._timestamp) {
+          const latency = Date.now() - payload._timestamp
+          console.log(`[v0] [PERF] Cursor sync latency: ${latency}ms`)
+        }
+
         console.log("[v0] Received cursor broadcast from:", payload.userName, "at", payload.x, payload.y)
 
         setOtherUsers((prev) => {
@@ -124,6 +132,10 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
     return () => {
       console.log("[v0] Cleaning up cursor broadcast channel")
       clearInterval(presenceInterval)
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current)
+      }
+      pendingCursorRef.current = null
       supabase.removeChannel(channel)
       channelRef.current = null
     }
@@ -131,22 +143,37 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
 
   const updateCursor = useCallback(
     (x: number, y: number) => {
-      if (!channelRef.current) {
-        console.warn("[v0] Cannot send cursor update: channel not ready")
+      pendingCursorRef.current = { x, y }
+
+      if (rafRef.current !== null) {
         return
       }
 
-      console.log("[v0] Broadcasting cursor position:", x, y, "for user:", userName)
-      channelRef.current.send({
-        type: "broadcast",
-        event: "cursor",
-        payload: {
-          userId,
-          userName,
-          color: userColor,
-          x,
-          y,
-        } as CursorUpdate,
+      rafRef.current = requestAnimationFrame(() => {
+        const pending = pendingCursorRef.current
+        pendingCursorRef.current = null
+        rafRef.current = null
+
+        if (!pending) return
+
+        if (!channelRef.current) {
+          console.warn("[v0] Cannot send cursor update: channel not ready")
+          return
+        }
+
+        console.log("[v0] Broadcasting cursor position:", pending.x, pending.y, "for user:", userName)
+        channelRef.current.send({
+          type: "broadcast",
+          event: "cursor",
+          payload: {
+            userId,
+            userName,
+            color: userColor,
+            x: pending.x,
+            y: pending.y,
+            _timestamp: Date.now(),
+          } as CursorUpdate,
+        })
       })
     },
     [userId, userName, userColor],

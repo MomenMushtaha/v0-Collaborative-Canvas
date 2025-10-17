@@ -5,7 +5,7 @@ import { MultiplayerCursors } from "@/components/multiplayer-cursors"
 import { PresencePanel } from "@/components/presence-panel"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
-import { useMemo, useEffect, useState, useCallback, type Dispatch, type SetStateAction } from "react"
+import { useMemo, useEffect, useState, useCallback, useRef, type Dispatch, type SetStateAction } from "react"
 import type { CanvasObject } from "@/lib/types"
 import { useAIQueue } from "@/hooks/use-ai-queue"
 import { ConnectionStatus } from "@/components/connection-status"
@@ -62,6 +62,8 @@ interface CollaborativeCanvasProps {
   onSendBackward?: Dispatch<SetStateAction<(() => void) | undefined>>
   lassoMode?: boolean // Added lassoMode prop type
   onSelectAllOfType?: Dispatch<SetStateAction<(() => void) | undefined>> // Added onSelectAllOfType prop type
+  historyRestore?: CanvasObject[] | null
+  onHistoryRestoreComplete?: (result: "success" | "error") => void
 }
 
 export function CollaborativeCanvas({
@@ -93,6 +95,8 @@ export function CollaborativeCanvas({
   onSendBackward,
   lassoMode = false,
   onSelectAllOfType,
+  historyRestore = null,
+  onHistoryRestoreComplete,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -124,6 +128,11 @@ export function CollaborativeCanvas({
   const { addCommand, undo, redo, canUndo: historyCanUndo, canRedo: historyCanRedo } = useHistory()
   const [previousObjects, setPreviousObjects] = useState<CanvasObject[]>([])
   const [newTextObjectIds, setNewTextObjectIds] = useState<Set<string>>(new Set()) // Track new text objects
+  const objectsRef = useRef<CanvasObject[]>(objects)
+
+  useEffect(() => {
+    objectsRef.current = objects
+  }, [objects])
 
   useEffect(() => {
     if (isUndoRedoOperation) {
@@ -231,6 +240,58 @@ export function CollaborativeCanvas({
 
     setPreviousObjects(objects)
   }, [objects, isUndoRedoOperation, newTextObjectIds])
+
+  useEffect(() => {
+    if (!historyRestore) return
+
+    const applyRestore = async () => {
+      const previousState = objectsRef.current || []
+
+      console.log(
+        "[v0] Applying history restore:",
+        historyRestore.length,
+        "object(s) replacing",
+        previousState.length,
+        "object(s)",
+      )
+
+      const uniqueIds = Array.from(
+        new Set([
+          ...previousState.map((obj) => obj.id),
+          ...historyRestore.map((obj) => obj.id),
+        ]),
+      )
+
+      setIsUndoRedoOperation(true)
+
+      try {
+        await syncObjects(historyRestore)
+
+        addCommand({
+          type: "restore",
+          objectIds: uniqueIds,
+          beforeState: previousState,
+          afterState: historyRestore,
+          timestamp: Date.now(),
+        })
+
+        setNewTextObjectIds(new Set())
+        setPreviousObjects(historyRestore)
+        setSelectedObjectIds([])
+        onSelectionChange?.([])
+
+        console.log("[v0] History restore applied successfully")
+
+        onHistoryRestoreComplete?.("success")
+      } catch (error) {
+        console.error("[v0] Failed to apply history restore:", error)
+        setIsUndoRedoOperation(false)
+        onHistoryRestoreComplete?.("error")
+      }
+    }
+
+    void applyRestore()
+  }, [historyRestore, addCommand, syncObjects, onSelectionChange, onHistoryRestoreComplete])
 
   const handleUndo = useCallback(() => {
     const newObjects = undo(objects)

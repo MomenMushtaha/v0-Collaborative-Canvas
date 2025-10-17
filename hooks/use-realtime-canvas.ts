@@ -4,55 +4,219 @@ import { useEffect, useState, useCallback, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { CanvasObject } from "@/lib/types"
 import type { RealtimeChannel } from "@supabase/supabase-js"
+import { LamportClock } from "@/lib/realtime/lamport"
+import {
+  shouldApplyRemoteUpdate,
+  toSerializableMap,
+  mapFromObject,
+  type LastEditorMeta,
+} from "@/lib/realtime/conflict"
+import {
+  loadSnapshot,
+  saveSnapshot,
+  loadQueuedOperations,
+  saveQueuedOperations,
+  clearQueuedOperations,
+  type PersistedQueuedOperation,
+} from "@/lib/state-persistence"
 
 interface UseRealtimeCanvasProps {
   canvasId: string
   userId: string
+  userName: string
   onConnectionChange?: (connected: boolean, queuedOps: number) => void
 }
 
-interface QueuedOperation {
-  type: "create" | "update" | "delete"
+interface BroadcastPayload {
   object?: CanvasObject
   objectId?: string
-  timestamp: number
+  version: number
+  meta: LastEditorMeta
+  event: "object_created" | "object_updated" | "object_deleted"
 }
 
-export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseRealtimeCanvasProps) {
+function stripMeta(object: CanvasObject) {
+  const { version, last_edited_by, last_edited_by_name, last_edited_at, ...rest } = object
+  return rest as CanvasObject
+}
+
+function ensureMeta(object: CanvasObject, version: number, meta: LastEditorMeta): CanvasObject {
+  return {
+    ...object,
+    version,
+    last_edited_by: meta.userId,
+    last_edited_by_name: meta.userName,
+    last_edited_at: new Date(meta.timestamp).toISOString(),
+  }
+}
+
+export function useRealtimeCanvas({ canvasId, userId, userName, onConnectionChange }: UseRealtimeCanvasProps) {
   const [objects, setObjects] = useState<CanvasObject[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isConnected, setIsConnected] = useState(true)
   const supabase = createClient()
 
+  const lamportRef = useRef(new LamportClock())
+  const objectVersionsRef = useRef(new Map<string, number>())
+  const deletedVersionsRef = useRef(new Map<string, number>())
+  const lastEditorsRef = useRef(new Map<string, LastEditorMeta>())
+  const objectsRef = useRef<CanvasObject[]>([])
+
   const syncTimeoutRef = useRef<NodeJS.Timeout>()
+  const persistTimeoutRef = useRef<number>()
   const pendingObjectsRef = useRef<CanvasObject[]>([])
+  const pendingDbOperationsRef = useRef<PersistedQueuedOperation[]>([])
   const channelRef = useRef<RealtimeChannel>()
-  const operationQueueRef = useRef<QueuedOperation[]>([])
+  const operationQueueRef = useRef<PersistedQueuedOperation[]>([])
   const reconnectAttemptRef = useRef(0)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
   const onConnectionChangeRef = useRef(onConnectionChange)
   const lastStatusRef = useRef<string>("")
 
+  const commitObjects = useCallback(
+    (nextObjects: CanvasObject[]) => {
+      objectsRef.current = nextObjects
+      pendingObjectsRef.current = nextObjects
+      setObjects(nextObjects)
+
+      if (typeof window !== "undefined") {
+        if (persistTimeoutRef.current) {
+          window.clearTimeout(persistTimeoutRef.current)
+        }
+        persistTimeoutRef.current = window.setTimeout(() => {
+          saveSnapshot(canvasId, {
+            objects: nextObjects,
+            versions: Object.fromEntries(objectVersionsRef.current.entries()),
+            editors: toSerializableMap(lastEditorsRef.current),
+            savedAt: Date.now(),
+          })
+        }, 100)
+      }
+    },
+    [canvasId],
+  )
+
+  const persistQueue = useCallback(() => {
+    saveQueuedOperations(canvasId, operationQueueRef.current)
+  }, [canvasId])
+
+  const flushDatabaseOperations = useCallback(async () => {
+    if (!isConnected) return
+    if (pendingDbOperationsRef.current.length === 0) return
+
+    const operations = pendingDbOperationsRef.current
+    pendingDbOperationsRef.current = []
+
+    const dedupedMap = new Map<string, PersistedQueuedOperation>()
+
+    for (const op of operations) {
+      if (op.type === "delete" && op.objectId) {
+        dedupedMap.set(op.objectId, op)
+      } else if (op.object) {
+        dedupedMap.set(op.object.id, op)
+      }
+    }
+
+    const dedupedOps = Array.from(dedupedMap.values()).sort((a, b) => a.timestamp - b.timestamp)
+
+    for (const op of dedupedOps) {
+      try {
+        if (op.type === "create" && op.object) {
+          await supabase
+            .from("canvas_objects")
+            .upsert({
+              ...stripMeta(op.object),
+              created_by: op.meta.userId,
+              updated_at: new Date(op.meta.timestamp).toISOString(),
+            })
+        } else if (op.type === "update" && op.object) {
+          await supabase
+            .from("canvas_objects")
+            .update({
+              ...stripMeta(op.object),
+              updated_at: new Date(op.meta.timestamp).toISOString(),
+            })
+            .eq("id", op.object.id)
+        } else if (op.type === "delete" && op.objectId) {
+          await supabase.from("canvas_objects").delete().eq("id", op.objectId)
+        }
+      } catch (error) {
+        console.error("[v0] [RECONNECT] Database sync failed, re-queueing", error)
+        pendingDbOperationsRef.current.push(op)
+      }
+    }
+  }, [isConnected, supabase])
+
   useEffect(() => {
     onConnectionChangeRef.current = onConnectionChange
   }, [onConnectionChange])
 
-  // Load initial objects from database
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const snapshot = loadSnapshot(canvasId)
+    if (snapshot) {
+      objectVersionsRef.current = new Map(Object.entries(snapshot.versions).map(([id, version]) => [id, Number(version)]))
+      lastEditorsRef.current = mapFromObject(snapshot.editors)
+      const maxVersion = Math.max(0, ...objectVersionsRef.current.values())
+      lamportRef.current.observe(maxVersion)
+      commitObjects(snapshot.objects)
+      setIsLoading(false)
+    }
+
+    const queued = loadQueuedOperations(canvasId)
+    if (queued.length > 0) {
+      operationQueueRef.current = queued
+      onConnectionChangeRef.current?.(false, queued.length)
+    }
+
+    const handleOnline = () => {
+      setIsConnected(true)
+      onConnectionChangeRef.current?.(true, operationQueueRef.current.length)
+    }
+
+    const handleOffline = () => {
+      setIsConnected(false)
+      onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
+    }
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [canvasId, commitObjects])
+
   useEffect(() => {
     async function loadObjects() {
       const { data, error } = await supabase.from("canvas_objects").select("*").eq("canvas_id", canvasId)
 
       if (error) {
         console.error("[v0] Error loading canvas objects:", error)
+        setIsLoading(false)
         return
       }
 
-      setObjects(data || [])
+      const fetched = (data || []).map((obj) => {
+        const version = obj.version ?? lamportRef.current.tickFromTimestamp(Date.now())
+        const meta: LastEditorMeta = {
+          userId: obj.last_edited_by || obj.created_by || "unknown",
+          userName: obj.last_edited_by_name || "Unknown",
+          timestamp: obj.last_edited_at ? Date.parse(obj.last_edited_at) : Date.now(),
+        }
+        objectVersionsRef.current.set(obj.id, version)
+        lastEditorsRef.current.set(obj.id, meta)
+        return ensureMeta(obj, version, meta)
+      })
+
+      commitObjects(fetched)
       setIsLoading(false)
     }
 
     loadObjects()
-  }, [canvasId, supabase])
+  }, [canvasId, commitObjects, supabase])
 
   const processQueuedOperations = useCallback(async () => {
     if (operationQueueRef.current.length === 0) return
@@ -61,65 +225,80 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
 
     const queue = [...operationQueueRef.current]
     operationQueueRef.current = []
+    persistQueue()
 
     for (const op of queue) {
       try {
         if (op.type === "create" && op.object) {
-          await supabase.from("canvas_objects").insert({
-            ...op.object,
-            created_by: userId,
-          })
+          await supabase
+            .from("canvas_objects")
+            .upsert({
+              ...stripMeta(op.object),
+              created_by: op.meta.userId,
+              updated_at: new Date(op.meta.timestamp).toISOString(),
+            })
           channelRef.current?.send({
             type: "broadcast",
             event: "object_created",
-            payload: { ...op.object, _timestamp: Date.now() },
+            payload: {
+              ...ensureMeta(op.object, op.version, op.meta),
+              _timestamp: op.meta.timestamp,
+              _version: op.version,
+              _editedBy: op.meta,
+            },
           })
         } else if (op.type === "update" && op.object) {
           await supabase
             .from("canvas_objects")
             .update({
-              x: op.object.x,
-              y: op.object.y,
-              width: op.object.width,
-              height: op.object.height,
-              rotation: op.object.rotation,
-              fill_color: op.object.fill_color,
-              stroke_color: op.object.stroke_color,
-              stroke_width: op.object.stroke_width,
-              text_content: op.object.text_content,
-              font_size: op.object.font_size,
-              font_family: op.object.font_family,
-              updated_at: new Date().toISOString(),
+              ...stripMeta(op.object),
+              updated_at: new Date(op.meta.timestamp).toISOString(),
             })
             .eq("id", op.object.id)
           channelRef.current?.send({
             type: "broadcast",
             event: "object_updated",
-            payload: { ...op.object, _timestamp: Date.now() },
+            payload: {
+              ...ensureMeta(op.object, op.version, op.meta),
+              _timestamp: op.meta.timestamp,
+              _version: op.version,
+              _editedBy: op.meta,
+            },
           })
         } else if (op.type === "delete" && op.objectId) {
           await supabase.from("canvas_objects").delete().eq("id", op.objectId)
           channelRef.current?.send({
             type: "broadcast",
             event: "object_deleted",
-            payload: { id: op.objectId, _timestamp: Date.now() },
+            payload: {
+              id: op.objectId,
+              _timestamp: op.meta.timestamp,
+              _version: op.version,
+              _editedBy: op.meta,
+            },
           })
         }
       } catch (error) {
         console.error("[v0] [RECONNECT] Error processing queued operation:", error)
+        operationQueueRef.current.push(op)
       }
     }
 
-    console.log("[v0] [RECONNECT] All queued operations processed")
-    onConnectionChangeRef.current?.(true, 0)
-  }, [supabase, userId])
+    if (operationQueueRef.current.length === 0) {
+      clearQueuedOperations(canvasId)
+      onConnectionChangeRef.current?.(true, 0)
+    } else {
+      persistQueue()
+      onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
+    }
+  }, [canvasId, persistQueue, supabase])
 
   const attemptReconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
     }
 
-    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000) // Max 30s
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000)
     console.log(`[v0] [RECONNECT] Attempting reconnect in ${delay}ms (attempt ${reconnectAttemptRef.current + 1})`)
 
     reconnectTimeoutRef.current = setTimeout(() => {
@@ -134,37 +313,105 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
   }, [supabase])
 
   const setupChannel = useCallback(() => {
+    const parsePayload = (payload: any): BroadcastPayload => {
+      const { _timestamp, _version, _editedBy, ...rest } = payload || {}
+      const meta: LastEditorMeta = _editedBy || {
+        userId: rest.last_edited_by || "unknown",
+        userName: rest.last_edited_by_name || "Unknown",
+        timestamp: typeof _timestamp === "number" ? _timestamp : Date.now(),
+      }
+
+      const version = typeof _version === "number" ? _version : lamportRef.current.tickFromTimestamp(meta.timestamp)
+
+      return {
+        object: rest.id ? (rest as CanvasObject) : undefined,
+        objectId: rest.id,
+        version,
+        meta,
+        event: payload?.event || "object_updated",
+      }
+    }
+
     const channel: RealtimeChannel = supabase
       .channel(`canvas:${canvasId}`)
       .on("broadcast", { event: "object_created" }, ({ payload }) => {
-        const timestamp = (payload as any)._timestamp
-        if (timestamp) {
-          const latency = Date.now() - timestamp
-          console.log(`[v0] [PERF] Object sync latency: ${latency}ms (created)`)
+        const { object, version, meta } = parsePayload(payload)
+        if (!object) return
+
+        const currentVersion = objectVersionsRef.current.get(object.id)
+        const deletedVersion = deletedVersionsRef.current.get(object.id)
+        if (deletedVersion && deletedVersion >= version) {
+          return
         }
 
-        setObjects((prev) => {
-          if (prev.some((obj) => obj.id === payload.id)) return prev
-          return [...prev, payload as CanvasObject]
-        })
+        if (!shouldApplyRemoteUpdate({
+          currentVersion,
+          incomingVersion: version,
+          currentUserId: lastEditorsRef.current.get(object.id)?.userId,
+          incomingUserId: meta.userId,
+        })) {
+          return
+        }
+
+        lamportRef.current.observe(version)
+        objectVersionsRef.current.set(object.id, version)
+        lastEditorsRef.current.set(object.id, meta)
+        deletedVersionsRef.current.delete(object.id)
+
+        commitObjects([
+          ...objectsRef.current.filter((o) => o.id !== object.id),
+          ensureMeta(object, version, meta),
+        ])
       })
       .on("broadcast", { event: "object_updated" }, ({ payload }) => {
-        const timestamp = (payload as any)._timestamp
-        if (timestamp) {
-          const latency = Date.now() - timestamp
-          console.log(`[v0] [PERF] Object sync latency: ${latency}ms (updated)`)
+        const { object, version, meta } = parsePayload(payload)
+        if (!object) return
+
+        const currentVersion = objectVersionsRef.current.get(object.id)
+
+        if (
+          !shouldApplyRemoteUpdate({
+            currentVersion,
+            incomingVersion: version,
+            currentUserId: lastEditorsRef.current.get(object.id)?.userId,
+            incomingUserId: meta.userId,
+          })
+        ) {
+          return
         }
 
-        setObjects((prev) => prev.map((obj) => (obj.id === payload.id ? (payload as CanvasObject) : obj)))
+        lamportRef.current.observe(version)
+        objectVersionsRef.current.set(object.id, version)
+        lastEditorsRef.current.set(object.id, meta)
+        deletedVersionsRef.current.delete(object.id)
+
+        commitObjects(
+          objectsRef.current.map((obj) => (obj.id === object.id ? ensureMeta(object, version, meta) : obj)),
+        )
       })
       .on("broadcast", { event: "object_deleted" }, ({ payload }) => {
-        const timestamp = (payload as any)._timestamp
-        if (timestamp) {
-          const latency = Date.now() - timestamp
-          console.log(`[v0] [PERF] Object sync latency: ${latency}ms (deleted)`)
+        const { objectId, version, meta } = parsePayload(payload)
+        if (!objectId) return
+
+        const currentVersion = objectVersionsRef.current.get(objectId)
+
+        if (
+          !shouldApplyRemoteUpdate({
+            currentVersion,
+            incomingVersion: version,
+            currentUserId: lastEditorsRef.current.get(objectId)?.userId,
+            incomingUserId: meta.userId,
+          })
+        ) {
+          return
         }
 
-        setObjects((prev) => prev.filter((obj) => obj.id !== payload.id))
+        lamportRef.current.observe(version)
+        objectVersionsRef.current.delete(objectId)
+        deletedVersionsRef.current.set(objectId, version)
+        lastEditorsRef.current.set(objectId, meta)
+
+        commitObjects(objectsRef.current.filter((obj) => obj.id !== objectId))
       })
       .subscribe((status) => {
         if (status !== lastStatusRef.current) {
@@ -177,6 +424,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
           setIsConnected(true)
           reconnectAttemptRef.current = 0
           processQueuedOperations()
+          flushDatabaseOperations()
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.log("[v0] [RECONNECT] Connection lost, will retry")
           setIsConnected(false)
@@ -186,7 +434,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
       })
 
     channelRef.current = channel
-  }, [canvasId, supabase, processQueuedOperations, attemptReconnect])
+  }, [attemptReconnect, canvasId, commitObjects, flushDatabaseOperations, processQueuedOperations, supabase])
 
   useEffect(() => {
     setupChannel()
@@ -198,197 +446,133 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
+      if (persistTimeoutRef.current) {
+        window.clearTimeout(persistTimeoutRef.current)
+      }
     }
   }, [setupChannel, supabase])
 
-  const debouncedDatabaseSync = useCallback(
-    async (updatedObjects: CanvasObject[]) => {
-      if (!isConnected) {
-        console.log("[v0] [RECONNECT] Offline - operations will be queued")
-        return
-      }
-
-      const dbWriteStart = performance.now()
-
-      const existingIds = new Set(objects.map((o) => o.id))
-      const updatedIds = new Set(updatedObjects.map((o) => o.id))
-
-      const newObjects = updatedObjects.filter((o) => !existingIds.has(o.id))
-      if (newObjects.length > 0) {
-        try {
-          await supabase.from("canvas_objects").insert(
-            newObjects.map((o) => ({
-              ...o,
-              created_by: userId,
-            })),
-          )
-        } catch (error) {
-          console.error("[v0] [RECONNECT] Database write failed, queueing operations")
-          newObjects.forEach((obj) => {
-            operationQueueRef.current.push({
-              type: "create",
-              object: obj,
-              timestamp: Date.now(),
-            })
-          })
-          onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
-        }
-      }
-
-      const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
-      for (const obj of toUpdate) {
-        const existing = objects.find((o) => o.id === obj.id)
-        if (existing && JSON.stringify(existing) !== JSON.stringify(obj)) {
-          try {
-            await supabase
-              .from("canvas_objects")
-              .update({
-                x: obj.x,
-                y: obj.y,
-                width: obj.width,
-                height: obj.height,
-                rotation: obj.rotation,
-                fill_color: obj.fill_color,
-                stroke_color: obj.stroke_color,
-                stroke_width: obj.stroke_width,
-                text_content: obj.text_content,
-                font_size: obj.font_size,
-                font_family: obj.font_family,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", obj.id)
-          } catch (error) {
-            console.error("[v0] [RECONNECT] Database update failed, queueing operation")
-            operationQueueRef.current.push({
-              type: "update",
-              object: obj,
-              timestamp: Date.now(),
-            })
-            onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
-          }
-        }
-      }
-
-      const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
-      if (deletedIds.length > 0) {
-        try {
-          await supabase.from("canvas_objects").delete().in("id", deletedIds)
-        } catch (error) {
-          console.error("[v0] [RECONNECT] Database delete failed, queueing operations")
-          deletedIds.forEach((id) => {
-            operationQueueRef.current.push({
-              type: "delete",
-              objectId: id,
-              timestamp: Date.now(),
-            })
-          })
-          onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
-        }
-      }
-
-      const dbWriteTime = performance.now() - dbWriteStart
-      console.log(
-        `[v0] [PERF] Database write completed in ${dbWriteTime.toFixed(2)}ms (${newObjects.length} new, ${toUpdate.length} updated, ${deletedIds.length} deleted)`,
-      )
-    },
-    [objects, supabase, userId, isConnected],
-  )
-
   const syncObjects = useCallback(
     async (updatedObjects: CanvasObject[]) => {
-      const broadcastStart = performance.now()
+      const existingMap = new Map(objectsRef.current.map((obj) => [obj.id, obj]))
+      const nextMap = new Map(updatedObjects.map((obj) => [obj.id, obj]))
+      const nextObjects: CanvasObject[] = []
+      const operations: PersistedQueuedOperation[] = []
 
-      setObjects(updatedObjects)
+      const timestampBase = Date.now()
 
-      pendingObjectsRef.current = updatedObjects
+      updatedObjects.forEach((obj, index) => {
+        const previous = existingMap.get(obj.id)
+        const sanitizedPrev = previous ? stripMeta(previous) : undefined
+        const sanitizedNext = stripMeta(obj)
 
-      const existingIds = new Set(objects.map((o) => o.id))
-      const updatedIds = new Set(updatedObjects.map((o) => o.id))
+        const hasChanged =
+          !previous ||
+          JSON.stringify(sanitizedPrev) !== JSON.stringify(sanitizedNext)
 
-      const channel = channelRef.current
-      if (!channel || !isConnected) {
-        console.log("[v0] [RECONNECT] Offline - queueing operations")
+        if (hasChanged) {
+          const timestamp = timestampBase + index
+          const version = lamportRef.current.tick()
+          const meta: LastEditorMeta = { userId, userName, timestamp }
 
-        const newObjects = updatedObjects.filter((o) => !existingIds.has(o.id))
-        newObjects.forEach((obj) => {
-          operationQueueRef.current.push({
-            type: "create",
-            object: obj,
-            timestamp: Date.now(),
+          objectVersionsRef.current.set(obj.id, version)
+          lastEditorsRef.current.set(obj.id, meta)
+          deletedVersionsRef.current.delete(obj.id)
+
+          const enriched = ensureMeta({ ...sanitizedNext }, version, meta)
+          nextObjects.push(enriched)
+
+          operations.push({
+            type: previous ? "update" : "create",
+            object: enriched,
+            version,
+            meta,
+            timestamp,
           })
-        })
+        } else if (previous) {
+          const version = objectVersionsRef.current.get(obj.id) ?? previous.version ?? lamportRef.current.tick()
+          const meta =
+            lastEditorsRef.current.get(obj.id) ||
+            ({
+              userId: previous.last_edited_by || previous.created_by || "unknown",
+              userName: previous.last_edited_by_name || "Unknown",
+              timestamp: previous.last_edited_at ? Date.parse(previous.last_edited_at) : timestampBase,
+            } satisfies LastEditorMeta)
 
-        const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
-        toUpdate.forEach((obj) => {
-          const existing = objects.find((o) => o.id === obj.id)
-          if (existing && JSON.stringify(existing) !== JSON.stringify(obj)) {
-            operationQueueRef.current.push({
-              type: "update",
-              object: obj,
-              timestamp: Date.now(),
-            })
-          }
-        })
+          objectVersionsRef.current.set(obj.id, version)
+          lastEditorsRef.current.set(obj.id, meta)
+          nextObjects.push(ensureMeta(stripMeta(obj), version, meta))
+        }
+      })
 
-        const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
-        deletedIds.forEach((id) => {
-          operationQueueRef.current.push({
+      existingMap.forEach((value, id) => {
+        if (!nextMap.has(id)) {
+          const timestamp = Date.now()
+          const version = lamportRef.current.tick()
+          const meta: LastEditorMeta = { userId, userName, timestamp }
+          deletedVersionsRef.current.set(id, version)
+          objectVersionsRef.current.delete(id)
+          lastEditorsRef.current.set(id, meta)
+
+          operations.push({
             type: "delete",
             objectId: id,
-            timestamp: Date.now(),
+            version,
+            meta,
+            timestamp,
           })
-        })
+        }
+      })
 
-        onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
+      commitObjects(nextObjects)
+
+      if (!channelRef.current || !isConnected) {
+        if (operations.length > 0) {
+          operationQueueRef.current.push(...operations)
+          persistQueue()
+          onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
+        }
         return
       }
 
-      const timestamp = Date.now()
-
-      const newObjects = updatedObjects.filter((o) => !existingIds.has(o.id))
-      for (const obj of newObjects) {
-        channel.send({
-          type: "broadcast",
-          event: "object_created",
-          payload: { ...obj, _timestamp: timestamp },
-        })
-      }
-
-      const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
-      for (const obj of toUpdate) {
-        const existing = objects.find((o) => o.id === obj.id)
-        if (existing && JSON.stringify(existing) !== JSON.stringify(obj)) {
-          channel.send({
+      for (const op of operations) {
+        if (op.type === "delete" && op.objectId) {
+          channelRef.current.send({
             type: "broadcast",
-            event: "object_updated",
-            payload: { ...obj, _timestamp: timestamp },
+            event: "object_deleted",
+            payload: {
+              id: op.objectId,
+              _timestamp: op.meta.timestamp,
+              _version: op.version,
+              _editedBy: op.meta,
+            },
+          })
+        } else if (op.object) {
+          const payload = {
+            ...op.object,
+            _timestamp: op.meta.timestamp,
+            _version: op.version,
+            _editedBy: op.meta,
+          }
+          channelRef.current.send({
+            type: "broadcast",
+            event: op.type === "create" ? "object_created" : "object_updated",
+            payload,
           })
         }
       }
 
-      const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
-      for (const id of deletedIds) {
-        channel.send({
-          type: "broadcast",
-          event: "object_deleted",
-          payload: { id, _timestamp: timestamp },
-        })
-      }
-
-      const broadcastTime = performance.now() - broadcastStart
-      console.log(
-        `[v0] [PERF] Broadcast completed in ${broadcastTime.toFixed(2)}ms (${newObjects.length + toUpdate.length + deletedIds.length} operations)`,
-      )
+      pendingDbOperationsRef.current.push(...operations)
 
       if (syncTimeoutRef.current) {
         clearTimeout(syncTimeoutRef.current)
       }
 
       syncTimeoutRef.current = setTimeout(() => {
-        debouncedDatabaseSync(pendingObjectsRef.current)
-      }, 300)
+        flushDatabaseOperations()
+      }, 250)
     },
-    [objects, debouncedDatabaseSync, isConnected],
+    [commitObjects, flushDatabaseOperations, isConnected, persistQueue, userId, userName],
   )
 
   return {

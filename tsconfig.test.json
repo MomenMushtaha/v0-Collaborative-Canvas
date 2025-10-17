@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist-tests",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "jsx": "react",
+    "allowJs": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "lib/realtime/**/*.ts",
+    "lib/state-persistence.ts",
+    "lib/types.ts",
+    "__tests__/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist-tests"]
+}

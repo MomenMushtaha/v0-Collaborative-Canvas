@@ -24,6 +24,8 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
   const supabase = createClient()
   const [presenceId, setPresenceId] = useState<string | null>(null)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const pendingFrameRef = useRef<number>()
+  const latestCursorRef = useRef<{ x: number; y: number } | null>(null)
 
   // Initialize presence
   useEffect(() => {
@@ -131,26 +133,46 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
 
   const updateCursor = useCallback(
     (x: number, y: number) => {
-      if (!channelRef.current) {
-        console.warn("[v0] Cannot send cursor update: channel not ready")
+      latestCursorRef.current = { x, y }
+
+      if (pendingFrameRef.current !== undefined) {
         return
       }
 
-      console.log("[v0] Broadcasting cursor position:", x, y, "for user:", userName)
-      channelRef.current.send({
-        type: "broadcast",
-        event: "cursor",
-        payload: {
-          userId,
-          userName,
-          color: userColor,
-          x,
-          y,
-        } as CursorUpdate,
+      pendingFrameRef.current = window.requestAnimationFrame(() => {
+        pendingFrameRef.current = undefined
+        if (!channelRef.current) {
+          console.warn("[v0] Cannot send cursor update: channel not ready")
+          return
+        }
+
+        const payload = latestCursorRef.current
+        if (!payload) return
+
+        console.log("[v0] Broadcasting cursor position:", payload.x, payload.y, "for user:", userName)
+        channelRef.current.send({
+          type: "broadcast",
+          event: "cursor",
+          payload: {
+            userId,
+            userName,
+            color: userColor,
+            x: payload.x,
+            y: payload.y,
+          } as CursorUpdate,
+        })
       })
     },
-    [userId, userName, userColor],
+    [userColor, userId, userName],
   )
+
+  useEffect(() => {
+    return () => {
+      if (pendingFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(pendingFrameRef.current)
+      }
+    }
+  }, [])
 
   return {
     otherUsers: Array.from(otherUsers.values()),

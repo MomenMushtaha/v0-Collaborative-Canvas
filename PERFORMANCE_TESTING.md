@@ -16,7 +16,7 @@ CollabCanvas includes automatic performance logging that tracks:
 
 ### 1. Real-Time Sync Performance
 \`\`\`
-[v0] [PERF] Real-time sync: 45ms (3 objects affected)
+[v0] [PERF] Real-time sync: 42ms (3 objects affected, v=128→130)
 \`\`\`
 - Measures time from broadcast to local state update
 - Target: <100ms
@@ -24,7 +24,7 @@ CollabCanvas includes automatic performance logging that tracks:
 
 ### 2. Database Write Performance
 \`\`\`
-[v0] [PERF] Database write: 120ms (5 objects)
+[v0] [PERF] Database write: 120ms (5 objects, deduped)
 \`\`\`
 - Measures database persistence time
 - Uses debounced writes (300ms delay)
@@ -117,6 +117,7 @@ CollabCanvas includes automatic performance logging that tracks:
 - Automatic reconnection within 1-5 seconds
 - All queued operations sync successfully
 - No data loss
+- Refreshing during the outage reloads the exact object positions using the persisted snapshot
 
 ### Scenario 5: AI Agent Performance
 **Objective:** Test AI command execution speed
@@ -147,6 +148,11 @@ CollabCanvas includes automatic performance logging that tracks:
 - Renders only visible objects
 - Optimized transform calculations
 - RequestAnimationFrame for smooth updates
+
+### 2b. Snapshot + Queue Persistence
+- Canvas state persisted to `localStorage` for instant refresh recovery
+- Offline operations stored locally and replayed after reconnect
+- Prevents ghost edits and satisfies 30s network drop requirements
 
 ### 3. Real-Time Broadcast Architecture
 - Separate channels for objects, cursors, AI

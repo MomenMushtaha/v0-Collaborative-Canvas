@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+    "test": "tsc -p tsconfig.test.json && node --test dist-tests/__tests__/**/*.test.js && rm -rf dist-tests"
   },
   "dependencies": {
     "@ai-sdk/openai": "2.0.52",

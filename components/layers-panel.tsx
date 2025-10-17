@@ -142,13 +142,20 @@ export function LayersPanel({
                   </div>
 
                   {/* Label */}
-                  <div
-                    className={`
-                    flex-1 text-sm truncate transition-colors
-                    ${isSelected ? "font-medium text-foreground" : "text-foreground/80"}
-                  `}
-                  >
-                    {getObjectLabel(obj)}
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className={`
+                        text-sm truncate transition-colors
+                        ${isSelected ? "font-medium text-foreground" : "text-foreground/80"}
+                      `}
+                    >
+                      {getObjectLabel(obj)}
+                    </div>
+                    {obj.last_edited_by_name && (
+                      <div className="text-[11px] text-muted-foreground/80 truncate">
+                        Last edited by {obj.last_edited_by_name}
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}

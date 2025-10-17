@@ -5,8 +5,32 @@ import { z } from "zod"
 
 export const maxDuration = 30
 
+const MAX_HISTORY_MESSAGES = 12
+
+const conversationMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().min(1).max(4000),
+})
+
+const conversationHistorySchema = z.array(conversationMessageSchema)
+
+type ConversationMessage = z.infer<typeof conversationMessageSchema>
+
+async function updateQueueStatus(queueItemId: string | null, updates: Record<string, unknown>) {
+  if (!queueItemId) return
+
+  try {
+    const supabase = createServiceRoleClient()
+    await supabase.from("ai_operations_queue").update(updates).eq("id", queueItemId)
+  } catch (err) {
+    console.warn("[v0] Failed to update queue status:", err)
+  }
+}
+
 export async function POST(request: Request) {
   console.log("[v0] ===== AI Canvas API Route Called =====")
+
+  let queueItemId: string | null = null
 
   try {
     const body = await request.json()
@@ -19,6 +43,7 @@ export async function POST(request: Request) {
       userId,
       userName,
       viewport,
+      conversationHistory: conversationHistoryPayload,
     } = body
 
     console.log("[v0] Message:", message)
@@ -42,7 +67,36 @@ export async function POST(request: Request) {
       )
     }
 
-    let queueItemId: string | null = null
+    const conversationHistoryResult = conversationHistorySchema.safeParse(
+      Array.isArray(conversationHistoryPayload) ? conversationHistoryPayload : [],
+    )
+
+    if (!conversationHistoryResult.success && conversationHistoryPayload) {
+      console.warn("[v0] Invalid conversation history provided, ignoring.")
+    }
+
+    const safeConversationHistory = conversationHistoryResult.success
+      ? conversationHistoryResult.data.slice(-MAX_HISTORY_MESSAGES)
+      : []
+
+    const historyEnsuredLatestUser = (() => {
+      if (safeConversationHistory.length === 0) {
+        return [{ role: "user", content: message } satisfies ConversationMessage]
+      }
+
+      const lastEntry = safeConversationHistory[safeConversationHistory.length - 1]
+      if (lastEntry.role !== "user" || lastEntry.content !== message) {
+        return [...safeConversationHistory, { role: "user", content: message } satisfies ConversationMessage]
+      }
+
+      return safeConversationHistory
+    })()
+
+    const conversationMessages = historyEnsuredLatestUser.map((entry) => ({
+      role: entry.role,
+      content: entry.content,
+    }))
+
     if (canvasId && userId && userName) {
       try {
         const supabase = createServiceRoleClient()
@@ -225,6 +279,63 @@ export async function POST(request: Request) {
     const operations: any[] = []
     const validationErrors: string[] = []
     const shapeIndexSchema = z.union([z.number(), z.literal("selected")])
+    const multiShapeTargetSchema = z
+      .union([z.array(z.number()), z.literal("selected"), z.literal("all")])
+      .optional()
+
+    const resolveTargetIndices = (
+      target: number[] | "selected" | "all" | undefined,
+      {
+        requireMultiple = false,
+        defaultToAllIfNone = false,
+        min = 1,
+      }: { requireMultiple?: boolean; defaultToAllIfNone?: boolean; min?: number } = {},
+    ): { indices?: number[]; error?: string } => {
+      if (safeCurrentObjects.length === 0) {
+        return { error: "There are no shapes on the canvas." }
+      }
+
+      let indices: number[] = []
+
+      if (target === "all") {
+        indices = safeCurrentObjects.map((_, idx) => idx)
+      } else if (Array.isArray(target) && target.length > 0) {
+        indices = target.map((value) => (value === -1 ? safeCurrentObjects.length - 1 : value))
+      } else if (target === "selected" || (!target && !defaultToAllIfNone)) {
+        indices = [...selectedIndices]
+      }
+
+      if (indices.length === 0 && defaultToAllIfNone) {
+        indices = safeCurrentObjects.map((_, idx) => idx)
+      }
+
+      const unique = Array.from(new Set(indices))
+      const invalidIndex = unique.find((idx) => idx < 0 || idx >= safeCurrentObjects.length)
+
+      if (invalidIndex !== undefined) {
+        return {
+          error: `Invalid shape index ${invalidIndex}. Canvas has ${safeCurrentObjects.length} shapes (indices 0-${Math.max(
+            safeCurrentObjects.length - 1,
+            0,
+          )}).`,
+        }
+      }
+
+      if (unique.length < min) {
+        return {
+          error:
+            unique.length === 0
+              ? "No shapes specified or selected for this operation."
+              : `This operation requires at least ${min} shape${min > 1 ? "s" : ""}.`,
+        }
+      }
+
+      if (requireMultiple && unique.length < 2) {
+        return { error: "Select at least two shapes or specify their indices for this operation." }
+      }
+
+      return { indices: unique }
+    }
 
     const resolveTargetIdsForOperation = (
       args: any,
@@ -306,6 +417,7 @@ export async function POST(request: Request) {
     }
 
     const tools = {
+      // ===== QUERY & INFORMATION =====
       getCanvasState: tool({
         description:
           "Query information about the current canvas state. Use this to answer questions about shapes, count objects, or get information before making changes.",
@@ -322,6 +434,426 @@ export async function POST(request: Request) {
           }
         },
       }),
+
+      // ===== SELECTION OPERATIONS =====
+      selectObjects: tool({
+        description: "Select one or more objects by their indices or IDs. Replaces current selection.",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Array of object indices to select"),
+          ids: z.array(z.string()).optional().describe("Array of object IDs to select"),
+          addToSelection: z.boolean().optional().describe("If true, add to current selection instead of replacing"),
+        }),
+        execute: async ({ indices, ids, addToSelection }) => {
+          const targetIds = ids || indices?.map((i) => canvasContext[i]?.id).filter(Boolean) || []
+          operations.push({
+            type: "select",
+            objectIds: targetIds,
+            addToSelection: addToSelection || false,
+          })
+          return { success: true, selectedCount: targetIds.length }
+        },
+      }),
+
+      selectAll: tool({
+        description: "Select all objects on the canvas",
+        inputSchema: z.object({}),
+        execute: async () => {
+          operations.push({
+            type: "selectAll",
+          })
+          return { success: true, selectedCount: canvasContext.length }
+        },
+      }),
+
+      selectAllOfType: tool({
+        description: "Select all objects of the same type as currently selected objects",
+        inputSchema: z.object({
+          type: z
+            .enum(["rectangle", "circle", "triangle", "line", "text"])
+            .optional()
+            .describe("Specific type to select, or use currently selected types"),
+        }),
+        execute: async ({ type }) => {
+          const targetType = type || (selectedContext.length > 0 ? selectedContext[0].type : undefined)
+          if (!targetType) {
+            return { error: "No type specified and no objects selected" }
+          }
+          operations.push({
+            type: "selectAllOfType",
+            objectType: targetType,
+          })
+          const matchingCount = canvasContext.filter((obj) => obj.type === targetType).length
+          return { success: true, selectedCount: matchingCount, objectType: targetType }
+        },
+      }),
+
+      clearSelection: tool({
+        description: "Deselect all objects",
+        inputSchema: z.object({}),
+        execute: async () => {
+          operations.push({
+            type: "clearSelection",
+          })
+          return { success: true }
+        },
+      }),
+
+      // ===== CLIPBOARD OPERATIONS =====
+      copyObjects: tool({
+        description: "Copy selected objects to clipboard",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices to copy, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to copy" }
+          }
+          operations.push({
+            type: "copy",
+            objectIndices: targetIndices,
+          })
+          return { success: true, copiedCount: targetIndices.length }
+        },
+      }),
+
+      pasteObjects: tool({
+        description: "Paste objects from clipboard at specified position or with offset",
+        inputSchema: z.object({
+          x: z.number().optional().describe("X position to paste at"),
+          y: z.number().optional().describe("Y position to paste at"),
+          offsetX: z.number().optional().describe("X offset from original position (default: 20)"),
+          offsetY: z.number().optional().describe("Y offset from original position (default: 20)"),
+        }),
+        execute: async ({ x, y, offsetX, offsetY }) => {
+          operations.push({
+            type: "paste",
+            x,
+            y,
+            offsetX: offsetX ?? 20,
+            offsetY: offsetY ?? 20,
+          })
+          return { success: true }
+        },
+      }),
+
+      duplicateObjects: tool({
+        description: "Duplicate selected objects with an offset",
+        inputSchema: z.object({
+          offsetX: z.number().optional().describe("X offset for duplicates (default: 20)"),
+          offsetY: z.number().optional().describe("Y offset for duplicates (default: 20)"),
+        }),
+        execute: async ({ offsetX, offsetY }) => {
+          if (selectedIndices.length === 0) {
+            return { error: "No objects selected to duplicate" }
+          }
+          operations.push({
+            type: "duplicate",
+            objectIndices: selectedIndices,
+            offsetX: offsetX ?? 20,
+            offsetY: offsetY ?? 20,
+          })
+          return { success: true, duplicatedCount: selectedIndices.length }
+        },
+      }),
+
+      // ===== STYLING OPERATIONS =====
+      setFillColor: tool({
+        description: "Change the fill color of selected objects",
+        inputSchema: z.object({
+          color: z.string().describe("Hex color code (e.g., #ff0000) or color name (red, blue, green)"),
+          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
+        }),
+        execute: async ({ color, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to style" }
+          }
+          const finalColor = normalizeColorInput(color, "#3b82f6")
+          operations.push({
+            type: "setStyle",
+            objectIndices: targetIndices,
+            fillColor: finalColor,
+          })
+          return { success: true, styledCount: targetIndices.length, color: finalColor }
+        },
+      }),
+
+      setStrokeColor: tool({
+        description: "Change the stroke/border color of selected objects",
+        inputSchema: z.object({
+          color: z.string().describe("Hex color code (e.g., #ff0000) or color name"),
+          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
+        }),
+        execute: async ({ color, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to style" }
+          }
+          const finalColor = normalizeColorInput(color, "#1e40af")
+          operations.push({
+            type: "setStyle",
+            objectIndices: targetIndices,
+            strokeColor: finalColor,
+          })
+          return { success: true, styledCount: targetIndices.length, color: finalColor }
+        },
+      }),
+
+      setStrokeWidth: tool({
+        description: "Change the stroke/border width of selected objects",
+        inputSchema: z.object({
+          width: z.number().min(0).max(20).describe("Stroke width in pixels (0-20)"),
+          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
+        }),
+        execute: async ({ width, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to style" }
+          }
+          operations.push({
+            type: "setStyle",
+            objectIndices: targetIndices,
+            strokeWidth: width,
+          })
+          return { success: true, styledCount: targetIndices.length, strokeWidth: width }
+        },
+      }),
+
+      // ===== ALIGNMENT & DISTRIBUTION =====
+      alignObjects: tool({
+        description: "Align multiple selected objects (requires 2+ objects)",
+        inputSchema: z.object({
+          alignment: z.enum(["left", "center", "right", "top", "middle", "bottom"]).describe("Alignment type"),
+          indices: z.array(z.number()).optional().describe("Specific indices to align, or use current selection"),
+        }),
+        execute: async ({ alignment, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length < 2) {
+            return { error: "Need at least 2 objects to align" }
+          }
+          operations.push({
+            type: "align",
+            objectIndices: targetIndices,
+            alignment,
+          })
+          return { success: true, alignedCount: targetIndices.length, alignment }
+        },
+      }),
+
+      distributeObjects: tool({
+        description: "Distribute multiple selected objects evenly (requires 3+ objects)",
+        inputSchema: z.object({
+          direction: z.enum(["horizontal", "vertical"]).describe("Distribution direction"),
+          indices: z.array(z.number()).optional().describe("Specific indices to distribute, or use current selection"),
+        }),
+        execute: async ({ direction, indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length < 3) {
+            return { error: "Need at least 3 objects to distribute" }
+          }
+          operations.push({
+            type: "distribute",
+            objectIndices: targetIndices,
+            direction,
+          })
+          return { success: true, distributedCount: targetIndices.length, direction }
+        },
+      }),
+
+      // ===== Z-ORDER / LAYERING =====
+      bringToFront: tool({
+        description: "Bring selected objects to the front (highest z-index)",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to reorder" }
+          }
+          operations.push({
+            type: "bringToFront",
+            objectIndices: targetIndices,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      sendToBack: tool({
+        description: "Send selected objects to the back (lowest z-index)",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to reorder" }
+          }
+          operations.push({
+            type: "sendToBack",
+            objectIndices: targetIndices,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      bringForward: tool({
+        description: "Bring selected objects one layer forward",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to reorder" }
+          }
+          operations.push({
+            type: "bringForward",
+            objectIndices: targetIndices,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      sendBackward: tool({
+        description: "Send selected objects one layer backward",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+        }),
+        execute: async ({ indices }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to reorder" }
+          }
+          operations.push({
+            type: "sendBackward",
+            objectIndices: targetIndices,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      // ===== VISIBILITY & LOCKING =====
+      toggleVisibility: tool({
+        description: "Toggle visibility of objects (show/hide)",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+          visible: z.boolean().optional().describe("Set specific visibility state, or toggle current state"),
+        }),
+        execute: async ({ indices, visible }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to modify" }
+          }
+          operations.push({
+            type: "toggleVisibility",
+            objectIndices: targetIndices,
+            visible,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      toggleLock: tool({
+        description: "Toggle lock state of objects (prevent/allow editing)",
+        inputSchema: z.object({
+          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
+          locked: z.boolean().optional().describe("Set specific lock state, or toggle current state"),
+        }),
+        execute: async ({ indices, locked }) => {
+          const targetIndices = indices || selectedIndices
+          if (targetIndices.length === 0) {
+            return { error: "No objects to modify" }
+          }
+          operations.push({
+            type: "toggleLock",
+            objectIndices: targetIndices,
+            locked,
+          })
+          return { success: true, count: targetIndices.length }
+        },
+      }),
+
+      // ===== GRID CONTROLS =====
+      toggleGrid: tool({
+        description: "Toggle grid visibility on/off",
+        inputSchema: z.object({
+          enabled: z.boolean().optional().describe("Set specific state, or toggle current state"),
+        }),
+        execute: async ({ enabled }) => {
+          operations.push({
+            type: "toggleGrid",
+            enabled,
+          })
+          return { success: true, enabled }
+        },
+      }),
+
+      toggleSnapToGrid: tool({
+        description: "Toggle snap-to-grid on/off",
+        inputSchema: z.object({
+          enabled: z.boolean().optional().describe("Set specific state, or toggle current state"),
+        }),
+        execute: async ({ enabled }) => {
+          operations.push({
+            type: "toggleSnapToGrid",
+            enabled,
+          })
+          return { success: true, enabled }
+        },
+      }),
+
+      setGridSize: tool({
+        description: "Change the grid size",
+        inputSchema: z.object({
+          size: z.enum(["10", "20", "30", "50", "100"]).describe("Grid size in pixels"),
+        }),
+        execute: async ({ size }) => {
+          operations.push({
+            type: "setGridSize",
+            size: Number.parseInt(size),
+          })
+          return { success: true, gridSize: Number.parseInt(size) }
+        },
+      }),
+
+      // ===== VIEWPORT CONTROLS =====
+      setZoom: tool({
+        description: "Set canvas zoom level",
+        inputSchema: z.object({
+          zoom: z.number().min(1).max(3).describe("Zoom level (1.0 = 100%, 2.0 = 200%, 3.0 = 300%)"),
+        }),
+        execute: async ({ zoom }) => {
+          operations.push({
+            type: "setZoom",
+            zoom,
+          })
+          return { success: true, zoom }
+        },
+      }),
+
+      panViewport: tool({
+        description: "Pan the viewport to a specific position or by offset",
+        inputSchema: z.object({
+          x: z.number().optional().describe("Absolute X position"),
+          y: z.number().optional().describe("Absolute Y position"),
+          deltaX: z.number().optional().describe("Relative X movement"),
+          deltaY: z.number().optional().describe("Relative Y movement"),
+        }),
+        execute: async ({ x, y, deltaX, deltaY }) => {
+          operations.push({
+            type: "panViewport",
+            x,
+            y,
+            deltaX,
+            deltaY,
+          })
+          return { success: true }
+        },
+      }),
+
+      // ===== EXISTING CREATION & MANIPULATION TOOLS =====
       createText: tool({
         description: "Create a text layer on the canvas with customizable content, position, size, and color",
         inputSchema: z.object({
@@ -352,6 +884,7 @@ export async function POST(request: Request) {
           return { success: true, text, x, y, fontSize: fontSize || 16, color: finalColor }
         },
       }),
+
       createShape: tool({
         description: "Create a new shape on the canvas",
         inputSchema: z.object({
@@ -390,6 +923,7 @@ export async function POST(request: Request) {
           return { success: true, shape, x, y, width, height, color: finalColor }
         },
       }),
+
       moveShape: tool({
         description: "Move an existing shape to a new position",
         inputSchema: z.object({
@@ -402,7 +936,11 @@ export async function POST(request: Request) {
           deltaY: z.number().optional().describe("Relative Y movement (alternative to absolute y)"),
         }),
         execute: async ({ shapeIndex, x, y, deltaX, deltaY }) => {
-          const validation = validateMoveShape({ shapeIndex, x, y, deltaX, deltaY }, safeCurrentObjects, selectedIndices)
+          const validation = validateMoveShape(
+            { shapeIndex, x, y, deltaX, deltaY },
+            safeCurrentObjects,
+            selectedIndices,
+          )
           if (!validation.valid) {
             validationErrors.push(`moveShape: ${validation.error}`)
             return { error: validation.error }
@@ -420,6 +958,7 @@ export async function POST(request: Request) {
           return { success: true, shapeIndex, x, y, deltaX, deltaY }
         },
       }),
+
       resizeShape: tool({
         description: "Resize an existing shape",
         inputSchema: z.object({
@@ -431,7 +970,11 @@ export async function POST(request: Request) {
           scale: z.number().optional().describe("Scale factor (e.g., 2 for twice as big, 0.5 for half size)"),
         }),
         execute: async ({ shapeIndex, width, height, scale }) => {
-          const validation = validateResizeShape({ shapeIndex, width, height, scale }, safeCurrentObjects, selectedIndices)
+          const validation = validateResizeShape(
+            { shapeIndex, width, height, scale },
+            safeCurrentObjects,
+            selectedIndices,
+          )
           if (!validation.valid) {
             validationErrors.push(`resizeShape: ${validation.error}`)
             return { error: validation.error }
@@ -448,6 +991,7 @@ export async function POST(request: Request) {
           return { success: true, shapeIndex, width, height, scale }
         },
       }),
+
       rotateShape: tool({
         description: "Rotate an existing shape",
         inputSchema: z.object({
@@ -477,12 +1021,13 @@ export async function POST(request: Request) {
           return { success: true, shapeIndex, degrees, absolute }
         },
       }),
+
       deleteShape: tool({
         description: "Delete one or more shapes from the canvas",
         inputSchema: z.object({
-          shapeIndex: shapeIndexSchema.optional().describe(
-            "Index of the shape to delete (0-based, or 'selected' for currently selected shape)",
-          ),
+          shapeIndex: shapeIndexSchema
+            .optional()
+            .describe("Index of the shape to delete (0-based, or 'selected' for currently selected shape)"),
           all: z.boolean().optional().describe("If true, delete all shapes from the canvas"),
         }),
         execute: async ({ shapeIndex, all }) => {
@@ -502,497 +1047,248 @@ export async function POST(request: Request) {
           return { success: true, shapeIndex, all }
         },
       }),
+
       arrangeShapes: tool({
         description: "Arrange multiple shapes in a pattern (grid, row, column, circle)",
         inputSchema: z.object({
           pattern: z.enum(["grid", "row", "column", "circle"]).describe("The arrangement pattern"),
-          shapeIndices: z
-            .array(z.number())
-            .optional()
-            .describe("Indices of shapes to arrange (empty array means all shapes)"),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to arrange (defaults to the current selection; use 'all' for every shape)",
+          ),
           spacing: z.number().optional().describe("Spacing between shapes in pixels"),
           columns: z.number().optional().describe("Number of columns (for grid pattern)"),
         }),
-        execute: async ({ pattern, shapeIndices, spacing, columns }) => {
-          const validation = validateArrangeShapes({ pattern, shapeIndices, spacing, columns }, safeCurrentObjects)
+        execute: async ({ pattern, shapeTarget, spacing, columns }) => {
+          const validation = validateArrangeShapes({ pattern, spacing, columns })
           if (!validation.valid) {
             validationErrors.push(`arrangeShapes: ${validation.error}`)
             return { error: validation.error }
           }
 
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1, defaultToAllIfNone: true })
+          if (error || !indices) {
+            validationErrors.push(`arrangeShapes: ${error}`)
+            return { error }
+          }
+
           operations.push({
             type: "arrange",
             pattern,
-            shapeIndices: shapeIndices || [],
+            shapeIndices: indices,
             spacing: spacing || 50,
             columns,
+            centerX: visibleArea.centerX,
+            centerY: visibleArea.centerY,
           })
 
-          return { success: true, pattern, shapeIndices, spacing, columns }
+          return { success: true, pattern, shapeIndices: indices, spacing: spacing || 50, columns }
         },
       }),
       alignShapes: tool({
-        description: "Align two or more shapes along a shared edge or center",
+        description:
+          "Align two or more shapes (left, right, top, bottom, center, or middle). Defaults to the current selection.",
         inputSchema: z.object({
-          alignment: z.enum(["left", "right", "top", "bottom", "center", "middle"]).describe(
-            "How to align the shapes (left/right/top/bottom/center/middle)",
+          alignment: z
+            .enum(["left", "right", "top", "bottom", "center", "middle"])
+            .describe("How to align the shapes"),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to align (defaults to the current selection; use 'all' for every shape)",
           ),
-          shapeIndices: z.array(z.number()).optional().describe("Specific shape indices to align"),
-          useSelection: z.boolean().optional().describe("Align the currently selected shapes"),
         }),
-        execute: async ({ alignment, shapeIndices, useSelection }) => {
-          const indicesToAlign = Array.from(
-            new Set(
-              shapeIndices && shapeIndices.length > 0
-                ? shapeIndices
-                : useSelection
-                  ? selectedIndices
-                  : [],
-            ),
-          )
-
-          const validation = validateAlignShapes({ alignment, shapeIndices: indicesToAlign }, safeCurrentObjects)
-          if (!validation.valid) {
-            validationErrors.push(`alignShapes: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "align",
-            alignment,
-            shapeIndices: indicesToAlign,
+        execute: async ({ alignment, shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, {
+            requireMultiple: true,
+            defaultToAllIfNone: true,
           })
 
-          return { success: true, alignment, shapeIndices: indicesToAlign }
+          if (error || !indices) {
+            validationErrors.push(`alignShapes: ${error}`)
+            return { error }
+          }
+
+          operations.push({ type: "align", alignment, shapeIndices: indices })
+
+          return { success: true, alignment, shapeIndices: indices }
         },
       }),
       distributeShapes: tool({
-        description: "Distribute three or more shapes evenly horizontally or vertically",
+        description:
+          "Distribute spacing between shapes horizontally or vertically. Defaults to the current selection.",
         inputSchema: z.object({
-          direction: z.enum(["horizontal", "vertical"]).describe("Distribution direction"),
-          shapeIndices: z.array(z.number()).optional().describe("Specific shape indices to distribute"),
-          useSelection: z.boolean().optional().describe("Use currently selected shapes"),
+          direction: z.enum(["horizontal", "vertical"]).describe("Distribute horizontally or vertically"),
+          spacing: z.number().optional().describe("Exact spacing between shapes in pixels"),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to distribute (defaults to the current selection; use 'all' for every shape)",
+          ),
         }),
-        execute: async ({ direction, shapeIndices, useSelection }) => {
-          const indicesToUse = Array.from(
-            new Set(
-              shapeIndices && shapeIndices.length > 0
-                ? shapeIndices
-                : useSelection
-                  ? selectedIndices
-                  : [],
-            ),
-          )
-
-          const validation = validateDistributeShapes({ direction, shapeIndices: indicesToUse }, safeCurrentObjects)
-          if (!validation.valid) {
-            validationErrors.push(`distributeShapes: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "distribute",
-            direction,
-            shapeIndices: indicesToUse,
+        execute: async ({ direction, spacing, shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, {
+            requireMultiple: true,
+            defaultToAllIfNone: true,
           })
 
-          return { success: true, direction, shapeIndices: indicesToUse }
+          if (error || !indices) {
+            validationErrors.push(`distributeShapes: ${error}`)
+            return { error }
+          }
+
+          operations.push({ type: "distribute", direction, spacing, shapeIndices: indices })
+
+          return { success: true, direction, spacing, shapeIndices: indices }
         },
       }),
       updateStyle: tool({
-        description: "Update fill, stroke, or typography styles on one or more shapes",
-        inputSchema: z
-          .object({
-            targetId: z.string().optional(),
-            targetIds: z.array(z.string()).optional(),
-            shapeIndex: z.number().optional(),
-            shapeIndices: z.array(z.number()).optional(),
-            useSelection: z.boolean().optional(),
-            fillColor: z.string().optional(),
-            strokeColor: z.string().optional(),
-            strokeWidth: z.number().optional(),
-            textColor: z.string().optional(),
-            fontSize: z.number().optional(),
-          })
-          .refine(
-            (value) =>
-              value.fillColor ||
-              value.strokeColor ||
-              value.strokeWidth !== undefined ||
-              value.textColor ||
-              value.fontSize !== undefined,
-            { message: "Provide at least one style property to update." },
+        description:
+          "Update fill, stroke, or text styling for one or more shapes. Defaults to the current selection.",
+        inputSchema: z.object({
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to style (defaults to the current selection; use 'all' for every shape)",
           ),
-        execute: async (args) => {
-          if (args.fillColor && !isValidColorInput(args.fillColor)) {
-            const error = `Invalid fill color ${args.fillColor}`
-            validationErrors.push(`updateStyle: ${error}`)
-            return { error }
-          }
-          if (args.strokeColor && !isValidColorInput(args.strokeColor)) {
-            const error = `Invalid stroke color ${args.strokeColor}`
-            validationErrors.push(`updateStyle: ${error}`)
-            return { error }
-          }
-          if (args.textColor && !isValidColorInput(args.textColor)) {
-            const error = `Invalid text color ${args.textColor}`
+          fillColor: z.string().optional().describe("New fill color (hex code or common color name)"),
+          strokeColor: z.string().optional().describe("New stroke color (hex code or common color name)"),
+          strokeWidth: z.number().optional().describe("New stroke width in pixels"),
+          textColor: z.string().optional().describe("New text color for text objects"),
+        }),
+        execute: async ({ shapeTarget, fillColor, strokeColor, strokeWidth, textColor }) => {
+          if (!fillColor && !strokeColor && strokeWidth === undefined && !textColor) {
+            const error = "Provide at least one style property to update."
             validationErrors.push(`updateStyle: ${error}`)
             return { error }
           }
 
-          const { ids, indices, error } = resolveTargetIdsForOperation(args)
-          if (error) {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
             validationErrors.push(`updateStyle: ${error}`)
             return { error }
           }
 
-          const firstIndex = indices.length > 0 ? indices[0] : -1
-          const primary = firstIndex >= 0 ? safeCurrentObjects[firstIndex] : undefined
-
-          const finalFill = args.fillColor
-            ? normalizeColorInput(args.fillColor, primary?.fill_color || "#3b82f6")
+          const firstShape = safeCurrentObjects[indices[0]]
+          const resolvedFill = fillColor ? normalizeColorInput(fillColor, firstShape?.fill_color || "#3b82f6") : undefined
+          const resolvedStroke = strokeColor
+            ? normalizeColorInput(strokeColor, firstShape?.stroke_color || "#1f2937")
             : undefined
-          const finalStroke = args.strokeColor
-            ? normalizeColorInput(args.strokeColor, primary?.stroke_color || "#1f2937")
-            : undefined
-          const finalTextColor = args.textColor
-            ? normalizeColorInput(args.textColor, primary?.fill_color || "#000000")
-            : undefined
+          const resolvedText = textColor ? normalizeColorInput(textColor, "#111827") : undefined
 
           operations.push({
             type: "updateStyle",
-            targetIds: ids,
-            fillColor: finalFill,
-            strokeColor: finalStroke,
-            strokeWidth: args.strokeWidth,
-            textColor: finalTextColor,
-            fontSize: args.fontSize,
+            shapeIndices: indices,
+            fillColor: resolvedFill,
+            strokeColor: resolvedStroke,
+            strokeWidth,
+            textColor: resolvedText,
           })
 
-          return { success: true, targetIds: ids }
-        },
-      }),
-      updateText: tool({
-        description: "Update the contents or typography of text objects",
-        inputSchema: z.object({
-          targetId: z.string().optional(),
-          targetIds: z.array(z.string()).optional(),
-          shapeIndex: z.number().optional(),
-          shapeIndices: z.array(z.number()).optional(),
-          useSelection: z.boolean().optional(),
-          text: z.string().describe("New text content"),
-          fontSize: z.number().optional(),
-          textColor: z.string().optional(),
-        }),
-        execute: async (args) => {
-          if (args.textColor && !isValidColorInput(args.textColor)) {
-            const error = `Invalid text color ${args.textColor}`
-            validationErrors.push(`updateText: ${error}`)
-            return { error }
+          return {
+            success: true,
+            shapeIndices: indices,
+            fillColor: resolvedFill,
+            strokeColor: resolvedStroke,
+            strokeWidth,
+            textColor: resolvedText,
           }
-
-          const { ids, indices, error } = resolveTargetIdsForOperation(args)
-          if (error) {
-            validationErrors.push(`updateText: ${error}`)
-            return { error }
-          }
-
-          const firstIndex = indices.length > 0 ? indices[0] : -1
-          const primary = firstIndex >= 0 ? safeCurrentObjects[firstIndex] : undefined
-          const finalTextColor = args.textColor
-            ? normalizeColorInput(args.textColor, primary?.fill_color || "#000000")
-            : undefined
-
-          operations.push({
-            type: "updateText",
-            targetIds: ids,
-            text: args.text,
-            fontSize: args.fontSize,
-            textColor: finalTextColor,
-          })
-
-          return { success: true, targetIds: ids, text: args.text }
-        },
-      }),
-      updateLayerState: tool({
-        description: "Toggle visibility or locking state on objects",
-        inputSchema: z
-          .object({
-            targetId: z.string().optional(),
-            targetIds: z.array(z.string()).optional(),
-            shapeIndex: z.number().optional(),
-            shapeIndices: z.array(z.number()).optional(),
-            useSelection: z.boolean().optional(),
-            visibility: z.boolean().optional(),
-            locked: z.boolean().optional(),
-          })
-          .refine((value) => value.visibility !== undefined || value.locked !== undefined, {
-            message: "Provide visibility or locked state to update.",
-          }),
-        execute: async (args) => {
-          const { ids, error } = resolveTargetIdsForOperation(args)
-          if (error) {
-            validationErrors.push(`updateLayerState: ${error}`)
-            return { error }
-          }
-
-          operations.push({
-            type: "updateLayerState",
-            targetIds: ids,
-            visibility: args.visibility,
-            locked: args.locked,
-          })
-
-          return { success: true, targetIds: ids }
-        },
-      }),
-      reorderLayers: tool({
-        description: "Change layer order (bring forward/backward, front/back)",
-        inputSchema: z.object({
-          action: z.enum(["bringToFront", "sendToBack", "bringForward", "sendBackward"]).describe(
-            "How to reorder the target shapes",
-          ),
-          targetId: z.string().optional(),
-          targetIds: z.array(z.string()).optional(),
-          shapeIndex: z.number().optional(),
-          shapeIndices: z.array(z.number()).optional(),
-          useSelection: z.boolean().optional(),
-        }),
-        execute: async (args) => {
-          const { ids, error } = resolveTargetIdsForOperation(args)
-          if (error) {
-            validationErrors.push(`reorderLayers: ${error}`)
-            return { error }
-          }
-
-          operations.push({
-            type: "reorder",
-            action: args.action,
-            targetIds: ids,
-          })
-
-          return { success: true, action: args.action, targetIds: ids }
         },
       }),
       duplicateShapes: tool({
-        description: "Duplicate shapes with an optional offset",
+        description:
+          "Duplicate one or more shapes (defaults to the current selection) and offset them for easy visibility.",
         inputSchema: z.object({
-          targetId: z.string().optional(),
-          targetIds: z.array(z.string()).optional(),
-          shapeIndex: z.number().optional(),
-          shapeIndices: z.array(z.number()).optional(),
-          useSelection: z.boolean().optional(),
-          offsetX: z.number().optional().describe("Horizontal offset for duplicates"),
-          offsetY: z.number().optional().describe("Vertical offset for duplicates"),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to duplicate (defaults to the current selection; use 'all' for every shape)",
+          ),
+          offsetX: z.number().optional().describe("Horizontal offset for duplicates (default 20px)"),
+          offsetY: z.number().optional().describe("Vertical offset for duplicates (default 20px)"),
         }),
-        execute: async (args) => {
-          const { ids, error } = resolveTargetIdsForOperation(args)
-          if (error) {
+        execute: async ({ shapeTarget, offsetX, offsetY }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
             validationErrors.push(`duplicateShapes: ${error}`)
             return { error }
           }
 
           operations.push({
             type: "duplicate",
-            targetIds: ids,
-            offsetX: args.offsetX,
-            offsetY: args.offsetY,
+            shapeIndices: indices,
+            offsetX: offsetX ?? 20,
+            offsetY: offsetY ?? 20,
           })
 
-          return { success: true, targetIds: ids }
+          return { success: true, shapeIndices: indices, offsetX: offsetX ?? 20, offsetY: offsetY ?? 20 }
         },
       }),
-      selectObjects: tool({
-        description: "Update the current selection using filters or explicit targets",
+      bringShapesToFront: tool({
+        description: "Move shapes to the front of the canvas stacking order.",
         inputSchema: z.object({
-          mode: z
-            .enum(["set", "add", "remove", "clear", "all"])
-            .optional()
-            .describe("How to apply the selection change"),
-          targetId: z.string().optional(),
-          targetIds: z.array(z.string()).optional(),
-          shapeIndex: z.number().optional(),
-          shapeIndices: z.array(z.number()).optional(),
-          useSelection: z.boolean().optional(),
-          shapeType: z.enum(["rectangle", "circle", "triangle", "line", "text"]).optional(),
-          fillColor: z.string().optional(),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to bring forward (defaults to the current selection)",
+          ),
         }),
-        execute: async (args) => {
-          if (args.fillColor && !isValidColorInput(args.fillColor)) {
-            const error = `Invalid color ${args.fillColor}`
-            validationErrors.push(`selectObjects: ${error}`)
+        execute: async ({ shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`bringShapesToFront: ${error}`)
             return { error }
           }
 
-          const mode = args.mode || "set"
-          if (mode === "clear" || mode === "all") {
-            operations.push({ type: "select", mode })
-            return { success: true, mode }
-          }
-
-          let resolvedIds: string[] = []
-          if (args.targetId || (Array.isArray(args.targetIds) && args.targetIds.length > 0) || args.shapeIndex !== undefined || (Array.isArray(args.shapeIndices) && args.shapeIndices.length > 0) || args.useSelection) {
-            const { ids, error } = resolveTargetIdsForOperation(args)
-            if (error) {
-              validationErrors.push(`selectObjects: ${error}`)
-              return { error }
-            }
-            resolvedIds = ids
-          }
-
-          if (args.shapeType) {
-            safeCurrentObjects.forEach((obj: any, idx: number) => {
-              if (obj.type === args.shapeType) {
-                resolvedIds.push(indexToId[idx])
-              }
-            })
-          }
-
-          if (args.fillColor) {
-            const targetColor = normalizeColorInput(args.fillColor, "#000000")
-            safeCurrentObjects.forEach((obj: any, idx: number) => {
-              const objectColor = normalizeColorInput(
-                typeof obj.fill_color === "string" ? obj.fill_color : undefined,
-                "#000000",
-              )
-              if (objectColor === targetColor) {
-                resolvedIds.push(indexToId[idx])
-              }
-            })
-          }
-
-          const uniqueIds = Array.from(new Set(resolvedIds))
-          if (uniqueIds.length === 0) {
-            const error = "No matching shapes found for selection."
-            validationErrors.push(`selectObjects: ${error}`)
+          operations.push({ type: "bringToFront", shapeIndices: indices })
+          return { success: true, shapeIndices: indices }
+        },
+      }),
+      sendShapesToBack: tool({
+        description: "Move shapes to the back of the canvas stacking order.",
+        inputSchema: z.object({
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to send backward (defaults to the current selection)",
+          ),
+        }),
+        execute: async ({ shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`sendShapesToBack: ${error}`)
             return { error }
           }
 
-          operations.push({
-            type: "select",
-            mode,
-            targetIds: uniqueIds,
-            shapeType: args.shapeType,
-            fillColor: args.fillColor,
-          })
-
-          return { success: true, mode, targetIds: uniqueIds }
+          operations.push({ type: "sendToBack", shapeIndices: indices })
+          return { success: true, shapeIndices: indices }
         },
       }),
-      updateViewport: tool({
-        description: "Pan or zoom the viewport",
+      bringShapesForward: tool({
+        description: "Move shapes one layer forward in the stacking order.",
         inputSchema: z.object({
-          x: z.number().optional(),
-          y: z.number().optional(),
-          zoom: z.number().optional(),
-          deltaX: z.number().optional(),
-          deltaY: z.number().optional(),
-          deltaZoom: z.number().optional(),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to move forward (defaults to the current selection)",
+          ),
         }),
-        execute: async ({ x, y, zoom, deltaX, deltaY, deltaZoom }) => {
-          const validation = validateViewportUpdate({ x, y, zoom, deltaX, deltaY, deltaZoom })
-          if (!validation.valid) {
-            validationErrors.push(`updateViewport: ${validation.error}`)
-            return { error: validation.error }
+        execute: async ({ shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`bringShapesForward: ${error}`)
+            return { error }
           }
 
-          operations.push({
-            type: "viewport",
-            x,
-            y,
-            zoom,
-            deltaX,
-            deltaY,
-            deltaZoom,
-          })
-
-          return { success: true }
+          operations.push({ type: "bringForward", shapeIndices: indices })
+          return { success: true, shapeIndices: indices }
         },
       }),
-      updateGridSettings: tool({
-        description: "Toggle grid visibility, snapping, or size",
+      sendShapesBackward: tool({
+        description: "Move shapes one layer backward in the stacking order.",
         inputSchema: z.object({
-          enabled: z.boolean().optional(),
-          snap: z.boolean().optional(),
-          size: z.number().optional(),
+          shapeTarget: multiShapeTargetSchema.describe(
+            "Which shapes to move backward (defaults to the current selection)",
+          ),
         }),
-        execute: async ({ enabled, snap, size }) => {
-          const validation = validateGridSettings({ enabled, snap, size })
-          if (!validation.valid) {
-            validationErrors.push(`updateGridSettings: ${validation.error}`)
-            return { error: validation.error }
+        execute: async ({ shapeTarget }) => {
+          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
+          if (error || !indices) {
+            validationErrors.push(`sendShapesBackward: ${error}`)
+            return { error }
           }
 
-          operations.push({
-            type: "gridSettings",
-            enabled,
-            snap,
-            size,
-          })
-
-          return { success: true, enabled, snap, size }
+          operations.push({ type: "sendBackward", shapeIndices: indices })
+          return { success: true, shapeIndices: indices }
         },
       }),
-      createComment: tool({
-        description: "Add a comment marker to the canvas",
-        inputSchema: z.object({
-          x: z.number().describe("X coordinate for the comment"),
-          y: z.number().describe("Y coordinate for the comment"),
-          content: z.string().min(1).describe("Comment text"),
-        }),
-        execute: async ({ x, y, content }) => {
-          const validation = validateComment({ x, y, content })
-          if (!validation.valid) {
-            validationErrors.push(`createComment: ${validation.error}`)
-            return { error: validation.error }
-          }
 
-          operations.push({
-            type: "comment",
-            x,
-            y,
-            content,
-          })
-
-          return { success: true, x, y }
-        },
-      }),
-      createSnapshot: tool({
-        description: "Create a named snapshot in version history",
-        inputSchema: z.object({
-          name: z.string().optional().describe("Optional label for the snapshot"),
-        }),
-        execute: async ({ name }) => {
-          operations.push({
-            type: "snapshot",
-            name,
-          })
-
-          return { success: true, name }
-        },
-      }),
-      exportCanvas: tool({
-        description: "Export the canvas as PNG or SVG",
-        inputSchema: z.object({
-          format: z.enum(["png", "svg"]).describe("Export format"),
-          selectionOnly: z.boolean().optional().describe("Export only the current selection"),
-        }),
-        execute: async ({ format, selectionOnly }) => {
-          const validation = validateExportRequest({ format, selectionOnly })
-          if (!validation.valid) {
-            validationErrors.push(`exportCanvas: ${validation.error}`)
-            return { error: validation.error }
-          }
-
-          operations.push({
-            type: "export",
-            format,
-            selectionOnly: selectionOnly ?? false,
-          })
-
-          return { success: true, format, selectionOnly: selectionOnly ?? false }
-        },
-      }),
+      // ===== COMPLEX LAYOUT TOOLS =====
       createLoginForm: tool({
         description:
           "Create a polished login form with title, username/password fields, and a primary action button arranged vertically.",
@@ -1033,6 +1329,7 @@ export async function POST(request: Request) {
           return { success: true, x: centerX, y: centerY, width: formWidth, height: formHeight }
         },
       }),
+
       createNavigationBar: tool({
         description:
           "Create a horizontal navigation bar with a brand label and evenly spaced menu items across the top of the canvas.",
@@ -1070,6 +1367,7 @@ export async function POST(request: Request) {
           return { success: true, x: leftX, y: topY, width: navWidth, height: navHeight, items: navItems }
         },
       }),
+
       createCardLayout: tool({
         description:
           "Create a content card with an image placeholder, title, description text, and call-to-action button.",
@@ -1109,7 +1407,7 @@ export async function POST(request: Request) {
       }),
     }
 
-    const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
+    const systemPrompt = `You are an advanced canvas assistant with FULL USER CAPABILITIES. You can perform ANY action a human user can perform on the collaborative canvas.
 
 CANVAS DIMENSIONS: 2000x2000 pixels
 CANVAS CENTER: (1000, 1000)
@@ -1150,31 +1448,63 @@ IMPORTANT: When the user says "the selected shape", "it", "this", "the selection
 OBJECTS ON CANVAS (${safeCurrentObjects.length} total):
 ${JSON.stringify(canvasContext, null, 2)}
 
-AVAILABLE FUNCTIONS:
-1. getCanvasState - Query canvas information (use for questions like "how many shapes?")
-2. createShape - Create new shapes (rectangle, circle, triangle, line)
-3. moveShape - Move existing shapes by index
-4. resizeShape - Resize existing shapes
-5. rotateShape - Rotate existing shapes
-6. deleteShape - Delete specific shapes or clear all
-7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
-8. alignShapes - Align shapes along shared edges or centers
-9. distributeShapes - Evenly space shapes horizontally or vertically
-10. createText - Create a text layer on the canvas
-11. updateStyle - Change fill, stroke, or typography on shapes
-12. updateText - Edit text content and typography for text objects
-13. updateLayerState - Toggle visibility or locking on shapes
-14. reorderLayers - Bring shapes forward/backward in the layer stack
-15. duplicateShapes - Duplicate shapes with optional offsets
-16. selectObjects - Update the current selection using filters or explicit IDs
-17. updateViewport - Pan or zoom the canvas viewport
-18. updateGridSettings - Toggle grid visibility, snapping, or size
-19. createComment - Drop a comment marker with text
-20. createLoginForm - Build a multi-element login form layout with labels and button
-21. createNavigationBar - Create a navigation bar with menu items
-22. createCardLayout - Create a card with media area, text, and button
-23. createSnapshot - Save a named snapshot to version history
-24. exportCanvas - Export the canvas as PNG or SVG
+COMPREHENSIVE TOOL CATEGORIES:
+
+**QUERY & INFORMATION:**
+- getCanvasState - Query canvas information
+
+**SELECTION:**
+- selectObjects - Select specific objects by index or ID
+- selectAll - Select all objects
+- selectAllOfType - Select all objects of same type
+- clearSelection - Deselect all
+
+**CLIPBOARD:**
+- copyObjects - Copy to clipboard
+- pasteObjects - Paste from clipboard
+- duplicateObjects - Duplicate with offset
+
+**CREATION:**
+- createShape - Create rectangles, circles, triangles, lines
+- createText - Create text layers
+- createLoginForm - Multi-element login form
+- createNavigationBar - Navigation bar with menu items
+- createCardLayout - Content card with media and button
+
+**MANIPULATION:**
+- moveShape - Move objects
+- resizeShape - Resize objects
+- rotateShape - Rotate objects
+- deleteShape - Delete objects
+- arrangeShapes - Arrange in patterns (grid, row, column, circle)
+
+**STYLING:**
+- setFillColor - Change fill color
+- setStrokeColor - Change stroke/border color
+- setStrokeWidth - Change stroke width
+
+**ALIGNMENT & DISTRIBUTION:**
+- alignObjects - Align left/center/right/top/middle/bottom (2+ objects)
+- distributeObjects - Distribute horizontally/vertically (3+ objects)
+
+**Z-ORDER / LAYERING:**
+- bringToFront - Move to highest layer
+- sendToBack - Move to lowest layer
+- bringForward - Move up one layer
+- sendBackward - Move down one layer
+
+**VISIBILITY & LOCKING:**
+- toggleVisibility - Show/hide objects
+- toggleLock - Lock/unlock objects
+
+**GRID CONTROLS:**
+- toggleGrid - Show/hide grid
+- toggleSnapToGrid - Enable/disable snap
+- setGridSize - Change grid size (10/20/30/50/100px)
+
+**VIEWPORT:**
+- setZoom - Set zoom level (1.0-3.0)
+- panViewport - Pan to position or by offset
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -1183,12 +1513,6 @@ SHAPE IDENTIFICATION RULES:
 - When user says "the circle", find the first shape of that type
 - When user says "the last shape" or "the latest", use index -1
 - If multiple shapes match, operate on the first match or ask for clarification
-
-TEXT LAYER RULES:
-- Use createText to add text layers
-- Provide text content, position (x, y), font size, and color
-- Font size defaults to 16 pixels if not specified
-- Text color defaults to black (#000000) if not specified
 
 COLOR REFERENCE (use hex codes):
 - red: #ef4444, blue: #3b82f6, green: #22c55e, yellow: #eab308
@@ -1212,37 +1536,87 @@ ${
 `
 }
 
-DEFAULT VALUES:
-- Shape size: 100x100 pixels
-- Spacing: 50 pixels
-- Grid columns: 3
-- Font size: 16 pixels
-- **REQUIRED default position: (${visibleArea.centerX}, ${visibleArea.centerY}) - Always use this for new objects**
-
 BEST PRACTICES:
-1. For questions about the canvas, use getCanvasState first
-2. For complex operations, call multiple functions in sequence
-3. When moving/resizing shapes, verify the shape exists first
-4. Be conversational and explain what you're doing
-5. If a request is ambiguous, make a reasonable assumption and explain it
-6. **ALWAYS check if there's a selected shape before assuming which shape to operate on**
-7. **CRITICAL: ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) - this is within the user's accessible viewport**
+1. **Be conversational and natural** - Explain what you're doing in friendly language
+2. **Chain operations intelligently** - For complex requests, use multiple tools in sequence
+3. **Verify before acting** - Use getCanvasState to check canvas state before making changes
+4. **Handle ambiguity gracefully** - Make reasonable assumptions and explain them
+5. **Respect selection context** - Always check if objects are selected before assuming which to operate on
+6. **Position awareness** - ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY})
+7. **Multi-step operations** - Break complex requests into logical steps
+8. **Memory and context** - Remember previous conversation context and user preferences
 
-Examples:
+EXAMPLE INTERACTIONS:
 - "Create a blue square" → createShape(rectangle, x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, 100x100, blue)
-- "Move the circle left" → moveShape(find circle index, deltaX: -100)
-- "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
+- "Select all circles" → selectAllOfType(type: "circle")
+- "Make them red" (with selection) → setFillColor(color: "#ef4444")
+- "Align them to the left" (2+ selected) → alignObjects(alignment: "left")
+- "Bring it to front" (with selection) → bringToFront()
+- "Copy and paste it over there" → copyObjects() then pasteObjects(x: newX, y: newY)
+- "Hide the selected shapes" → toggleVisibility(visible: false)
+- "Turn on the grid" → toggleGrid(enabled: true)
+- "Zoom in" → setZoom(zoom: 2.0)
 - "How many shapes?" → getCanvasState(query: "count")
-- "Delete all red shapes" → Find all red shapes and delete each one
-- "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')`
 
-    const result = await generateText({
-      model: "openai/gpt-4o-mini",
-      system: systemPrompt,
-      prompt: message,
-      tools,
-      maxSteps: 5,
-    })
+You have COMPLETE parity with human users. You can do EVERYTHING they can do. Be helpful, intelligent, and seamless in your interactions.`
+
+    let result
+    try {
+      result = await generateText({
+        model: "openai/gpt-4o-mini",
+        system: systemPrompt,
+        messages: conversationMessages,
+        tools,
+        maxSteps: 5,
+        maxRetries: 2,
+      })
+    } catch (primaryError) {
+      console.warn("[v0] Primary AI call failed, attempting fallback:", primaryError)
+      const minimalHistory = conversationMessages.slice(-3)
+
+      if (minimalHistory.length === conversationMessages.length) {
+        await updateQueueStatus(queueItemId, {
+          status: "failed",
+          operations: [],
+          completed_at: new Date().toISOString(),
+        })
+
+        return NextResponse.json({
+          message:
+            "I ran into a temporary issue while processing that request. Please try again in a moment or rephrase what you need.",
+          operations: [],
+          queueItemId,
+          validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
+        })
+      }
+
+      try {
+        result = await generateText({
+          model: "openai/gpt-4o-mini",
+          system: systemPrompt,
+          messages: minimalHistory,
+          tools,
+          maxSteps: 5,
+          maxRetries: 2,
+        })
+        console.log("[v0] Fallback AI call succeeded with reduced context")
+      } catch (fallbackError) {
+        console.error("[v0] Fallback AI call failed:", fallbackError)
+        await updateQueueStatus(queueItemId, {
+          status: "failed",
+          operations: [],
+          completed_at: new Date().toISOString(),
+        })
+
+        return NextResponse.json({
+          message:
+            "I ran into a temporary issue while processing that request. Please try again in a moment or rephrase what you need.",
+          operations: [],
+          queueItemId,
+          validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
+        })
+      }
+    }
 
     console.log("[v0] AI SDK response received")
     console.log("[v0] Operations collected:", operations.length)
@@ -1253,21 +1627,11 @@ Examples:
       aiMessage += `\n\nNote: Some operations couldn't be completed:\n${validationErrors.map((e) => `• ${e}`).join("\n")}`
     }
 
-    if (queueItemId && canvasId) {
-      try {
-        const supabase = createServiceRoleClient()
-        await supabase
-          .from("ai_operations_queue")
-          .update({
-            status: "completed",
-            operations: operations,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", queueItemId)
-      } catch (err) {
-        console.warn("[v0] Failed to update queue status:", err)
-      }
-    }
+    await updateQueueStatus(queueItemId, {
+      status: "completed",
+      operations: operations,
+      completed_at: new Date().toISOString(),
+    })
 
     console.log("[v0] Returning", operations.length, "operations")
     return NextResponse.json({
@@ -1281,6 +1645,12 @@ Examples:
     console.error("[v0] Error type:", error?.constructor?.name)
     console.error("[v0] Error message:", error instanceof Error ? error.message : String(error))
     console.error("[v0] Error stack:", error instanceof Error ? error.stack : "No stack trace")
+
+    await updateQueueStatus(queueItemId, {
+      status: "failed",
+      operations: [],
+      completed_at: new Date().toISOString(),
+    })
 
     return NextResponse.json(
       {
@@ -1573,24 +1943,9 @@ function validateDeleteShape(
   return { valid: true }
 }
 
-function validateArrangeShapes(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
+function validateArrangeShapes(args: any): { valid: boolean; error?: string } {
   if (!args.pattern || !["grid", "row", "column", "circle"].includes(args.pattern)) {
     return { valid: false, error: "Pattern must be one of: grid, row, column, circle." }
-  }
-
-  if (args.shapeIndices && !Array.isArray(args.shapeIndices)) {
-    return { valid: false, error: "shapeIndices must be an array." }
-  }
-
-  if (args.shapeIndices && args.shapeIndices.length > 0) {
-    for (const index of args.shapeIndices) {
-      if (typeof index !== "number" || index < 0 || index >= currentObjects.length) {
-        return {
-          valid: false,
-          error: `Invalid shape index ${index} in shapeIndices. Canvas has ${currentObjects.length} shapes.`,
-        }
-      }
-    }
   }
 
   if (args.spacing !== undefined && (typeof args.spacing !== "number" || args.spacing < 0)) {

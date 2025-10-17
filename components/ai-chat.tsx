@@ -38,6 +38,7 @@ export function AiChat({
   canvasId,
   viewport,
 }: AiChatProps) {
+  const MAX_HISTORY_MESSAGES = 12
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -59,7 +60,8 @@ export function AiChat({
 
     const userMessage = input.trim()
     setInput("")
-    setMessages((prev) => [...prev, { role: "user", content: userMessage }])
+    const userMessageEntry: Message = { role: "user", content: userMessage }
+    setMessages((prev) => [...prev, userMessageEntry])
     setIsLoading(true)
     setOperationProgress(null)
 
@@ -87,6 +89,13 @@ export function AiChat({
 
       const selectedObjects = sanitizedObjects.filter((obj) => selectedObjectIds.includes(obj.id))
 
+      const conversationHistory = [...messages, userMessageEntry]
+        .slice(-MAX_HISTORY_MESSAGES)
+        .map((entry) => ({
+          role: entry.role,
+          content: entry.content,
+        }))
+
       const response = await fetch("/api/ai-canvas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -99,6 +108,7 @@ export function AiChat({
           currentObjects: sanitizedObjects,
           selectedObjectIds,
           selectedObjects,
+          conversationHistory,
         }),
       })
 

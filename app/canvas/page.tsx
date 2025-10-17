@@ -316,6 +316,7 @@ export default function CanvasPage() {
         userId={user.id}
         userName={user.name}
         canvasId="default"
+        viewport={viewport}
       />
       {showHistory && (
         <HistoryPanel

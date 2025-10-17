@@ -1,9 +1,10 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LogOut, Undo, Redo } from "lucide-react"
+import { LogOut, Undo, Redo, Download } from "lucide-react"
 import { AlignmentToolbar } from "./alignment-toolbar"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 interface ToolbarProps {
   userName: string
@@ -15,6 +16,8 @@ interface ToolbarProps {
   selectedCount?: number
   onAlign?: (type: AlignmentType) => void
   onDistribute?: (type: DistributeType) => void
+  onExportPNG?: () => void
+  onExportSVG?: () => void
 }
 
 export function Toolbar({
@@ -27,6 +30,8 @@ export function Toolbar({
   selectedCount = 0,
   onAlign,
   onDistribute,
+  onExportPNG,
+  onExportSVG,
 }: ToolbarProps) {
   return (
     <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b bg-card px-4">
@@ -45,6 +50,23 @@ export function Toolbar({
 
         {onAlign && onDistribute && (
           <AlignmentToolbar selectedCount={selectedCount} onAlign={onAlign} onDistribute={onDistribute} />
+        )}
+
+        {(onExportPNG || onExportSVG) && (
+          <div className="border-l pl-4">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-2">
+                  <Download className="h-4 w-4" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {onExportPNG && <DropdownMenuItem onClick={onExportPNG}>Export as PNG</DropdownMenuItem>}
+                {onExportSVG && <DropdownMenuItem onClick={onExportSVG}>Export as SVG</DropdownMenuItem>}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         )}
       </div>
 

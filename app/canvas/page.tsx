@@ -8,6 +8,7 @@ import { Toolbar } from "@/components/toolbar"
 import { AiChat } from "@/components/ai-chat"
 import type { CanvasObject } from "@/lib/types"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
+import { exportCanvas } from "@/lib/export-utils"
 
 export default function CanvasPage() {
   const [user, setUser] = useState<{ id: string; name: string } | null>(null)
@@ -49,6 +50,39 @@ export default function CanvasPage() {
     setAiOperations(operations)
   }
 
+  const handleExportPNG = () => {
+    const objectsToExport =
+      selectedObjectIds.length > 0 ? currentObjects.filter((obj) => selectedObjectIds.includes(obj.id)) : currentObjects
+
+    if (objectsToExport.length === 0) {
+      console.warn("[v0] No objects to export")
+      return
+    }
+
+    exportCanvas({
+      format: "png",
+      objects: objectsToExport,
+      backgroundColor: "#ffffff",
+      scale: 2,
+    })
+  }
+
+  const handleExportSVG = () => {
+    const objectsToExport =
+      selectedObjectIds.length > 0 ? currentObjects.filter((obj) => selectedObjectIds.includes(obj.id)) : currentObjects
+
+    if (objectsToExport.length === 0) {
+      console.warn("[v0] No objects to export")
+      return
+    }
+
+    exportCanvas({
+      format: "svg",
+      objects: objectsToExport,
+      backgroundColor: "#ffffff",
+    })
+  }
+
   if (isLoading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -70,6 +104,8 @@ export default function CanvasPage() {
           selectedCount={selectedObjectIds.length}
           onAlign={onAlign}
           onDistribute={onDistribute}
+          onExportPNG={handleExportPNG}
+          onExportSVG={handleExportSVG}
         />
       </div>
       <div className="h-full w-full">

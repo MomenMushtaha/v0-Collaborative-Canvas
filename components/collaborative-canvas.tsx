@@ -497,7 +497,7 @@ export function CollaborativeCanvas({
         onAlign={handleAlign}
         onDistribute={handleDistribute}
         selectedCount={selectedObjectIds.length}
-        gridEnabled={gridEnabled} // Pass grid props to Canvas
+        gridEnabled={gridEnabled}
         snapEnabled={snapEnabled}
         gridSize={gridSize}
       >

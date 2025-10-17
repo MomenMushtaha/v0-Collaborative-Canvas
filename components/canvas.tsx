@@ -13,7 +13,8 @@ interface CanvasProps {
   onCursorMove?: (x: number, y: number) => void
   onSelectionChange?: (selectedIds: string[]) => void
   children?: any
-  gridEnabled?: boolean // Added grid props
+  viewport?: { x: number; y: number; zoom: number } // Add viewport prop
+  gridEnabled?: boolean
   snapEnabled?: boolean
   gridSize?: number
 }
@@ -25,7 +26,8 @@ export function Canvas({
   onCursorMove,
   onSelectionChange,
   children,
-  gridEnabled = false, // Added grid props with defaults
+  viewport: externalViewport, // Receive viewport from parent
+  gridEnabled = false,
   snapEnabled,
   gridSize,
 }: CanvasProps) {
@@ -43,13 +45,13 @@ export function Canvas({
     editingTextId,
     saveTextEdit,
     cancelTextEdit,
-    measureText, // Get measureText from hook
+    measureText,
   } = useCanvas({
     canvasId,
     objects,
     onObjectsChange,
     onCursorMove,
-    gridEnabled, // Pass grid props to useCanvas hook
+    gridEnabled,
     snapEnabled,
     gridSize,
   })
@@ -154,7 +156,7 @@ export function Canvas({
   }, [selectedIds, onSelectionChange])
 
   const editingTextObject = editingTextId ? objects.find((o) => o.id === editingTextId) : null
-  const { x: viewportX, y: viewportY, zoom: viewportZoom } = viewport
+  const { x: viewportX, y: viewportY, zoom: viewportZoom } = externalViewport || viewport
 
   const textAreaStyle: CSSProperties | undefined = useMemo(() => {
     if (!editingTextObject) return undefined
@@ -257,7 +259,7 @@ export function Canvas({
       {/* Zoom display */}
       <div className="absolute bottom-4 right-[224px] z-10 rounded-lg border bg-card px-3 py-2 text-sm shadow-lg">
         <span className="text-muted-foreground">Zoom: </span>
-        <span className="font-medium">{Math.round(viewport.zoom * 100)}%</span>
+        <span className="font-medium">{Math.round(viewportZoom * 100)}%</span>
       </div>
 
       {/* Canvas */}
@@ -322,7 +324,7 @@ export function Canvas({
         {children && (
           <div
             style={{
-              transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+              transform: `translate(${viewportX}px, ${viewportY}px) scale(${viewportZoom})`,
               transformOrigin: "0 0",
             }}
           >

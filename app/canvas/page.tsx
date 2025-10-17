@@ -25,6 +25,7 @@ export default function CanvasPage() {
   const [gridEnabled, setGridEnabled] = useState(false)
   const [snapEnabled, setSnapEnabled] = useState(false)
   const [gridSize, setGridSize] = useState(20)
+  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const router = useRouter()
   const supabase = createClient()
 
@@ -67,6 +68,9 @@ export default function CanvasPage() {
       objects: objectsToExport,
       backgroundColor: "#ffffff",
       scale: 2,
+      viewport: viewport,
+      canvasWidth: typeof window !== "undefined" ? window.innerWidth : 1920,
+      canvasHeight: typeof window !== "undefined" ? window.innerHeight : 1080,
     })
   }
 
@@ -83,6 +87,9 @@ export default function CanvasPage() {
       format: "svg",
       objects: objectsToExport,
       backgroundColor: "#ffffff",
+      viewport: viewport,
+      canvasWidth: typeof window !== "undefined" ? window.innerWidth : 1920,
+      canvasHeight: typeof window !== "undefined" ? window.innerHeight : 1080,
     })
   }
 
@@ -131,6 +138,7 @@ export default function CanvasPage() {
           onAiOperationsProcessed={() => setAiOperations([])}
           onObjectsChange={setCurrentObjects}
           onSelectionChange={setSelectedObjectIds}
+          viewport={viewport} // Pass viewport state
           onUndo={setOnUndo}
           onRedo={setOnRedo}
           canUndo={setCanUndo}

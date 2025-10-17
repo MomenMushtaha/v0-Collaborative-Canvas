@@ -40,34 +40,6 @@ export function LayersPanel({
 }: LayersPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
 
-  // Helper function to get readable color names
-  const getColorName = (hex: string | undefined): string => {
-    if (!hex) return ""
-
-    const colorMap: Record<string, string> = {
-      "#000000": "Black",
-      "#ffffff": "White",
-      "#ff0000": "Red",
-      "#00ff00": "Green",
-      "#0000ff": "Blue",
-      "#ffff00": "Yellow",
-      "#ff00ff": "Magenta",
-      "#00ffff": "Cyan",
-      "#ffa500": "Orange",
-      "#800080": "Purple",
-      "#ffc0cb": "Pink",
-      "#a52a2a": "Brown",
-      "#808080": "Gray",
-      "#1e40af": "Blue",
-      "#ef4444": "Red",
-      "#10b981": "Green",
-      "#f59e0b": "Amber",
-      "#8b5cf6": "Violet",
-    }
-
-    return colorMap[hex.toLowerCase()] || hex.substring(0, 7)
-  }
-
   const getObjectIcon = (obj: CanvasObject) => {
     if (obj.type === "text") return <Type className="h-4 w-4" />
     switch (obj.shape) {
@@ -86,30 +58,12 @@ export function LayersPanel({
 
   const getObjectLabel = (obj: CanvasObject) => {
     if (obj.type === "text") {
-      const preview = obj.content?.substring(0, 20) || "Text"
+      const preview = obj.content?.substring(0, 30) || "Text"
       return preview.length < (obj.content?.length || 0) ? `${preview}...` : preview
     }
 
-    const shapeName = obj.shape?.charAt(0).toUpperCase() + obj.shape?.slice(1)
-    const color = getColorName(obj.fill_color || obj.stroke_color)
-    const width = obj.width ? Math.round(obj.width) : null
-    const height = obj.height ? Math.round(obj.height) : null
-
-    // Build descriptive label
-    let label = ""
-
-    if (color && color.length < 10) {
-      label = `${color} ${shapeName}`
-    } else {
-      label = shapeName || "Object"
-    }
-
-    // Add size for non-line shapes
-    if (obj.shape !== "line" && width && height && width > 0 && height > 0) {
-      label += ` (${width}×${height})`
-    }
-
-    return label
+    // Just return the capitalized shape name
+    return obj.shape?.charAt(0).toUpperCase() + obj.shape?.slice(1) || "Object"
   }
 
   // Sort objects by z-index (reverse so highest z-index is at top)

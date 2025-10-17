@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LogOut, Undo, Redo, Download, History, MessageSquare } from "lucide-react"
+import { LogOut, Undo, Redo, Download, History, MessageSquare, Copy, Clipboard } from "lucide-react"
 import { AlignmentToolbar } from "./alignment-toolbar"
 import { GridControls } from "./grid-controls"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
@@ -26,6 +26,12 @@ interface ToolbarProps {
   onShowHistory?: () => void
   commentMode?: boolean
   onToggleCommentMode?: () => void
+  onCopy?: () => void
+  onPaste?: () => void
+  onBringToFront?: () => void
+  onSendToBack?: () => void
+  onBringForward?: () => void
+  onSendBackward?: () => void
 }
 
 export function Toolbar({
@@ -47,6 +53,12 @@ export function Toolbar({
   onShowHistory,
   commentMode = false,
   onToggleCommentMode,
+  onCopy,
+  onPaste,
+  onBringToFront,
+  onSendToBack,
+  onBringForward,
+  onSendBackward,
 }: ToolbarProps) {
   return (
     <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b border-border/50 bg-background/95 backdrop-blur-md shadow-sm transition-all duration-200 px-4">
@@ -61,6 +73,16 @@ export function Toolbar({
           <Button variant="ghost" size="icon" onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Y)">
             <Redo className="h-4 w-4" />
           </Button>
+          {onCopy && (
+            <Button variant="ghost" size="icon" onClick={onCopy} disabled={selectedCount === 0} title="Copy (Ctrl+C)">
+              <Copy className="h-4 w-4" />
+            </Button>
+          )}
+          {onPaste && (
+            <Button variant="ghost" size="icon" onClick={onPaste} title="Paste (Ctrl+V)">
+              <Clipboard className="h-4 w-4" />
+            </Button>
+          )}
           {onShowHistory && (
             <Button variant="ghost" size="icon" onClick={onShowHistory} title="Version History">
               <History className="h-4 w-4" />
@@ -79,7 +101,15 @@ export function Toolbar({
         </div>
 
         {onAlign && onDistribute && (
-          <AlignmentToolbar selectedCount={selectedCount} onAlign={onAlign} onDistribute={onDistribute} />
+          <AlignmentToolbar
+            selectedCount={selectedCount}
+            onAlign={onAlign}
+            onDistribute={onDistribute}
+            onBringToFront={onBringToFront}
+            onSendToBack={onSendToBack}
+            onBringForward={onBringForward}
+            onSendBackward={onSendBackward}
+          />
         )}
 
         {onGridChange && (

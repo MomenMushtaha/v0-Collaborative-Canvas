@@ -56,6 +56,10 @@ interface CollaborativeCanvasProps {
   commentMode?: boolean
   onCommentCreate?: (x: number, y: number, content: string) => void
   comments?: Comment[]
+  onBringToFront?: Dispatch<SetStateAction<(() => void) | undefined>>
+  onSendToBack?: Dispatch<SetStateAction<(() => void) | undefined>>
+  onBringForward?: Dispatch<SetStateAction<(() => void) | undefined>>
+  onSendBackward?: Dispatch<SetStateAction<(() => void) | undefined>>
 }
 
 export function CollaborativeCanvas({
@@ -81,6 +85,10 @@ export function CollaborativeCanvas({
   commentMode = false,
   onCommentCreate,
   comments = [],
+  onBringToFront,
+  onSendToBack,
+  onBringForward,
+  onSendBackward,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -512,6 +520,90 @@ export function CollaborativeCanvas({
     [selectedObjectIds, objects, syncObjects],
   )
 
+  const handleBringToFront = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+    const otherObjs = objects.filter((obj) => !selectedObjectIds.includes(obj.id))
+
+    // Move selected objects to the end (highest z-index)
+    const updatedObjects = [...otherObjs, ...selectedObjs]
+    syncObjects(updatedObjects)
+    console.log("[v0] Brought", selectedObjectIds.length, "object(s) to front")
+
+    toast({
+      title: "Brought to Front",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} moved to front`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
+  const handleSendToBack = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+    const otherObjs = objects.filter((obj) => !selectedObjectIds.includes(obj.id))
+
+    // Move selected objects to the beginning (lowest z-index)
+    const updatedObjects = [...selectedObjs, ...otherObjs]
+    syncObjects(updatedObjects)
+    console.log("[v0] Sent", selectedObjectIds.length, "object(s) to back")
+
+    toast({
+      title: "Sent to Back",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} moved to back`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
+  const handleBringForward = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const updatedObjects = [...objects]
+
+    // Move each selected object one position forward (higher z-index)
+    // Process from end to start to avoid conflicts
+    for (let i = updatedObjects.length - 2; i >= 0; i--) {
+      if (selectedObjectIds.includes(updatedObjects[i].id) && !selectedObjectIds.includes(updatedObjects[i + 1].id)) {
+        // Swap with next object
+        const temp = updatedObjects[i]
+        updatedObjects[i] = updatedObjects[i + 1]
+        updatedObjects[i + 1] = temp
+      }
+    }
+
+    syncObjects(updatedObjects)
+    console.log("[v0] Brought", selectedObjectIds.length, "object(s) forward")
+
+    toast({
+      title: "Brought Forward",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} moved forward`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
+  const handleSendBackward = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const updatedObjects = [...objects]
+
+    // Move each selected object one position backward (lower z-index)
+    // Process from start to end to avoid conflicts
+    for (let i = 1; i < updatedObjects.length; i++) {
+      if (selectedObjectIds.includes(updatedObjects[i].id) && !selectedObjectIds.includes(updatedObjects[i - 1].id)) {
+        // Swap with previous object
+        const temp = updatedObjects[i]
+        updatedObjects[i] = updatedObjects[i - 1]
+        updatedObjects[i - 1] = temp
+      }
+    }
+
+    syncObjects(updatedObjects)
+    console.log("[v0] Sent", selectedObjectIds.length, "object(s) backward")
+
+    toast({
+      title: "Sent Backward",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} moved backward`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
   useEffect(() => {
     if (onAlign) {
       onAlign(() => handleAlign)
@@ -521,14 +613,29 @@ export function CollaborativeCanvas({
     }
   }, [handleAlign, handleDistribute, onAlign, onDistribute])
 
-  const handleCommentCreate = useCallback(
-    (x: number, y: number, content: string) => {
-      if (onCommentCreate) {
-        onCommentCreate(x, y, content)
-      }
-    },
-    [onCommentCreate],
-  )
+  useEffect(() => {
+    if (onBringToFront) {
+      onBringToFront(() => handleBringToFront)
+    }
+    if (onSendToBack) {
+      onSendToBack(() => handleSendToBack)
+    }
+    if (onBringForward) {
+      onBringForward(() => handleBringForward)
+    }
+    if (onSendBackward) {
+      onSendBackward(() => handleSendBackward)
+    }
+  }, [
+    handleBringToFront,
+    handleSendToBack,
+    handleBringForward,
+    handleSendBackward,
+    onBringToFront,
+    onSendToBack,
+    onBringForward,
+    onSendBackward,
+  ])
 
   if (isLoading) {
     return (
@@ -566,7 +673,11 @@ export function CollaborativeCanvas({
         snapEnabled={snapEnabled}
         gridSize={gridSize}
         commentMode={commentMode}
-        onCommentCreate={handleCommentCreate}
+        onCommentCreate={onCommentCreate}
+        onBringToFront={handleBringToFront}
+        onSendToBack={handleSendToBack}
+        onBringForward={handleBringForward}
+        onSendBackward={handleSendBackward}
       >
         <MultiplayerCursors users={otherUsers} />
         {comments.map((comment) => (

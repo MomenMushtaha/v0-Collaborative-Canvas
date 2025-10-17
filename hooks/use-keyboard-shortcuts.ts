@@ -8,6 +8,8 @@ interface KeyboardShortcutsProps {
   onDelete?: () => void
   onDuplicate?: () => void
   onSelectAll?: () => void
+  onCopy?: () => void
+  onPaste?: () => void
   canUndo?: boolean
   canRedo?: boolean
   hasSelection?: boolean
@@ -19,6 +21,8 @@ export function useKeyboardShortcuts({
   onDelete,
   onDuplicate,
   onSelectAll,
+  onCopy,
+  onPaste,
   canUndo = false,
   canRedo = false,
   hasSelection = false,
@@ -39,6 +43,22 @@ export function useKeyboardShortcuts({
         e.preventDefault()
         onSelectAll()
         console.log("[v0] Keyboard shortcut: Select All")
+        return
+      }
+
+      // Copy: Ctrl+C (Windows/Linux) or Cmd+C (Mac)
+      if (modifier && e.key === "c" && hasSelection && onCopy) {
+        e.preventDefault()
+        onCopy()
+        console.log("[v0] Keyboard shortcut: Copy")
+        return
+      }
+
+      // Paste: Ctrl+V (Windows/Linux) or Cmd+V (Mac)
+      if (modifier && e.key === "v" && onPaste) {
+        e.preventDefault()
+        onPaste()
+        console.log("[v0] Keyboard shortcut: Paste")
         return
       }
 
@@ -77,5 +97,5 @@ export function useKeyboardShortcuts({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [onUndo, onRedo, onDelete, onDuplicate, onSelectAll, canUndo, canRedo, hasSelection])
+  }, [onUndo, onRedo, onDelete, onDuplicate, onSelectAll, onCopy, onPaste, canUndo, canRedo, hasSelection])
 }

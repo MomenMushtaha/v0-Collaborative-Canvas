@@ -67,6 +67,7 @@ export function CollaborativeCanvas({
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
   const [isUndoRedoOperation, setIsUndoRedoOperation] = useState(false)
   const [connectionState, setConnectionState] = useState({ isConnected: true, queuedOps: 0 })
+  const [clipboard, setClipboard] = useState<CanvasObject[]>([]) // Added clipboard state
 
   const { objects, isLoading, syncObjects, isConnected, queuedOperations } = useRealtimeCanvas({
     canvasId,
@@ -198,6 +199,32 @@ export function CollaborativeCanvas({
     console.log("[v0] Duplicated", selectedObjectIds.length, "object(s)")
   }, [selectedObjectIds, objects, syncObjects])
 
+  const handleCopy = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+    setClipboard(selectedObjs)
+    console.log("[v0] Copied", selectedObjectIds.length, "object(s) to clipboard")
+  }, [selectedObjectIds, objects])
+
+  const handlePaste = useCallback(() => {
+    if (clipboard.length === 0) return
+
+    const pastedObjects = clipboard.map((obj) => ({
+      ...obj,
+      id: crypto.randomUUID(),
+      x: obj.x + 20, // Offset by 20px
+      y: obj.y + 20, // Offset by 20px
+    }))
+
+    const updatedObjects = [...objects, ...pastedObjects]
+    syncObjects(updatedObjects)
+
+    // Select the newly pasted objects
+    setSelectedObjectIds(pastedObjects.map((obj) => obj.id))
+    console.log("[v0] Pasted", clipboard.length, "object(s) from clipboard")
+  }, [clipboard, objects, syncObjects])
+
   const handleStyleChange = useCallback(
     (updates: Partial<CanvasObject>) => {
       if (selectedObjectIds.length === 0) return
@@ -229,8 +256,10 @@ export function CollaborativeCanvas({
     onUndo: handleUndo,
     onRedo: handleRedo,
     onDelete: handleDelete,
-    onDuplicate: handleDuplicate, // Added duplicate handler
+    onDuplicate: handleDuplicate,
     onSelectAll: handleSelectAll,
+    onCopy: handleCopy,
+    onPaste: handlePaste,
     canUndo: historyCanUndo,
     canRedo: historyCanRedo,
     hasSelection: selectedObjectIds.length > 0,

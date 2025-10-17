@@ -43,16 +43,32 @@ export function Toolbar({
   onGridChange,
 }: ToolbarProps) {
   return (
-    <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b bg-card px-4">
+    <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b bg-background/80 backdrop-blur-md px-4 shadow-sm">
       <div className="flex items-center gap-4">
-        <h1 className="text-lg font-semibold">CollabCanvas</h1>
+        <h1 className="text-lg font-semibold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+          CollabCanvas
+        </h1>
         <span className="text-sm text-muted-foreground">MVP</span>
 
         <div className="flex items-center gap-1 border-l pl-4">
-          <Button variant="ghost" size="icon" onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            className="transition-all hover:scale-105"
+          >
             <Undo className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Y)">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Y)"
+            className="transition-all hover:scale-105"
+          >
             <Redo className="h-4 w-4" />
           </Button>
         </div>
@@ -76,7 +92,7 @@ export function Toolbar({
           <div className="border-l pl-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-2">
+                <Button variant="ghost" size="sm" className="gap-2 transition-all hover:scale-105">
                   <Download className="h-4 w-4" />
                   Export
                 </Button>
@@ -91,8 +107,17 @@ export function Toolbar({
       </div>
 
       <div className="flex items-center gap-4">
-        <span className="text-sm text-muted-foreground">{userName}</span>
-        <Button variant="ghost" size="icon" onClick={onSignOut} title="Sign Out">
+        <div className="flex items-center gap-2 rounded-full bg-accent px-3 py-1">
+          <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+          <span className="text-sm font-medium">{userName}</span>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onSignOut}
+          title="Sign Out"
+          className="transition-all hover:scale-105 hover:text-destructive"
+        >
           <LogOut className="h-4 w-4" />
         </Button>
       </div>

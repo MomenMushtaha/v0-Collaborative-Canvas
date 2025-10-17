@@ -238,7 +238,7 @@ export async function POST(request: Request) {
         description: "Move an existing shape to a new position",
         inputSchema: z.object({
           shapeIndex: z
-            .number()
+            .union([z.number(), z.literal("selected")])
             .describe(
               "Index of the shape to move (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
             ),
@@ -254,23 +254,25 @@ export async function POST(request: Request) {
             return { error: validation.error }
           }
 
+          const resolvedIndex = validation.shapeIndex as number
+
           operations.push({
             type: "move",
-            shapeIndex: shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex,
+            shapeIndex: resolvedIndex,
             x,
             y,
             deltaX,
             deltaY,
           })
 
-          return { success: true, shapeIndex, x, y, deltaX, deltaY }
+          return { success: true, shapeIndex: resolvedIndex, x, y, deltaX, deltaY }
         },
       }),
       resizeShape: tool({
         description: "Resize an existing shape",
         inputSchema: z.object({
           shapeIndex: z
-            .number()
+            .union([z.number(), z.literal("selected")])
             .describe(
               "Index of the shape to resize (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
             ),
@@ -285,22 +287,24 @@ export async function POST(request: Request) {
             return { error: validation.error }
           }
 
+          const resolvedIndex = validation.shapeIndex as number
+
           operations.push({
             type: "resize",
-            shapeIndex: shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex,
+            shapeIndex: resolvedIndex,
             width,
             height,
             scale,
           })
 
-          return { success: true, shapeIndex, width, height, scale }
+          return { success: true, shapeIndex: resolvedIndex, width, height, scale }
         },
       }),
       rotateShape: tool({
         description: "Rotate an existing shape",
         inputSchema: z.object({
           shapeIndex: z
-            .number()
+            .union([z.number(), z.literal("selected")])
             .describe(
               "Index of the shape to rotate (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
             ),
@@ -317,21 +321,23 @@ export async function POST(request: Request) {
             return { error: validation.error }
           }
 
+          const resolvedIndex = validation.shapeIndex as number
+
           operations.push({
             type: "rotate",
-            shapeIndex: shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex,
+            shapeIndex: resolvedIndex,
             degrees: degrees ?? 0,
             absolute: absolute ?? false,
           })
 
-          return { success: true, shapeIndex, degrees, absolute }
+          return { success: true, shapeIndex: resolvedIndex, degrees, absolute }
         },
       }),
       deleteShape: tool({
         description: "Delete one or more shapes from the canvas",
         inputSchema: z.object({
           shapeIndex: z
-            .number()
+            .union([z.number(), z.literal("selected")])
             .optional()
             .describe("Index of the shape to delete (0-based, or 'selected' for currently selected shape)"),
           all: z.boolean().optional().describe("If true, delete all shapes from the canvas"),
@@ -343,14 +349,15 @@ export async function POST(request: Request) {
             return { error: validation.error }
           }
 
+          const resolvedIndex = validation.shapeIndex
+
           operations.push({
             type: "delete",
-            shapeIndex:
-              shapeIndex === undefined ? undefined : shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex,
+            ...(resolvedIndex !== undefined ? { shapeIndex: resolvedIndex } : {}),
             all: all ?? false,
           })
 
-          return { success: true, shapeIndex, all }
+          return { success: true, shapeIndex: resolvedIndex, all }
         },
       }),
       arrangeShapes: tool({
@@ -697,27 +704,57 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
   return { valid: true }
 }
 
+type ShapeIndexInput = number | "selected" | undefined
+
+function resolveShapeIndex(
+  shapeIndex: ShapeIndexInput,
+  currentObjects: any[],
+  selectedIndices: number[],
+  { allowUndefined = false }: { allowUndefined?: boolean } = {},
+): { valid: boolean; error?: string; shapeIndex?: number } {
+  if (shapeIndex === undefined) {
+    if (allowUndefined) {
+      return { valid: true, shapeIndex: undefined }
+    }
+    return { valid: false, error: "shapeIndex is required." }
+  }
+
+  if (currentObjects.length === 0) {
+    return { valid: false, error: "There are no shapes on the canvas." }
+  }
+
+  let resolvedIndex: number
+
+  if (shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    resolvedIndex = selectedIndices[0]
+  } else if (typeof shapeIndex === "number" && Number.isFinite(shapeIndex)) {
+    resolvedIndex = shapeIndex === -1 ? currentObjects.length - 1 : shapeIndex
+  } else {
+    return { valid: false, error: "shapeIndex must be a number or 'selected'." }
+  }
+
+  if (resolvedIndex < 0 || resolvedIndex >= currentObjects.length) {
+    const original = shapeIndex === "selected" ? "selected" : shapeIndex
+    return {
+      valid: false,
+      error: `Invalid shape index ${original}. Canvas has ${currentObjects.length} shapes (indices 0-${Math.max(0, currentObjects.length - 1)}).`,
+    }
+  }
+
+  return { valid: true, shapeIndex: resolvedIndex }
+}
+
 function validateMoveShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string } {
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    args.shapeIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex !== "number") {
-    return { valid: false, error: "shapeIndex must be a number." }
-  }
-
-  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
-
-  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes (indices 0-${currentObjects.length - 1}).`,
-    }
+): { valid: boolean; error?: string; shapeIndex?: number } {
+  const resolved = resolveShapeIndex(args.shapeIndex, currentObjects, selectedIndices)
+  if (!resolved.valid) {
+    return resolved
   }
 
   if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
@@ -743,30 +780,17 @@ function validateMoveShape(
     }
   }
 
-  return { valid: true }
+  return { valid: true, shapeIndex: resolved.shapeIndex }
 }
 
 function validateResizeShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string } {
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    args.shapeIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex !== "number") {
-    return { valid: false, error: "shapeIndex must be a number." }
-  }
-
-  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
-
-  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes (indices 0-${currentObjects.length - 1}).`,
-    }
+): { valid: boolean; error?: string; shapeIndex?: number } {
+  const resolved = resolveShapeIndex(args.shapeIndex, currentObjects, selectedIndices)
+  if (!resolved.valid) {
+    return resolved
   }
 
   if (args.width !== undefined && (typeof args.width !== "number" || args.width <= 0 || args.width > 2000)) {
@@ -785,67 +809,45 @@ function validateResizeShape(
     return { valid: false, error: "Must provide either dimensions (width, height) or scale factor." }
   }
 
-  return { valid: true }
+  return { valid: true, shapeIndex: resolved.shapeIndex }
 }
 
 function validateRotateShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string } {
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    args.shapeIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex !== "number") {
-    return { valid: false, error: "shapeIndex must be a number." }
+): { valid: boolean; error?: string; shapeIndex?: number } {
+  const resolved = resolveShapeIndex(args.shapeIndex, currentObjects, selectedIndices)
+  if (!resolved.valid) {
+    return resolved
   }
 
-  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
-
-  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes.`,
-    }
-  }
-
-  if (typeof args.degrees !== "number") {
+  if (typeof args.degrees !== "number" || !Number.isFinite(args.degrees)) {
     return { valid: false, error: "Rotation degrees must be a number." }
   }
 
-  return { valid: true }
+  return { valid: true, shapeIndex: resolved.shapeIndex }
 }
 
 function validateDeleteShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string } {
+): { valid: boolean; error?: string; shapeIndex?: number } {
   if (args.all === true) {
     return { valid: true }
   }
 
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    args.shapeIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex !== "number") {
-    return { valid: false, error: "shapeIndex must be a number, or set all: true to delete all shapes." }
+  const resolved = resolveShapeIndex(args.shapeIndex, currentObjects, selectedIndices, { allowUndefined: true })
+  if (!resolved.valid) {
+    return resolved
   }
 
-  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
-
-  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes.`,
-    }
+  if (resolved.shapeIndex === undefined) {
+    return { valid: false, error: "shapeIndex must be a number or 'selected', or set all: true to delete all shapes." }
   }
 
-  return { valid: true }
+  return { valid: true, shapeIndex: resolved.shapeIndex }
 }
 
 function validateArrangeShapes(args: any, currentObjects: any[]): { valid: boolean; error?: string } {

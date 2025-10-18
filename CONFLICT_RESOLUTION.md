@@ -40,6 +40,7 @@ saveToDatabase(objectId, newProperties)
 - Sub-50ms local updates (no network latency)
 - Smooth user experience
 - Changes appear instantly
+- Local version + last-editor metadata stamped immediately so the client can resolve conflicts without waiting for the server
 
 ### 2. Real-Time Synchronization
 
@@ -72,7 +73,14 @@ Result: All users see x: 200 (User B's change wins)
 - Ensures users can only modify objects in their canvas
 - Prevents unauthorized overwrites
 
-### 4. Reconnection & Queue
+### 4. Versioned Conflict Guard
+
+- Every object carries a monotonic `version` counter and millisecond `last_modified_at`
+- Incoming realtime messages are ignored when the version/timestamp is older than the local copy (prevents stale overwrites)
+- Delete broadcasts include the incremented version so newer edits cannot be removed by an out-of-order delete
+- Metadata feeds the "last edited" banner that surfaces who performed the most recent change
+
+### 5. Reconnection & Queue
 
 **During Disconnect**:
 - Operations are queued locally
@@ -108,7 +116,7 @@ T3: User A receives User B's update → object at (100, 150)
 T4: User B receives User A's update → object at (150, 100)
 \`\`\`
 
-**Resolution**: Last broadcast wins. If User B's broadcast arrives last at the server, all users converge to (100, 150).
+**Resolution**: Last broadcast wins. Each change increments the object's version so whichever update carries the higher version/time (User B in this case) is applied and persisted, ensuring everyone converges to (100, 150).
 
 **User Experience**: Brief flicker as object position updates, then stabilizes.
 
@@ -125,6 +133,7 @@ T2: User B edits object → broadcasts update
 **Resolution**:
 - If delete arrives first: Edit is ignored (object doesn't exist)
 - If edit arrives first: Object briefly reappears, then deleted
+- Versioned deletes ensure any later stale updates are ignored once the delete wins
 
 **Implementation**:
 \`\`\`typescript
@@ -177,6 +186,11 @@ T3: If user was editing same area, AI object appears
 - Selected objects show colored borders (per user)
 - Users can see what others are editing
 - Encourages coordination
+
+### Last Editor Banner
+- Selecting a single object reveals a floating "Last edited by" badge with collaborator name & relative time
+- Badge color matches the collaborator's presence color, reinforcing who owns the latest change
+- Gives immediate clarity during rapid hand-offs or conflict investigation
 
 ### Connection Status
 - Banner shows "Reconnecting..." or "Offline" during disconnects

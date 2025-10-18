@@ -18,6 +18,7 @@ import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { useToast } from "@/hooks/use-toast"
 import { CommentMarker } from "@/components/comment-marker"
 import type { Comment } from "@/lib/comments-utils"
+import { formatDistanceToNow } from "date-fns"
 
 // Generate a random color for each user
 function generateUserColor() {
@@ -108,6 +109,8 @@ export function CollaborativeCanvas({
   const { objects, isLoading, syncObjects, isConnected, queuedOperations } = useRealtimeCanvas({
     canvasId,
     userId,
+    userName,
+    userColor,
     onConnectionChange: (connected, queued) => {
       setConnectionState({ isConnected: connected, queuedOps: queued })
     },
@@ -534,6 +537,36 @@ export function CollaborativeCanvas({
     return objects.filter((obj) => selectedObjectIds.includes(obj.id))
   }, [objects, selectedObjectIds])
 
+  const lastEditedSummary = useMemo(() => {
+    if (selectedObjectIds.length !== 1) return null
+
+    const selectedObject = objects.find((obj) => obj.id === selectedObjectIds[0])
+    if (!selectedObject || !selectedObject.last_modified_name) {
+      return null
+    }
+
+    const timestamp =
+      selectedObject.last_modified_at ??
+      (selectedObject.updated_at ? new Date(selectedObject.updated_at).getTime() : undefined)
+
+    let relativeTime: string | null = null
+    if (timestamp) {
+      try {
+        relativeTime = formatDistanceToNow(new Date(timestamp), { addSuffix: true })
+      } catch (error) {
+        console.warn("[v0] Failed to format last edited time", error)
+        relativeTime = null
+      }
+    }
+
+    return {
+      name: selectedObject.last_modified_name,
+      color: selectedObject.last_modified_color || selectedObject.fill_color || "#6b7280",
+      timestamp,
+      relativeTime,
+    }
+  }, [objects, selectedObjectIds])
+
   useKeyboardShortcuts({
     onUndo: handleUndo,
     onRedo: handleRedo,
@@ -847,6 +880,19 @@ export function CollaborativeCanvas({
     <div className="relative h-full w-full">
       <ConnectionStatus isConnected={connectionState.isConnected} queuedOps={connectionState.queuedOps} />
       <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
+      {lastEditedSummary && (
+        <div className="pointer-events-none absolute right-6 top-32 flex max-w-sm items-center gap-2 rounded-md border border-border/60 bg-background/95 px-3 py-1.5 text-sm shadow-lg backdrop-blur">
+          <span
+            aria-hidden
+            className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: lastEditedSummary.color }}
+          />
+          <span className="text-muted-foreground">
+            Last edited by <span className="font-medium text-foreground">{lastEditedSummary.name}</span>
+            {lastEditedSummary.relativeTime ? ` ${lastEditedSummary.relativeTime}` : " just now"}
+          </span>
+        </div>
+      )}
       <StylePanel selectedObjects={selectedObjects} onStyleChange={handleStyleChange} />
       <LayersPanel
         objects={objects}

@@ -23,6 +23,11 @@ export interface CanvasObject {
   content?: string // text content for text objects
   children?: string[] // IDs of child objects in a group
   parent_group?: string // ID of parent group if this object is in a group
+  version?: number // monotonically increasing version for conflict resolution
+  last_modified_by?: string // user id of most recent editor
+  last_modified_name?: string // display name of most recent editor
+  last_modified_color?: string // presence color of most recent editor
+  last_modified_at?: number // unix epoch ms timestamp of the most recent edit
 }
 
 export interface UserPresence {

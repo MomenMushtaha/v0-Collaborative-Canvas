@@ -266,7 +266,9 @@ export function useCanvas({
       const groups = objects.filter((obj) => obj.type === "group")
       const nonGroups = objects.filter((obj) => obj.type !== "group")
 
-      nonGroups.forEach((obj) => {
+      const visibleNonGroups = nonGroups.filter((obj) => obj.isVisible !== false)
+
+      visibleNonGroups.forEach((obj) => {
         ctx.save()
 
         const isSelected = selectedIds.includes(obj.id)

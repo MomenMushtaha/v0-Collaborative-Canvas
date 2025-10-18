@@ -8,8 +8,6 @@ import {
   Download,
   History,
   MessageSquare,
-  Copy,
-  Clipboard,
   Lasso,
   MousePointerClick,
   Group,
@@ -96,16 +94,6 @@ export function Toolbar({
           <Button variant="ghost" size="icon" onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Y)">
             <Redo className="h-4 w-4" />
           </Button>
-          {onCopy && (
-            <Button variant="ghost" size="icon" onClick={onCopy} disabled={selectedCount === 0} title="Copy (Ctrl+C)">
-              <Copy className="h-4 w-4" />
-            </Button>
-          )}
-          {onPaste && (
-            <Button variant="ghost" size="icon" onClick={onPaste} title="Paste (Ctrl+V)">
-              <Clipboard className="h-4 w-4" />
-            </Button>
-          )}
           {onShowHistory && (
             <Button variant="ghost" size="icon" onClick={onShowHistory} title="Version History">
               <History className="h-4 w-4" />

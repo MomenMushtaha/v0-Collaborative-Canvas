@@ -12,6 +12,7 @@ import {
   type Comment,
 } from "@/lib/comments-utils"
 import { formatDistanceToNow } from "date-fns"
+import type { SupabaseClient } from "@supabase/supabase-js"
 
 interface CommentsPanelProps {
   canvasId: string
@@ -19,23 +20,31 @@ interface CommentsPanelProps {
   onCommentClick?: (x: number, y: number) => void
   comments: Comment[]
   onCommentsChange: () => void
+  supabase: SupabaseClient
 }
 
-export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCommentsChange }: CommentsPanelProps) {
+export function CommentsPanel({
+  canvasId,
+  userId,
+  onCommentClick,
+  comments,
+  onCommentsChange,
+  supabase,
+}: CommentsPanelProps) {
   const [showResolved, setShowResolved] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
 
   const filteredComments = showResolved ? comments : comments.filter((c) => !c.resolved)
 
   const handleResolve = async (commentId: string) => {
-    const success = await resolveComment(commentId, userId)
+    const success = await resolveComment(supabase, commentId, userId)
     if (success) {
       onCommentsChange()
     }
   }
 
   const handleDelete = async (commentId: string) => {
-    const success = await deleteComment(commentId)
+    const success = await deleteComment(supabase, commentId)
     if (success) {
       onCommentsChange()
     }
@@ -46,7 +55,7 @@ export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCo
       return
     }
 
-    const success = await clearAllComments(canvasId)
+    const success = await clearAllComments(supabase, canvasId)
     if (success) {
       onCommentsChange()
     }
@@ -65,7 +74,7 @@ export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCo
       return
     }
 
-    const success = await clearResolvedComments(canvasId)
+    const success = await clearResolvedComments(supabase, canvasId)
     if (success) {
       onCommentsChange()
     }

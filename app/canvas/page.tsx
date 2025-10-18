@@ -83,13 +83,13 @@ export default function CanvasPage() {
     if (!user) return
 
     const loadInitialComments = async () => {
-      const loadedComments = await loadComments("default")
+      const loadedComments = await loadComments(supabase, "default")
       setComments(loadedComments)
     }
 
     loadInitialComments()
 
-    const unsubscribe = subscribeToComments("default", (newComment) => {
+    const unsubscribe = subscribeToComments(supabase, "default", (newComment) => {
       setComments((prev) => [newComment, ...prev])
     })
 
@@ -208,7 +208,7 @@ export default function CanvasPage() {
   const handleCommentCreate = async (x: number, y: number, content: string) => {
     if (!user) return
 
-    const comment = await createComment("default", x, y, content, user.id, user.name)
+    const comment = await createComment(supabase, "default", x, y, content, user.id, user.name)
     if (comment) {
       setComments((prev) => [comment, ...prev])
       toast({
@@ -230,7 +230,7 @@ export default function CanvasPage() {
   }
 
   const handleCommentsChange = async () => {
-    const loadedComments = await loadComments("default")
+    const loadedComments = await loadComments(supabase, "default")
     setComments(loadedComments)
   }
 
@@ -346,6 +346,7 @@ export default function CanvasPage() {
         onCommentClick={handleCommentClick}
         comments={comments}
         onCommentsChange={handleCommentsChange}
+        supabase={supabase}
       />
     </div>
   )

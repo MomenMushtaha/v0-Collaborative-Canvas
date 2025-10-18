@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { snapPointToGrid, isObjectInLasso } from "@/lib/grid-utils"
+import { getGroupBounds } from "@/lib/group-utils"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { CanvasObject } from "@/lib/types"
@@ -136,11 +137,9 @@ export function useCanvas({
       const centerX = obj.x + obj.width / 2
       const centerY = obj.y + obj.height / 2
 
-      // Rotation handle is above the top edge in local coordinates
       const localHandleX = 0 // relative to center
       const localHandleY = -obj.height / 2 - 30 / viewport.zoom // above the object
 
-      // Transform handle position by object's rotation
       const rotationRad = (obj.rotation * Math.PI) / 180
       const cos = Math.cos(rotationRad)
       const sin = Math.sin(rotationRad)
@@ -264,7 +263,10 @@ export function useCanvas({
         ctx.stroke()
       }
 
-      objects.forEach((obj) => {
+      const groups = objects.filter((obj) => obj.type === "group")
+      const nonGroups = objects.filter((obj) => obj.type !== "group")
+
+      nonGroups.forEach((obj) => {
         ctx.save()
 
         const isSelected = selectedIds.includes(obj.id)
@@ -354,11 +356,39 @@ export function useCanvas({
           ctx.strokeRect(obj.x - 5, obj.y - 5, obj.width + 10, obj.height + 10)
           ctx.setLineDash([])
 
+          if (obj.type !== "line" && obj.type !== "text") {
+            const handleSize = 8 / viewport.zoom
+            const offset = handleSize / 2 + 3 / viewport.zoom
+            const x1 = obj.x
+            const y1 = obj.y
+            const x2 = obj.x + obj.width
+            const y2 = obj.y + obj.height
+            const centerX = obj.x + obj.width / 2
+            const centerY = obj.y + obj.height / 2
+
+            const drawHandle = (x: number, y: number) => {
+              ctx.fillStyle = "#ffffff"
+              ctx.strokeStyle = "#3b82f6"
+              ctx.lineWidth = 2 / viewport.zoom
+              ctx.fillRect(x - handleSize / 2, y - handleSize / 2, handleSize, handleSize)
+              ctx.strokeRect(x - handleSize / 2, y - handleSize / 2, handleSize, handleSize)
+            }
+
+            drawHandle(x1 - offset, y1 - offset)
+            drawHandle(x2 + offset, y1 - offset)
+            drawHandle(x1 - offset, y2 + offset)
+            drawHandle(x2 + offset, y2 + offset)
+
+            drawHandle(centerX, y1 - offset)
+            drawHandle(x2 + offset, centerY)
+            drawHandle(centerX, y2 + offset)
+            drawHandle(x1 - offset, centerY)
+          }
+
           if (selectedIds.length === 1) {
             const centerX = obj.x + obj.width / 2
             const rotateHandleY = obj.y - 30 / viewport.zoom
 
-            // Draw line from top center to rotation handle
             ctx.strokeStyle = "#3b82f6"
             ctx.lineWidth = 2 / viewport.zoom
             ctx.beginPath()
@@ -366,7 +396,6 @@ export function useCanvas({
             ctx.lineTo(centerX, rotateHandleY)
             ctx.stroke()
 
-            // Draw rotation handle circle
             ctx.fillStyle = "#ffffff"
             ctx.strokeStyle = "#3b82f6"
             ctx.lineWidth = 2 / viewport.zoom
@@ -375,6 +404,27 @@ export function useCanvas({
             ctx.fill()
             ctx.stroke()
           }
+        }
+
+        ctx.restore()
+      })
+
+      groups.forEach((group) => {
+        const bounds = getGroupBounds(group, objects)
+        const isSelected = selectedIds.includes(group.id)
+
+        ctx.save()
+
+        ctx.strokeStyle = isSelected ? "#3b82f6" : "#9ca3af"
+        ctx.lineWidth = 2 / viewport.zoom
+        ctx.setLineDash([10 / viewport.zoom, 5 / viewport.zoom])
+        ctx.strokeRect(bounds.x - 5, bounds.y - 5, bounds.width + 10, bounds.height + 10)
+        ctx.setLineDash([])
+
+        if (isSelected) {
+          ctx.fillStyle = "#3b82f6"
+          ctx.font = `${12 / viewport.zoom}px Arial`
+          ctx.fillText("Group", bounds.x, bounds.y - 10 / viewport.zoom)
         }
 
         ctx.restore()
@@ -799,7 +849,6 @@ export function useCanvas({
           const angleDiff = ((currentAngle - rotateStart.angle) * 180) / Math.PI
           let newRotation = rotateStart.objRotation + angleDiff
 
-          // Normalize rotation to 0-360 range
           newRotation = ((newRotation % 360) + 360) % 360
 
           const updatedObjects = objects.map((o) =>

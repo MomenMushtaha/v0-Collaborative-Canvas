@@ -16,6 +16,12 @@ interface AiChatProps {
   userName: string
   canvasId: string
   viewport: { x: number; y: number; zoom: number }
+  usableCanvasDimensions?: {
+    leftOffset: number
+    rightOffset: number
+    topOffset: number
+    bottomOffset: number
+  }
 }
 
 interface Message {
@@ -37,8 +43,8 @@ export function AiChat({
   userName,
   canvasId,
   viewport,
+  usableCanvasDimensions,
 }: AiChatProps) {
-  const MAX_HISTORY_MESSAGES = 12
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -60,8 +66,7 @@ export function AiChat({
 
     const userMessage = input.trim()
     setInput("")
-    const userMessageEntry: Message = { role: "user", content: userMessage }
-    setMessages((prev) => [...prev, userMessageEntry])
+    setMessages((prev) => [...prev, { role: "user", content: userMessage }])
     setIsLoading(true)
     setOperationProgress(null)
 
@@ -89,13 +94,6 @@ export function AiChat({
 
       const selectedObjects = sanitizedObjects.filter((obj) => selectedObjectIds.includes(obj.id))
 
-      const conversationHistory = [...messages, userMessageEntry]
-        .slice(-MAX_HISTORY_MESSAGES)
-        .map((entry) => ({
-          role: entry.role,
-          content: entry.content,
-        }))
-
       const response = await fetch("/api/ai-canvas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -105,10 +103,10 @@ export function AiChat({
           userId,
           userName,
           viewport,
+          usableCanvasDimensions,
           currentObjects: sanitizedObjects,
           selectedObjectIds,
           selectedObjects,
-          conversationHistory,
         }),
       })
 
@@ -189,14 +187,47 @@ export function AiChat({
       {/* Messages */}
       <div className="flex h-96 flex-col gap-3 overflow-y-auto p-4 bg-muted/30">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground px-4">
-            <div className="bg-gradient-to-br from-blue-500 to-cyan-500 p-3 rounded-full mb-4">
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-4 text-center text-muted-foreground">
+            <div className="mb-2 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 p-3">
               <Sparkles className="h-8 w-8 text-white" />
             </div>
-            <p className="text-sm font-medium mb-2">Ask me to create shapes, arrange objects, or build layouts!</p>
-            <p className="text-xs text-muted-foreground/70 leading-relaxed">
-              Try: "Create a blue rectangle" or "Move the last shape to the center"
+            <p className="text-sm font-medium text-foreground">
+              Ask me to create shapes, arrange objects, or build layouts!
             </p>
+            <div className="w-full max-w-sm space-y-3 text-left text-xs leading-relaxed text-muted-foreground/80">
+              <div>
+                <p className="font-semibold text-foreground">Creation Commands</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>"Create a red circle at position 100, 200"</li>
+                  <li>"Add a text layer that says 'Hello World'"</li>
+                  <li>"Make a 200x300 rectangle"</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Manipulation Commands</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>"Move the blue rectangle to the center"</li>
+                  <li>"Resize the circle to be twice as big"</li>
+                  <li>"Rotate the text 45 degrees"</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Layout Commands</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>"Arrange these shapes in a horizontal row"</li>
+                  <li>"Create a grid of 3x3 squares"</li>
+                  <li>"Space these elements evenly"</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Complex Commands</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>"Create a login form with username and password fields"</li>
+                  <li>"Build a navigation bar with 4 menu items"</li>
+                  <li>"Make a card layout with title, image, and description"</li>
+                </ul>
+              </div>
+            </div>
           </div>
         )}
         {messages.map((message, index) => (

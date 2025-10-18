@@ -12,6 +12,8 @@ import {
   Clipboard,
   Lasso,
   MousePointerClick,
+  Group,
+  Ungroup,
 } from "lucide-react"
 import { AlignmentToolbar } from "./alignment-toolbar"
 import { GridControls } from "./grid-controls"
@@ -46,6 +48,8 @@ interface ToolbarProps {
   lassoMode?: boolean
   onToggleLassoMode?: () => void
   onSelectAllOfType?: () => void
+  onGroup?: () => void
+  onUngroup?: () => void
 }
 
 export function Toolbar({
@@ -76,6 +80,8 @@ export function Toolbar({
   lassoMode = false,
   onToggleLassoMode,
   onSelectAllOfType,
+  onGroup,
+  onUngroup,
 }: ToolbarProps) {
   return (
     <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b border-border/50 bg-background/95 backdrop-blur-md shadow-sm transition-all duration-200 px-4">
@@ -116,6 +122,27 @@ export function Toolbar({
             </Button>
           )}
         </div>
+
+        {(onGroup || onUngroup) && (
+          <div className="flex items-center gap-1 border-l pl-4">
+            {onGroup && (
+              <Button variant="ghost" size="icon" onClick={onGroup} disabled={selectedCount < 2} title="Group (Ctrl+G)">
+                <Group className="h-4 w-4" />
+              </Button>
+            )}
+            {onUngroup && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onUngroup}
+                disabled={selectedCount === 0}
+                title="Ungroup (Ctrl+Shift+G)"
+              >
+                <Ungroup className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        )}
 
         {(onToggleLassoMode || onSelectAllOfType) && (
           <div className="flex items-center gap-1 border-l pl-4">

@@ -5,32 +5,8 @@ import { z } from "zod"
 
 export const maxDuration = 30
 
-const MAX_HISTORY_MESSAGES = 12
-
-const conversationMessageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
-  content: z.string().min(1).max(4000),
-})
-
-const conversationHistorySchema = z.array(conversationMessageSchema)
-
-type ConversationMessage = z.infer<typeof conversationMessageSchema>
-
-async function updateQueueStatus(queueItemId: string | null, updates: Record<string, unknown>) {
-  if (!queueItemId) return
-
-  try {
-    const supabase = createServiceRoleClient()
-    await supabase.from("ai_operations_queue").update(updates).eq("id", queueItemId)
-  } catch (err) {
-    console.warn("[v0] Failed to update queue status:", err)
-  }
-}
-
 export async function POST(request: Request) {
   console.log("[v0] ===== AI Canvas API Route Called =====")
-
-  let queueItemId: string | null = null
 
   try {
     const body = await request.json()
@@ -43,7 +19,7 @@ export async function POST(request: Request) {
       userId,
       userName,
       viewport,
-      conversationHistory: conversationHistoryPayload,
+      usableCanvasDimensions,
     } = body
 
     console.log("[v0] Message:", message)
@@ -55,6 +31,7 @@ export async function POST(request: Request) {
     console.log("[v0] Selected objects count:", safeSelectedIds.length)
     console.log("[v0] Canvas ID:", canvasId)
     console.log("[v0] User:", userName)
+    console.log("[v0] Usable canvas dimensions:", usableCanvasDimensions)
 
     if (!message) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 })
@@ -67,36 +44,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const conversationHistoryResult = conversationHistorySchema.safeParse(
-      Array.isArray(conversationHistoryPayload) ? conversationHistoryPayload : [],
-    )
-
-    if (!conversationHistoryResult.success && conversationHistoryPayload) {
-      console.warn("[v0] Invalid conversation history provided, ignoring.")
-    }
-
-    const safeConversationHistory = conversationHistoryResult.success
-      ? conversationHistoryResult.data.slice(-MAX_HISTORY_MESSAGES)
-      : []
-
-    const historyEnsuredLatestUser = (() => {
-      if (safeConversationHistory.length === 0) {
-        return [{ role: "user", content: message } satisfies ConversationMessage]
-      }
-
-      const lastEntry = safeConversationHistory[safeConversationHistory.length - 1]
-      if (lastEntry.role !== "user" || lastEntry.content !== message) {
-        return [...safeConversationHistory, { role: "user", content: message } satisfies ConversationMessage]
-      }
-
-      return safeConversationHistory
-    })()
-
-    const conversationMessages = historyEnsuredLatestUser.map((entry) => ({
-      role: entry.role,
-      content: entry.content,
-    }))
-
+    let queueItemId: string | null = null
     if (canvasId && userId && userName) {
       try {
         const supabase = createServiceRoleClient()
@@ -205,23 +153,73 @@ export async function POST(request: Request) {
           top: Math.max(0, Math.round(-viewport.y / viewport.zoom)),
           right: Math.min(2000, Math.round((-viewport.x + canvasWidth) / viewport.zoom)),
           bottom: Math.min(2000, Math.round((-viewport.y + canvasHeight) / viewport.zoom)),
+          width: Math.round(canvasWidth / viewport.zoom),
+          height: Math.round(canvasHeight / viewport.zoom),
           centerX: Math.round((-viewport.x + canvasWidth / 2) / viewport.zoom),
-          centerY: Math.round((-viewport.y + 150) / viewport.zoom),
+          centerY: Math.round((-viewport.y + canvasHeight / 2) / viewport.zoom),
         }
       : {
           left: 0,
           top: 0,
           right: 1920,
           bottom: 1080,
+          width: 1920,
+          height: 1080,
           centerX: 960,
-          centerY: 150,
+          centerY: 540,
         }
 
+    const usableArea =
+      usableCanvasDimensions && viewport
+        ? {
+            // Convert panel offsets from screen pixels to canvas coordinates
+            leftOffset: Math.round(usableCanvasDimensions.leftOffset / viewport.zoom),
+            rightOffset: Math.round(usableCanvasDimensions.rightOffset / viewport.zoom),
+            topOffset: Math.round(usableCanvasDimensions.topOffset / viewport.zoom),
+            bottomOffset: Math.round(usableCanvasDimensions.bottomOffset / viewport.zoom),
+            // Calculate usable bounds
+            left: visibleArea.left + Math.round(usableCanvasDimensions.leftOffset / viewport.zoom),
+            top: visibleArea.top + Math.round(usableCanvasDimensions.topOffset / viewport.zoom),
+            right: visibleArea.right - Math.round(usableCanvasDimensions.rightOffset / viewport.zoom),
+            bottom: visibleArea.bottom - Math.round(usableCanvasDimensions.bottomOffset / viewport.zoom),
+            // Calculate usable dimensions
+            width: Math.round(
+              (canvasWidth - usableCanvasDimensions.leftOffset - usableCanvasDimensions.rightOffset) / viewport.zoom,
+            ),
+            height: Math.round(
+              (canvasHeight - usableCanvasDimensions.topOffset - usableCanvasDimensions.bottomOffset) / viewport.zoom,
+            ),
+            // Calculate center of usable area
+            centerX: Math.round(
+              (-viewport.x +
+                (canvasWidth - usableCanvasDimensions.rightOffset + usableCanvasDimensions.leftOffset) / 2) /
+                viewport.zoom,
+            ),
+            centerY: Math.round(
+              (-viewport.y +
+                (canvasHeight - usableCanvasDimensions.bottomOffset + usableCanvasDimensions.topOffset) / 2) /
+                viewport.zoom,
+            ),
+          }
+        : {
+            leftOffset: 0,
+            rightOffset: 0,
+            topOffset: 0,
+            bottomOffset: 0,
+            left: visibleArea.left,
+            top: visibleArea.top,
+            right: visibleArea.right,
+            bottom: visibleArea.bottom,
+            width: visibleArea.width,
+            height: visibleArea.height,
+            centerX: visibleArea.centerX,
+            centerY: visibleArea.centerY,
+          }
+
+    console.log("[v0] Visible area:", visibleArea)
+    console.log("[v0] Usable area:", usableArea)
+
     const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-    const clampCenter = (value: number | undefined, size: number, fallback: number) =>
-      clamp(value ?? fallback, size / 2, 2000 - size / 2)
-    const clampTopLeft = (value: number | undefined, size: number, fallback: number) =>
-      clamp(value ?? fallback, 0, 2000 - size)
 
     const NAMED_COLORS: Record<string, string> = {
       black: "#000000",
@@ -257,69 +255,11 @@ export async function POST(request: Request) {
     const operations: any[] = []
     const validationErrors: string[] = []
     const shapeIndexSchema = z.union([z.number(), z.literal("selected")])
-    const multiShapeTargetSchema = z
-      .union([z.array(z.number()), z.literal("selected"), z.literal("all")])
-      .optional()
-
-    const resolveTargetIndices = (
-      target: number[] | "selected" | "all" | undefined,
-      {
-        requireMultiple = false,
-        defaultToAllIfNone = false,
-        min = 1,
-      }: { requireMultiple?: boolean; defaultToAllIfNone?: boolean; min?: number } = {},
-    ): { indices?: number[]; error?: string } => {
-      if (safeCurrentObjects.length === 0) {
-        return { error: "There are no shapes on the canvas." }
-      }
-
-      let indices: number[] = []
-
-      if (target === "all") {
-        indices = safeCurrentObjects.map((_, idx) => idx)
-      } else if (Array.isArray(target) && target.length > 0) {
-        indices = target.map((value) => (value === -1 ? safeCurrentObjects.length - 1 : value))
-      } else if (target === "selected" || (!target && !defaultToAllIfNone)) {
-        indices = [...selectedIndices]
-      }
-
-      if (indices.length === 0 && defaultToAllIfNone) {
-        indices = safeCurrentObjects.map((_, idx) => idx)
-      }
-
-      const unique = Array.from(new Set(indices))
-      const invalidIndex = unique.find((idx) => idx < 0 || idx >= safeCurrentObjects.length)
-
-      if (invalidIndex !== undefined) {
-        return {
-          error: `Invalid shape index ${invalidIndex}. Canvas has ${safeCurrentObjects.length} shapes (indices 0-${Math.max(
-            safeCurrentObjects.length - 1,
-            0,
-          )}).`,
-        }
-      }
-
-      if (unique.length < min) {
-        return {
-          error:
-            unique.length === 0
-              ? "No shapes specified or selected for this operation."
-              : `This operation requires at least ${min} shape${min > 1 ? "s" : ""}.`,
-        }
-      }
-
-      if (requireMultiple && unique.length < 2) {
-        return { error: "Select at least two shapes or specify their indices for this operation." }
-      }
-
-      return { indices: unique }
-    }
 
     const tools = {
-      // ===== QUERY & INFORMATION =====
       getCanvasState: tool({
         description:
-          "Query information about the current canvas state. Use this to answer questions about shapes, count objects, or get information before making changes.",
+          "Query information about the current canvas state. Use this to answer questions about shapes, count objects, or get information before making making changes.",
         inputSchema: z.object({
           query: z.string().describe("What information to retrieve (e.g., 'count', 'list all', 'find blue shapes')"),
         }),
@@ -333,432 +273,12 @@ export async function POST(request: Request) {
           }
         },
       }),
-
-      // ===== SELECTION OPERATIONS =====
-      selectObjects: tool({
-        description: "Select one or more objects by their indices or IDs. Replaces current selection.",
-        inputSchema: z.object({
-          indices: z.array(z.number()).optional().describe("Array of object indices to select"),
-          ids: z.array(z.string()).optional().describe("Array of object IDs to select"),
-          addToSelection: z.boolean().optional().describe("If true, add to current selection instead of replacing"),
-        }),
-        execute: async ({ indices, ids, addToSelection }) => {
-          const targetIds = ids || indices?.map((i) => canvasContext[i]?.id).filter(Boolean) || []
-          operations.push({
-            type: "select",
-            objectIds: targetIds,
-            addToSelection: addToSelection || false,
-          })
-          return { success: true, selectedCount: targetIds.length }
-        },
-      }),
-
-      selectAll: tool({
-        description: "Select all objects on the canvas",
-        inputSchema: z.object({}),
-        execute: async () => {
-          operations.push({
-            type: "selectAll",
-          })
-          return { success: true, selectedCount: canvasContext.length }
-        },
-      }),
-
-      selectAllOfType: tool({
-        description: "Select all objects of the same type as currently selected objects",
-        inputSchema: z.object({
-          type: z
-            .enum(["rectangle", "circle", "triangle", "line", "text"])
-            .optional()
-            .describe("Specific type to select, or use currently selected types"),
-        }),
-        execute: async ({ type }) => {
-          const targetType = type || (selectedContext.length > 0 ? selectedContext[0].type : undefined)
-          if (!targetType) {
-            return { error: "No type specified and no objects selected" }
-          }
-          operations.push({
-            type: "selectAllOfType",
-            objectType: targetType,
-          })
-          const matchingCount = canvasContext.filter((obj) => obj.type === targetType).length
-          return { success: true, selectedCount: matchingCount, objectType: targetType }
-        },
-      }),
-
-      clearSelection: tool({
-        description: "Deselect all objects",
-        inputSchema: z.object({}),
-        execute: async () => {
-          operations.push({
-            type: "clearSelection",
-          })
-          return { success: true }
-        },
-      }),
-
-      // ===== CLIPBOARD OPERATIONS =====
-      copyObjects: tool({
-        description: "Copy selected objects to clipboard",
-        inputSchema: z.object({
-          indices: z.array(z.number()).optional().describe("Specific indices to copy, or use current selection"),
-        }),
-        execute: async ({ indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to copy" }
-          }
-          operations.push({
-            type: "copy",
-            objectIndices: targetIndices,
-          })
-          return { success: true, copiedCount: targetIndices.length }
-        },
-      }),
-
-      pasteObjects: tool({
-        description: "Paste objects from clipboard at specified position or with offset",
-        inputSchema: z.object({
-          x: z.number().optional().describe("X position to paste at"),
-          y: z.number().optional().describe("Y position to paste at"),
-          offsetX: z.number().optional().describe("X offset from original position (default: 20)"),
-          offsetY: z.number().optional().describe("Y offset from original position (default: 20)"),
-        }),
-        execute: async ({ x, y, offsetX, offsetY }) => {
-          operations.push({
-            type: "paste",
-            x,
-            y,
-            offsetX: offsetX ?? 20,
-            offsetY: offsetY ?? 20,
-          })
-          return { success: true }
-        },
-      }),
-
-      duplicateObjects: tool({
-        description: "Duplicate selected objects with an offset",
-        inputSchema: z.object({
-          offsetX: z.number().optional().describe("X offset for duplicates (default: 20)"),
-          offsetY: z.number().optional().describe("Y offset for duplicates (default: 20)"),
-        }),
-        execute: async ({ offsetX, offsetY }) => {
-          if (selectedIndices.length === 0) {
-            return { error: "No objects selected to duplicate" }
-          }
-          operations.push({
-            type: "duplicate",
-            objectIndices: selectedIndices,
-            offsetX: offsetX ?? 20,
-            offsetY: offsetY ?? 20,
-          })
-          return { success: true, duplicatedCount: selectedIndices.length }
-        },
-      }),
-
-      // ===== STYLING OPERATIONS =====
-      setFillColor: tool({
-        description: "Change the fill color of selected objects",
-        inputSchema: z.object({
-          color: z.string().describe("Hex color code (e.g., #ff0000) or color name (red, blue, green)"),
-          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
-        }),
-        execute: async ({ color, indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to style" }
-          }
-          const finalColor = normalizeColorInput(color, "#3b82f6")
-          operations.push({
-            type: "setStyle",
-            objectIndices: targetIndices,
-            fillColor: finalColor,
-          })
-          return { success: true, styledCount: targetIndices.length, color: finalColor }
-        },
-      }),
-
-      setStrokeColor: tool({
-        description: "Change the stroke/border color of selected objects",
-        inputSchema: z.object({
-          color: z.string().describe("Hex color code (e.g., #ff0000) or color name"),
-          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
-        }),
-        execute: async ({ color, indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to style" }
-          }
-          const finalColor = normalizeColorInput(color, "#1e40af")
-          operations.push({
-            type: "setStyle",
-            objectIndices: targetIndices,
-            strokeColor: finalColor,
-          })
-          return { success: true, styledCount: targetIndices.length, color: finalColor }
-        },
-      }),
-
-      setStrokeWidth: tool({
-        description: "Change the stroke/border width of selected objects",
-        inputSchema: z.object({
-          width: z.number().min(0).max(20).describe("Stroke width in pixels (0-20)"),
-          indices: z.array(z.number()).optional().describe("Specific indices to style, or use current selection"),
-        }),
-        execute: async ({ width, indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to style" }
-          }
-          operations.push({
-            type: "setStyle",
-            objectIndices: targetIndices,
-            strokeWidth: width,
-          })
-          return { success: true, styledCount: targetIndices.length, strokeWidth: width }
-        },
-      }),
-
-      // ===== ALIGNMENT & DISTRIBUTION =====
-      alignObjects: tool({
-        description: "Align multiple selected objects (requires 2+ objects)",
-        inputSchema: z.object({
-          alignment: z.enum(["left", "center", "right", "top", "middle", "bottom"]).describe("Alignment type"),
-          indices: z.array(z.number()).optional().describe("Specific indices to align, or use current selection"),
-        }),
-        execute: async ({ alignment, indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length < 2) {
-            return { error: "Need at least 2 objects to align" }
-          }
-          operations.push({
-            type: "align",
-            objectIndices: targetIndices,
-            alignment,
-          })
-          return { success: true, alignedCount: targetIndices.length, alignment }
-        },
-      }),
-
-      distributeObjects: tool({
-        description: "Distribute multiple selected objects evenly (requires 3+ objects)",
-        inputSchema: z.object({
-          direction: z.enum(["horizontal", "vertical"]).describe("Distribution direction"),
-          indices: z.array(z.number()).optional().describe("Specific indices to distribute, or use current selection"),
-        }),
-        execute: async ({ direction, indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length < 3) {
-            return { error: "Need at least 3 objects to distribute" }
-          }
-          operations.push({
-            type: "distribute",
-            objectIndices: targetIndices,
-            direction,
-          })
-          return { success: true, distributedCount: targetIndices.length, direction }
-        },
-      }),
-
-      // ===== Z-ORDER / LAYERING =====
-      bringToFront: tool({
-        description: "Bring selected objects to the front (highest z-index)",
-        inputSchema: z.object({
-          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
-        }),
-        execute: async ({ indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to reorder" }
-          }
-          operations.push({
-            type: "bringToFront",
-            objectIndices: targetIndices,
-          })
-          return { success: true, count: targetIndices.length }
-        },
-      }),
-
-      sendToBack: tool({
-        description: "Send selected objects to the back (lowest z-index)",
-        inputSchema: z.object({
-          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
-        }),
-        execute: async ({ indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to reorder" }
-          }
-          operations.push({
-            type: "sendToBack",
-            objectIndices: targetIndices,
-          })
-          return { success: true, count: targetIndices.length }
-        },
-      }),
-
-      bringForward: tool({
-        description: "Bring selected objects one layer forward",
-        inputSchema: z.object({
-          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
-        }),
-        execute: async ({ indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to reorder" }
-          }
-          operations.push({
-            type: "bringForward",
-            objectIndices: targetIndices,
-          })
-          return { success: true, count: targetIndices.length }
-        },
-      }),
-
-      sendBackward: tool({
-        description: "Send selected objects one layer backward",
-        inputSchema: z.object({
-          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
-        }),
-        execute: async ({ indices }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to reorder" }
-          }
-          operations.push({
-            type: "sendBackward",
-            objectIndices: targetIndices,
-          })
-          return { success: true, count: targetIndices.length }
-        },
-      }),
-
-      // ===== VISIBILITY & LOCKING =====
-      toggleVisibility: tool({
-        description: "Toggle visibility of objects (show/hide)",
-        inputSchema: z.object({
-          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
-          visible: z.boolean().optional().describe("Set specific visibility state, or toggle current state"),
-        }),
-        execute: async ({ indices, visible }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to modify" }
-          }
-          operations.push({
-            type: "toggleVisibility",
-            objectIndices: targetIndices,
-            visible,
-          })
-          return { success: true, count: targetIndices.length }
-        },
-      }),
-
-      toggleLock: tool({
-        description: "Toggle lock state of objects (prevent/allow editing)",
-        inputSchema: z.object({
-          indices: z.array(z.number()).optional().describe("Specific indices, or use current selection"),
-          locked: z.boolean().optional().describe("Set specific lock state, or toggle current state"),
-        }),
-        execute: async ({ indices, locked }) => {
-          const targetIndices = indices || selectedIndices
-          if (targetIndices.length === 0) {
-            return { error: "No objects to modify" }
-          }
-          operations.push({
-            type: "toggleLock",
-            objectIndices: targetIndices,
-            locked,
-          })
-          return { success: true, count: targetIndices.length }
-        },
-      }),
-
-      // ===== GRID CONTROLS =====
-      toggleGrid: tool({
-        description: "Toggle grid visibility on/off",
-        inputSchema: z.object({
-          enabled: z.boolean().optional().describe("Set specific state, or toggle current state"),
-        }),
-        execute: async ({ enabled }) => {
-          operations.push({
-            type: "toggleGrid",
-            enabled,
-          })
-          return { success: true, enabled }
-        },
-      }),
-
-      toggleSnapToGrid: tool({
-        description: "Toggle snap-to-grid on/off",
-        inputSchema: z.object({
-          enabled: z.boolean().optional().describe("Set specific state, or toggle current state"),
-        }),
-        execute: async ({ enabled }) => {
-          operations.push({
-            type: "toggleSnapToGrid",
-            enabled,
-          })
-          return { success: true, enabled }
-        },
-      }),
-
-      setGridSize: tool({
-        description: "Change the grid size",
-        inputSchema: z.object({
-          size: z.enum(["10", "20", "30", "50", "100"]).describe("Grid size in pixels"),
-        }),
-        execute: async ({ size }) => {
-          operations.push({
-            type: "setGridSize",
-            size: Number.parseInt(size),
-          })
-          return { success: true, gridSize: Number.parseInt(size) }
-        },
-      }),
-
-      // ===== VIEWPORT CONTROLS =====
-      setZoom: tool({
-        description: "Set canvas zoom level",
-        inputSchema: z.object({
-          zoom: z.number().min(1).max(3).describe("Zoom level (1.0 = 100%, 2.0 = 200%, 3.0 = 300%)"),
-        }),
-        execute: async ({ zoom }) => {
-          operations.push({
-            type: "setZoom",
-            zoom,
-          })
-          return { success: true, zoom }
-        },
-      }),
-
-      panViewport: tool({
-        description: "Pan the viewport to a specific position or by offset",
-        inputSchema: z.object({
-          x: z.number().optional().describe("Absolute X position"),
-          y: z.number().optional().describe("Absolute Y position"),
-          deltaX: z.number().optional().describe("Relative X movement"),
-          deltaY: z.number().optional().describe("Relative Y movement"),
-        }),
-        execute: async ({ x, y, deltaX, deltaY }) => {
-          operations.push({
-            type: "panViewport",
-            x,
-            y,
-            deltaX,
-            deltaY,
-          })
-          return { success: true }
-        },
-      }),
-
-      // ===== EXISTING CREATION & MANIPULATION TOOLS =====
       createText: tool({
         description: "Create a text layer on the canvas with customizable content, position, size, and color",
         inputSchema: z.object({
           text: z.string().describe("The text content to display"),
-          x: z.number().describe("X coordinate position on the canvas"),
-          y: z.number().describe("Y coordinate position on the canvas"),
+          x: z.number().optional().describe("X coordinate position on the canvas"),
+          y: z.number().optional().describe("Y coordinate position on the canvas"),
           fontSize: z.number().optional().describe("Font size in pixels (default: 16)"),
           color: z.string().optional().describe("Text color as hex code (e.g., #000000 for black)"),
         }),
@@ -770,26 +290,34 @@ export async function POST(request: Request) {
           }
 
           const finalColor = normalizeColorInput(color, "#000000")
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.centerY
 
           operations.push({
             type: "createText",
             text,
-            x,
-            y,
+            x: finalX,
+            y: finalY,
             fontSize: fontSize || 16,
             color: finalColor,
           })
 
-          return { success: true, text, x, y, fontSize: fontSize || 16, color: finalColor }
+          return {
+            success: true,
+            text,
+            x: finalX,
+            y: finalY,
+            fontSize: fontSize || 16,
+            color: finalColor,
+          }
         },
       }),
-
       createShape: tool({
         description: "Create a new shape on the canvas",
         inputSchema: z.object({
           shape: z.enum(["rectangle", "circle", "triangle", "line"]).describe("The type of shape to create"),
-          x: z.number().describe("X coordinate position on the canvas"),
-          y: z.number().describe("Y coordinate position on the canvas"),
+          x: z.number().optional().describe("X coordinate position on the canvas"),
+          y: z.number().optional().describe("Y coordinate position on the canvas"),
           width: z.number().describe("Width of the shape in pixels"),
           height: z.number().describe("Height of the shape in pixels"),
           color: z.string().describe("Hex color code (e.g., #ff0000 for red, #3b82f6 for blue)"),
@@ -802,14 +330,16 @@ export async function POST(request: Request) {
           }
 
           const finalColor = normalizeColorInput(color, "#3b82f6")
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.centerY
 
           operations.push({
             type: "create",
             object: {
               id: crypto.randomUUID(),
               type: shape,
-              x,
-              y,
+              x: finalX,
+              y: finalY,
               width,
               height,
               rotation: 0,
@@ -819,10 +349,17 @@ export async function POST(request: Request) {
             },
           })
 
-          return { success: true, shape, x, y, width, height, color: finalColor }
+          return {
+            success: true,
+            shape,
+            x: finalX,
+            y: finalY,
+            width,
+            height,
+            color: finalColor,
+          }
         },
       }),
-
       moveShape: tool({
         description: "Move an existing shape to a new position",
         inputSchema: z.object({
@@ -847,17 +384,16 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "move",
-            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
+            shapeIndex: validation.shapeIndex,
             x,
             y,
             deltaX,
             deltaY,
           })
 
-          return { success: true, shapeIndex, x, y, deltaX, deltaY }
+          return { success: true, shapeIndex: validation.shapeIndex, x, y, deltaX, deltaY }
         },
       }),
-
       resizeShape: tool({
         description: "Resize an existing shape",
         inputSchema: z.object({
@@ -881,16 +417,15 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "resize",
-            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
+            shapeIndex: validation.shapeIndex,
             width,
             height,
             scale,
           })
 
-          return { success: true, shapeIndex, width, height, scale }
+          return { success: true, shapeIndex: validation.shapeIndex, width, height, scale }
         },
       }),
-
       rotateShape: tool({
         description: "Rotate an existing shape",
         inputSchema: z.object({
@@ -912,15 +447,14 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "rotate",
-            shapeIndex: shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
+            shapeIndex: validation.shapeIndex,
             degrees: degrees ?? 0,
             absolute: absolute ?? false,
           })
 
-          return { success: true, shapeIndex, degrees, absolute }
+          return { success: true, shapeIndex: validation.shapeIndex, degrees, absolute }
         },
       }),
-
       deleteShape: tool({
         description: "Delete one or more shapes from the canvas",
         inputSchema: z.object({
@@ -938,256 +472,115 @@ export async function POST(request: Request) {
 
           operations.push({
             type: "delete",
-            shapeIndex:
-              shapeIndex === undefined ? undefined : shapeIndex === -1 ? safeCurrentObjects.length - 1 : shapeIndex,
+            shapeIndex: validation.shapeIndex,
             all: all ?? false,
           })
 
-          return { success: true, shapeIndex, all }
+          return { success: true, shapeIndex: validation.shapeIndex, all }
         },
       }),
+      deleteShapesByType: tool({
+        description:
+          "Delete all shapes of a specific type (e.g., all rectangles, all circles). Use this when user asks to delete shapes by type.",
+        inputSchema: z.object({
+          shapeType: z
+            .enum(["rectangle", "circle", "triangle", "line", "text"])
+            .describe("The type of shapes to delete"),
+        }),
+        execute: async ({ shapeType }) => {
+          const matchingIndices = canvasContext
+            .filter((obj: any) => obj.type === shapeType)
+            .map((obj: any) => obj.index)
 
+          if (matchingIndices.length === 0) {
+            return {
+              success: false,
+              error: `No ${shapeType} shapes found on the canvas.`,
+              deletedCount: 0,
+            }
+          }
+
+          matchingIndices.reverse().forEach((index: number) => {
+            operations.push({
+              type: "delete",
+              shapeIndex: index,
+              all: false,
+            })
+          })
+
+          return {
+            success: true,
+            shapeType,
+            deletedCount: matchingIndices.length,
+            message: `Deleted ${matchingIndices.length} ${shapeType}${matchingIndices.length > 1 ? "s" : ""}`,
+          }
+        },
+      }),
+      deleteShapesByColor: tool({
+        description: "Delete all shapes of a specific color. Use this when user asks to delete shapes by color.",
+        inputSchema: z.object({
+          color: z.string().describe("The color to match (hex code like #ff0000 or color name like 'red')"),
+        }),
+        execute: async ({ color }) => {
+          const normalizedColor = normalizeColorInput(color, "")
+
+          const matchingIndices = canvasContext
+            .filter((obj: any) => obj.color === normalizedColor || obj.strokeColor === normalizedColor)
+            .map((obj: any) => obj.index)
+
+          if (matchingIndices.length === 0) {
+            return {
+              success: false,
+              error: `No shapes with color ${color} found on the canvas.`,
+              deletedCount: 0,
+            }
+          }
+
+          matchingIndices.reverse().forEach((index: number) => {
+            operations.push({
+              type: "delete",
+              shapeIndex: index,
+              all: false,
+            })
+          })
+
+          return {
+            success: true,
+            color: normalizedColor,
+            deletedCount: matchingIndices.length,
+            message: `Deleted ${matchingIndices.length} shape${matchingIndices.length > 1 ? "s" : ""} with color ${color}`,
+          }
+        },
+      }),
       arrangeShapes: tool({
         description: "Arrange multiple shapes in a pattern (grid, row, column, circle)",
         inputSchema: z.object({
           pattern: z.enum(["grid", "row", "column", "circle"]).describe("The arrangement pattern"),
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to arrange (defaults to the current selection; use 'all' for every shape)",
-          ),
+          shapeIndices: z
+            .array(z.number())
+            .optional()
+            .describe("Indices of shapes to arrange (empty array means all shapes)"),
           spacing: z.number().optional().describe("Spacing between shapes in pixels"),
           columns: z.number().optional().describe("Number of columns (for grid pattern)"),
         }),
-        execute: async ({ pattern, shapeTarget, spacing, columns }) => {
-          const validation = validateArrangeShapes({ pattern, spacing, columns })
+        execute: async ({ pattern, shapeIndices, spacing, columns }) => {
+          const validation = validateArrangeShapes({ pattern, shapeIndices, spacing, columns }, safeCurrentObjects)
           if (!validation.valid) {
             validationErrors.push(`arrangeShapes: ${validation.error}`)
             return { error: validation.error }
           }
 
-          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1, defaultToAllIfNone: true })
-          if (error || !indices) {
-            validationErrors.push(`arrangeShapes: ${error}`)
-            return { error }
-          }
-
           operations.push({
             type: "arrange",
             pattern,
-            shapeIndices: indices,
+            shapeIndices: shapeIndices || [],
             spacing: spacing || 50,
             columns,
-            centerX: visibleArea.centerX,
-            centerY: visibleArea.centerY,
           })
 
-          return { success: true, pattern, shapeIndices: indices, spacing: spacing || 50, columns }
+          return { success: true, pattern, shapeIndices, spacing, columns }
         },
       }),
-      alignShapes: tool({
-        description:
-          "Align two or more shapes (left, right, top, bottom, center, or middle). Defaults to the current selection.",
-        inputSchema: z.object({
-          alignment: z
-            .enum(["left", "right", "top", "bottom", "center", "middle"])
-            .describe("How to align the shapes"),
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to align (defaults to the current selection; use 'all' for every shape)",
-          ),
-        }),
-        execute: async ({ alignment, shapeTarget }) => {
-          const { indices, error } = resolveTargetIndices(shapeTarget, {
-            requireMultiple: true,
-            defaultToAllIfNone: true,
-          })
-
-          if (error || !indices) {
-            validationErrors.push(`alignShapes: ${error}`)
-            return { error }
-          }
-
-          operations.push({ type: "align", alignment, shapeIndices: indices })
-
-          return { success: true, alignment, shapeIndices: indices }
-        },
-      }),
-      distributeShapes: tool({
-        description:
-          "Distribute spacing between shapes horizontally or vertically. Defaults to the current selection.",
-        inputSchema: z.object({
-          direction: z.enum(["horizontal", "vertical"]).describe("Distribute horizontally or vertically"),
-          spacing: z.number().optional().describe("Exact spacing between shapes in pixels"),
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to distribute (defaults to the current selection; use 'all' for every shape)",
-          ),
-        }),
-        execute: async ({ direction, spacing, shapeTarget }) => {
-          const { indices, error } = resolveTargetIndices(shapeTarget, {
-            requireMultiple: true,
-            defaultToAllIfNone: true,
-          })
-
-          if (error || !indices) {
-            validationErrors.push(`distributeShapes: ${error}`)
-            return { error }
-          }
-
-          operations.push({ type: "distribute", direction, spacing, shapeIndices: indices })
-
-          return { success: true, direction, spacing, shapeIndices: indices }
-        },
-      }),
-      updateStyle: tool({
-        description:
-          "Update fill, stroke, or text styling for one or more shapes. Defaults to the current selection.",
-        inputSchema: z.object({
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to style (defaults to the current selection; use 'all' for every shape)",
-          ),
-          fillColor: z.string().optional().describe("New fill color (hex code or common color name)"),
-          strokeColor: z.string().optional().describe("New stroke color (hex code or common color name)"),
-          strokeWidth: z.number().optional().describe("New stroke width in pixels"),
-          textColor: z.string().optional().describe("New text color for text objects"),
-        }),
-        execute: async ({ shapeTarget, fillColor, strokeColor, strokeWidth, textColor }) => {
-          if (!fillColor && !strokeColor && strokeWidth === undefined && !textColor) {
-            const error = "Provide at least one style property to update."
-            validationErrors.push(`updateStyle: ${error}`)
-            return { error }
-          }
-
-          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
-          if (error || !indices) {
-            validationErrors.push(`updateStyle: ${error}`)
-            return { error }
-          }
-
-          const firstShape = safeCurrentObjects[indices[0]]
-          const resolvedFill = fillColor ? normalizeColorInput(fillColor, firstShape?.fill_color || "#3b82f6") : undefined
-          const resolvedStroke = strokeColor
-            ? normalizeColorInput(strokeColor, firstShape?.stroke_color || "#1f2937")
-            : undefined
-          const resolvedText = textColor ? normalizeColorInput(textColor, "#111827") : undefined
-
-          operations.push({
-            type: "updateStyle",
-            shapeIndices: indices,
-            fillColor: resolvedFill,
-            strokeColor: resolvedStroke,
-            strokeWidth,
-            textColor: resolvedText,
-          })
-
-          return {
-            success: true,
-            shapeIndices: indices,
-            fillColor: resolvedFill,
-            strokeColor: resolvedStroke,
-            strokeWidth,
-            textColor: resolvedText,
-          }
-        },
-      }),
-      duplicateShapes: tool({
-        description:
-          "Duplicate one or more shapes (defaults to the current selection) and offset them for easy visibility.",
-        inputSchema: z.object({
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to duplicate (defaults to the current selection; use 'all' for every shape)",
-          ),
-          offsetX: z.number().optional().describe("Horizontal offset for duplicates (default 20px)"),
-          offsetY: z.number().optional().describe("Vertical offset for duplicates (default 20px)"),
-        }),
-        execute: async ({ shapeTarget, offsetX, offsetY }) => {
-          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
-          if (error || !indices) {
-            validationErrors.push(`duplicateShapes: ${error}`)
-            return { error }
-          }
-
-          operations.push({
-            type: "duplicate",
-            shapeIndices: indices,
-            offsetX: offsetX ?? 20,
-            offsetY: offsetY ?? 20,
-          })
-
-          return { success: true, shapeIndices: indices, offsetX: offsetX ?? 20, offsetY: offsetY ?? 20 }
-        },
-      }),
-      bringShapesToFront: tool({
-        description: "Move shapes to the front of the canvas stacking order.",
-        inputSchema: z.object({
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to bring forward (defaults to the current selection)",
-          ),
-        }),
-        execute: async ({ shapeTarget }) => {
-          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
-          if (error || !indices) {
-            validationErrors.push(`bringShapesToFront: ${error}`)
-            return { error }
-          }
-
-          operations.push({ type: "bringToFront", shapeIndices: indices })
-          return { success: true, shapeIndices: indices }
-        },
-      }),
-      sendShapesToBack: tool({
-        description: "Move shapes to the back of the canvas stacking order.",
-        inputSchema: z.object({
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to send backward (defaults to the current selection)",
-          ),
-        }),
-        execute: async ({ shapeTarget }) => {
-          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
-          if (error || !indices) {
-            validationErrors.push(`sendShapesToBack: ${error}`)
-            return { error }
-          }
-
-          operations.push({ type: "sendToBack", shapeIndices: indices })
-          return { success: true, shapeIndices: indices }
-        },
-      }),
-      bringShapesForward: tool({
-        description: "Move shapes one layer forward in the stacking order.",
-        inputSchema: z.object({
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to move forward (defaults to the current selection)",
-          ),
-        }),
-        execute: async ({ shapeTarget }) => {
-          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
-          if (error || !indices) {
-            validationErrors.push(`bringShapesForward: ${error}`)
-            return { error }
-          }
-
-          operations.push({ type: "bringForward", shapeIndices: indices })
-          return { success: true, shapeIndices: indices }
-        },
-      }),
-      sendShapesBackward: tool({
-        description: "Move shapes one layer backward in the stacking order.",
-        inputSchema: z.object({
-          shapeTarget: multiShapeTargetSchema.describe(
-            "Which shapes to move backward (defaults to the current selection)",
-          ),
-        }),
-        execute: async ({ shapeTarget }) => {
-          const { indices, error } = resolveTargetIndices(shapeTarget, { min: 1 })
-          if (error || !indices) {
-            validationErrors.push(`sendShapesBackward: ${error}`)
-            return { error }
-          }
-
-          operations.push({ type: "sendBackward", shapeIndices: indices })
-          return { success: true, shapeIndices: indices }
-        },
-      }),
-
-      // ===== COMPLEX LAYOUT TOOLS =====
       createLoginForm: tool({
         description:
           "Create a polished login form with title, username/password fields, and a primary action button arranged vertically.",
@@ -1201,14 +594,16 @@ export async function POST(request: Request) {
         execute: async ({ x, y, title, subtitle, primaryColor }) => {
           const formWidth = 360
           const formHeight = 320
-          const centerX = clampCenter(x, formWidth, visibleArea.centerX)
-          const centerY = clampCenter(y, formHeight, visibleArea.centerY)
+
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.centerY
+
           const buttonColor = normalizeColorInput(primaryColor, "#3b82f6")
 
           operations.push({
             type: "createLoginForm",
-            x: centerX,
-            y: centerY,
+            x: finalX,
+            y: finalY,
             width: formWidth,
             height: formHeight,
             titleText: title || "Welcome back",
@@ -1225,7 +620,7 @@ export async function POST(request: Request) {
             helpText: "Forgot password?",
           })
 
-          return { success: true, x: centerX, y: centerY, width: formWidth, height: formHeight }
+          return { success: true, x: finalX, y: finalY, width: formWidth, height: formHeight }
         },
       }),
 
@@ -1243,9 +638,12 @@ export async function POST(request: Request) {
           const navItems = clamp(items ?? 4, 2, 8)
           const navWidth = Math.max(420, Math.min(960, navItems * 140))
           const navHeight = 64
-          const centerX = clampCenter(x, navWidth, visibleArea.centerX)
-          const topY = clampTopLeft(y, navHeight, visibleArea.top)
-          const leftX = clamp(centerX - navWidth / 2, 0, 2000 - navWidth)
+
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.top + navHeight / 2 + 20
+
+          const leftX = finalX - navWidth / 2
+          const topY = finalY - navHeight / 2
           const highlightColor = normalizeColorInput(accentColor, "#3b82f6")
 
           operations.push({
@@ -1266,7 +664,6 @@ export async function POST(request: Request) {
           return { success: true, x: leftX, y: topY, width: navWidth, height: navHeight, items: navItems }
         },
       }),
-
       createCardLayout: tool({
         description:
           "Create a content card with an image placeholder, title, description text, and call-to-action button.",
@@ -1281,14 +678,16 @@ export async function POST(request: Request) {
         execute: async ({ x, y, title, description, buttonText, accentColor }) => {
           const cardWidth = 320
           const cardHeight = 220
-          const centerX = clampCenter(x, cardWidth, visibleArea.centerX)
-          const centerY = clampCenter(y, cardHeight, visibleArea.centerY)
+
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.centerY
+
           const accent = normalizeColorInput(accentColor, "#3b82f6")
 
           operations.push({
             type: "createCard",
-            x: centerX,
-            y: centerY,
+            x: finalX,
+            y: finalY,
             width: cardWidth,
             height: cardHeight,
             titleText: title || "Card title",
@@ -1301,29 +700,61 @@ export async function POST(request: Request) {
             buttonTextColor: "#ffffff",
           })
 
-          return { success: true, x: centerX, y: centerY, width: cardWidth, height: cardHeight }
+          return { success: true, x: finalX, y: finalY, width: cardWidth, height: cardHeight }
         },
       }),
     }
 
-    const systemPrompt = `You are an advanced canvas assistant with FULL USER CAPABILITIES. You can perform ANY action a human user can perform on the collaborative canvas.
+    const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
 
 CANVAS DIMENSIONS: 2000x2000 pixels
 CANVAS CENTER: (1000, 1000)
 VIEWPORT: Users can pan and zoom (100% to 300%)
 
 ${
-  viewport
+  viewport && usableCanvasDimensions
     ? `
 CURRENT VIEWPORT (User's visible area):
 - Zoom: ${Math.round(viewport.zoom * 100)}%
-- Visible area: (${visibleArea.left}, ${visibleArea.top}) to (${visibleArea.right}, ${visibleArea.bottom})
-- Recommended position for new objects: (${visibleArea.centerX}, ${visibleArea.centerY})
+- Full visible bounds: Left=${visibleArea.left}, Top=${visibleArea.top}, Right=${visibleArea.right}, Bottom=${visibleArea.bottom}
+- Full visible size: ${visibleArea.width}x${visibleArea.height} pixels
 
-⭐ CRITICAL: Always create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) to ensure they appear in the user's accessible viewport area.
+⭐ USABLE CANVAS AREA (excluding UI panels):
+- **Usable bounds: Left=${usableArea.left}, Top=${usableArea.top}, Right=${usableArea.right}, Bottom=${usableArea.bottom}**
+- **Usable size: ${usableArea.width}x${usableArea.height} pixels**
+- **Center of usable area: (${usableArea.centerX}, ${usableArea.centerY})** ← USE THIS FOR NEW OBJECTS
+- UI panel offsets: Left=${usableArea.leftOffset}px, Right=${usableArea.rightOffset}px, Top=${usableArea.topOffset}px, Bottom=${usableArea.bottomOffset}px
+
+⭐ CRITICAL POSITIONING RULES: 
+1. **ALWAYS create new objects at (${usableArea.centerX}, ${usableArea.centerY})** - the center of the usable area
+2. The user has panels open that cover parts of the canvas:
+   - Left side (toolbar): ~${usableArea.leftOffset}px
+   - Right side (panels): ~${usableArea.rightOffset}px
+   - Top (toolbar): ~${usableArea.topOffset}px
+   - Bottom (comments): ~${usableArea.bottomOffset}px
+3. **NEVER create objects in areas covered by panels** - they won't be visible to the user
+4. When user requests relative positioning (e.g., "5cm down", "below X"), calculate from existing objects but ensure result is within usable area
+5. For navigation bars, position near top of usable area: y ≈ ${usableArea.top + 50}
+6. For forms/cards, use center of usable area: (${usableArea.centerX}, ${usableArea.centerY})
+7. The usable area is where the user can actually see and interact with objects
 `
-    : `
-⭐ CRITICAL: Create new objects in the top-right accessible area (default: x=960, y=150) since users have zoom constraints.
+    : viewport
+      ? `
+CURRENT VIEWPORT (User's visible area):
+- Zoom: ${Math.round(viewport.zoom * 100)}%
+- Visible bounds: Left=${visibleArea.left}, Top=${visibleArea.top}, Right=${visibleArea.right}, Bottom=${visibleArea.bottom}
+- Visible size: ${visibleArea.width}x${visibleArea.height} pixels
+- **Center of visible area: (${visibleArea.centerX}, ${visibleArea.centerY})**
+
+⭐ POSITIONING GUIDELINES: 
+1. Default position for new objects: (${visibleArea.centerX}, ${visibleArea.centerY}) - center of user's view
+2. When user requests relative positioning (e.g., "5cm down", "below X"), calculate from existing objects
+3. Ensure objects are positioned within or near the visible viewport for best user experience
+4. For navigation bars, position near top of viewport: y ≈ ${visibleArea.top + 50}
+5. For forms/cards, use center of viewport: (${visibleArea.centerX}, ${visibleArea.centerY})
+`
+      : `
+⭐ DEFAULT POSITIONING: Create new objects at (960, 540) - center of default view.
 `
 }
 
@@ -1347,63 +778,20 @@ IMPORTANT: When the user says "the selected shape", "it", "this", "the selection
 OBJECTS ON CANVAS (${safeCurrentObjects.length} total):
 ${JSON.stringify(canvasContext, null, 2)}
 
-COMPREHENSIVE TOOL CATEGORIES:
-
-**QUERY & INFORMATION:**
-- getCanvasState - Query canvas information
-
-**SELECTION:**
-- selectObjects - Select specific objects by index or ID
-- selectAll - Select all objects
-- selectAllOfType - Select all objects of same type
-- clearSelection - Deselect all
-
-**CLIPBOARD:**
-- copyObjects - Copy to clipboard
-- pasteObjects - Paste from clipboard
-- duplicateObjects - Duplicate with offset
-
-**CREATION:**
-- createShape - Create rectangles, circles, triangles, lines
-- createText - Create text layers
-- createLoginForm - Multi-element login form
-- createNavigationBar - Navigation bar with menu items
-- createCardLayout - Content card with media and button
-
-**MANIPULATION:**
-- moveShape - Move objects
-- resizeShape - Resize objects
-- rotateShape - Rotate objects
-- deleteShape - Delete objects
-- arrangeShapes - Arrange in patterns (grid, row, column, circle)
-
-**STYLING:**
-- setFillColor - Change fill color
-- setStrokeColor - Change stroke/border color
-- setStrokeWidth - Change stroke width
-
-**ALIGNMENT & DISTRIBUTION:**
-- alignObjects - Align left/center/right/top/middle/bottom (2+ objects)
-- distributeObjects - Distribute horizontally/vertically (3+ objects)
-
-**Z-ORDER / LAYERING:**
-- bringToFront - Move to highest layer
-- sendToBack - Move to lowest layer
-- bringForward - Move up one layer
-- sendBackward - Move down one layer
-
-**VISIBILITY & LOCKING:**
-- toggleVisibility - Show/hide objects
-- toggleLock - Lock/unlock objects
-
-**GRID CONTROLS:**
-- toggleGrid - Show/hide grid
-- toggleSnapToGrid - Enable/disable snap
-- setGridSize - Change grid size (10/20/30/50/100px)
-
-**VIEWPORT:**
-- setZoom - Set zoom level (1.0-3.0)
-- panViewport - Pan to position or by offset
+AVAILABLE FUNCTIONS:
+1. getCanvasState - Query canvas information (use for questions like "how many shapes?")
+2. createShape - Create new shapes (rectangle, circle, triangle, line)
+3. moveShape - Move existing shapes by index
+4. resizeShape - Resize existing shapes
+5. rotateShape - Rotate existing shapes
+6. deleteShape - Delete specific shapes or clear all
+7. deleteShapesByType - Delete all shapes of a specific type (e.g., all rectangles)
+8. deleteShapesByColor - Delete all shapes of a specific color
+9. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
+10. createText - Create a text layer on the canvas
+11. createLoginForm - Build a multi-element login form layout with labels and button
+12. createNavigationBar - Create a navigation bar with menu items
+13. createCardLayout - Create a card with media area, text, and button
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -1413,6 +801,12 @@ SHAPE IDENTIFICATION RULES:
 - When user says "the last shape" or "the latest", use index -1
 - If multiple shapes match, operate on the first match or ask for clarification
 
+TEXT LAYER RULES:
+- Use createText to add text layers
+- Provide text content, position (x, y), font size, and color
+- Font size defaults to 16 pixels if not specified
+- Text color defaults to black (#000000) if not specified
+
 COLOR REFERENCE (use hex codes):
 - red: #ef4444, blue: #3b82f6, green: #22c55e, yellow: #eab308
 - purple: #a855f7, pink: #ec4899, orange: #f97316, cyan: #06b6d4
@@ -1421,101 +815,72 @@ COLOR REFERENCE (use hex codes):
 
 POSITION REFERENCE:
 ${
-  viewport
+  usableCanvasDimensions && viewport
     ? `
-- **REQUIRED position for new objects**: (${visibleArea.centerX}, ${visibleArea.centerY}) - This is in the user's visible area
+- **DEFAULT position**: (${usableArea.centerX}, ${usableArea.centerY}) - Center of USABLE area (visible to user)
+- Usable top-left: (${usableArea.left}, ${usableArea.top})
+- Usable top-right: (${usableArea.right}, ${usableArea.top})
+- Usable bottom-left: (${usableArea.left}, ${usableArea.bottom})
+- Usable bottom-right: (${usableArea.right}, ${usableArea.bottom})
+- **AVOID areas covered by panels** (outside usable bounds)
+`
+    : viewport
+      ? `
+- **DEFAULT position**: (${visibleArea.centerX}, ${visibleArea.centerY}) - Center of user's visible area
 - Visible top-left: (${visibleArea.left}, ${visibleArea.top})
 - Visible top-right: (${visibleArea.right}, ${visibleArea.top})
 - Visible bottom-left: (${visibleArea.left}, ${visibleArea.bottom})
 - Visible bottom-right: (${visibleArea.right}, ${visibleArea.bottom})
 `
-    : `
-- **REQUIRED position for new objects**: (960, 150) - Top-right accessible area
+      : `
+- **DEFAULT position**: (960, 540) - Center of default view
 - Accessible area: (0, 0) to (1920, 1080)
 `
 }
 
+RELATIVE POSITIONING:
+- When user says "5cm down" or "below X", calculate relative to existing objects or viewport center
+- 1cm ≈ 37.8 pixels (standard screen DPI)
+- "above" = negative Y, "below" = positive Y
+- "left of" = negative X, "right of" = positive X
+- Calculate positions to keep objects visible and well-positioned in the usable area
+- **Ensure calculated positions stay within usable bounds to remain visible**
+
+DEFAULT VALUES:
+- Shape size: 100x100 pixels
+- Spacing: 50 pixels
+- Grid columns: 3
+- Font size: 16 pixels
+- **DEFAULT position: (${usableArea.centerX}, ${usableArea.centerY}) - Center of usable area**
+
 BEST PRACTICES:
-1. **Be conversational and natural** - Explain what you're doing in friendly language
-2. **Chain operations intelligently** - For complex requests, use multiple tools in sequence
-3. **Verify before acting** - Use getCanvasState to check canvas state before making changes
-4. **Handle ambiguity gracefully** - Make reasonable assumptions and explain them
-5. **Respect selection context** - Always check if objects are selected before assuming which to operate on
-6. **Position awareness** - ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY})
-7. **Multi-step operations** - Break complex requests into logical steps
-8. **Memory and context** - Remember previous conversation context and user preferences
+1. For questions about the canvas, use getCanvasState first
+2. For complex operations, call multiple functions in sequence
+3. When moving/resizing shapes, verify the shape exists first
+4. Be conversational and explain what you're doing
+5. If a request is ambiguous, make a reasonable assumption and explain it
+6. **ALWAYS check if there's a selected shape before assuming which shape to operate on**
+7. **Position objects in the usable area (${usableArea.centerX}, ${usableArea.centerY}) so they're visible to the user**
+8. **When user requests relative positioning, calculate from existing objects but ensure result is within usable bounds**
+9. **When deleting by type or color, use deleteShapesByType or deleteShapesByColor**
+10. **The usable area excludes UI panels - objects created there will be visible and accessible**
 
-EXAMPLE INTERACTIONS:
-- "Create a blue square" → createShape(rectangle, x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, 100x100, blue)
-- "Select all circles" → selectAllOfType(type: "circle")
-- "Make them red" (with selection) → setFillColor(color: "#ef4444")
-- "Align them to the left" (2+ selected) → alignObjects(alignment: "left")
-- "Bring it to front" (with selection) → bringToFront()
-- "Copy and paste it over there" → copyObjects() then pasteObjects(x: newX, y: newY)
-- "Hide the selected shapes" → toggleVisibility(visible: false)
-- "Turn on the grid" → toggleGrid(enabled: true)
-- "Zoom in" → setZoom(zoom: 2.0)
+Examples:
+- "Create a blue square" → createShape(rectangle, x: ${usableArea.centerX}, y: ${usableArea.centerY}, 100x100, blue)
+- "Add text 5cm below the header" → Find header Y position, add ~189 pixels (5cm), createText at that position (ensure within usable area)
+- "Move the circle left" → moveShape(find circle index, deltaX: -100)
+- "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
 - "How many shapes?" → getCanvasState(query: "count")
+- "Delete all rectangles" → deleteShapesByType(shapeType: "rectangle")
+- "Create a login form" → createLoginForm at usable area center (${usableArea.centerX}, ${usableArea.centerY})`
 
-You have COMPLETE parity with human users. You can do EVERYTHING they can do. Be helpful, intelligent, and seamless in your interactions.`
-
-    let result
-    try {
-      result = await generateText({
-        model: "openai/gpt-4o-mini",
-        system: systemPrompt,
-        messages: conversationMessages,
-        tools,
-        maxSteps: 5,
-        maxRetries: 2,
-      })
-    } catch (primaryError) {
-      console.warn("[v0] Primary AI call failed, attempting fallback:", primaryError)
-      const minimalHistory = conversationMessages.slice(-3)
-
-      if (minimalHistory.length === conversationMessages.length) {
-        await updateQueueStatus(queueItemId, {
-          status: "failed",
-          operations: [],
-          completed_at: new Date().toISOString(),
-        })
-
-        return NextResponse.json({
-          message:
-            "I ran into a temporary issue while processing that request. Please try again in a moment or rephrase what you need.",
-          operations: [],
-          queueItemId,
-          validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
-        })
-      }
-
-      try {
-        result = await generateText({
-          model: "openai/gpt-4o-mini",
-          system: systemPrompt,
-          messages: minimalHistory,
-          tools,
-          maxSteps: 5,
-          maxRetries: 2,
-        })
-        console.log("[v0] Fallback AI call succeeded with reduced context")
-      } catch (fallbackError) {
-        console.error("[v0] Fallback AI call failed:", fallbackError)
-        await updateQueueStatus(queueItemId, {
-          status: "failed",
-          operations: [],
-          completed_at: new Date().toISOString(),
-        })
-
-        return NextResponse.json({
-          message:
-            "I ran into a temporary issue while processing that request. Please try again in a moment or rephrase what you need.",
-          operations: [],
-          queueItemId,
-          validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
-        })
-      }
-    }
+    const result = await generateText({
+      model: "openai/gpt-4o-mini",
+      system: systemPrompt,
+      prompt: message,
+      tools,
+      maxSteps: 5,
+    })
 
     console.log("[v0] AI SDK response received")
     console.log("[v0] Operations collected:", operations.length)
@@ -1526,11 +891,21 @@ You have COMPLETE parity with human users. You can do EVERYTHING they can do. Be
       aiMessage += `\n\nNote: Some operations couldn't be completed:\n${validationErrors.map((e) => `• ${e}`).join("\n")}`
     }
 
-    await updateQueueStatus(queueItemId, {
-      status: "completed",
-      operations: operations,
-      completed_at: new Date().toISOString(),
-    })
+    if (queueItemId && canvasId) {
+      try {
+        const supabase = createServiceRoleClient()
+        await supabase
+          .from("ai_operations_queue")
+          .update({
+            status: "completed",
+            operations: operations,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", queueItemId)
+      } catch (err) {
+        console.warn("[v0] Failed to update queue status:", err)
+      }
+    }
 
     console.log("[v0] Returning", operations.length, "operations")
     return NextResponse.json({
@@ -1545,12 +920,6 @@ You have COMPLETE parity with human users. You can do EVERYTHING they can do. Be
     console.error("[v0] Error message:", error instanceof Error ? error.message : String(error))
     console.error("[v0] Error stack:", error instanceof Error ? error.stack : "No stack trace")
 
-    await updateQueueStatus(queueItemId, {
-      status: "failed",
-      operations: [],
-      completed_at: new Date().toISOString(),
-    })
-
     return NextResponse.json(
       {
         error: "Failed to process request",
@@ -1562,13 +931,59 @@ You have COMPLETE parity with human users. You can do EVERYTHING they can do. Be
   }
 }
 
+type ValidationFailure = { valid: false; error: string }
+type ValidationSuccess<T extends Record<string, unknown> = Record<string, never>> = { valid: true } & T
+type ValidationResult<T extends Record<string, unknown> = Record<string, never>> =
+  | ValidationFailure
+  | ValidationSuccess<T>
+
+function resolveShapeIndex(
+  shapeIndex: number | "selected" | undefined,
+  selectedIndices: number[],
+  totalShapes: number,
+): ValidationResult<{ shapeIndex: number }> {
+  if (shapeIndex === "selected") {
+    if (selectedIndices.length === 0) {
+      return { valid: false, error: "No shape is currently selected." }
+    }
+    return resolveShapeIndex(selectedIndices[0], selectedIndices, totalShapes)
+  }
+
+  if (typeof shapeIndex !== "number") {
+    return { valid: false, error: "shapeIndex must be a number or 'selected'." }
+  }
+
+  if (!Number.isFinite(shapeIndex)) {
+    return { valid: false, error: "shapeIndex must be a finite number." }
+  }
+
+  const resolvedIndex = shapeIndex === -1 ? totalShapes - 1 : shapeIndex
+
+  if (totalShapes === 0) {
+    return { valid: false, error: "There are no shapes on the canvas." }
+  }
+
+  if (resolvedIndex < 0 || resolvedIndex >= totalShapes) {
+    return {
+      valid: false,
+      error: `Invalid shape index ${shapeIndex}. Canvas has ${totalShapes} shapes (indices 0-${Math.max(0, totalShapes - 1)}).`,
+    }
+  }
+
+  return { valid: true, shapeIndex: resolvedIndex }
+}
+
 function validateCreateShape(args: any): { valid: boolean; error?: string } {
   if (!args.shape || !["rectangle", "circle", "triangle", "line"].includes(args.shape)) {
     return { valid: false, error: "Invalid shape type. Must be rectangle, circle, triangle, or line." }
   }
 
-  if (typeof args.x !== "number" || typeof args.y !== "number") {
-    return { valid: false, error: "Position (x, y) must be numbers." }
+  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
+    return { valid: false, error: "X position must be a number between 0 and 2000." }
+  }
+
+  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 2000)) {
+    return { valid: false, error: "Y position must be a number between 0 and 2000." }
   }
 
   if (typeof args.width !== "number" || typeof args.height !== "number") {
@@ -1583,10 +998,6 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Dimensions cannot exceed 2000 pixels." }
   }
 
-  if (args.x < 0 || args.x > 2000 || args.y < 0 || args.y > 2000) {
-    return { valid: false, error: "Position must be within canvas bounds (0-2000)." }
-  }
-
   return { valid: true }
 }
 
@@ -1594,23 +1005,10 @@ function validateMoveShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string } {
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    args.shapeIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex !== "number") {
-    return { valid: false, error: "shapeIndex must be a number." }
-  }
-
-  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
-
-  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes (indices 0-${currentObjects.length - 1}).`,
-    }
+): ValidationResult<{ shapeIndex: number }> {
+  const indexResult = resolveShapeIndex(args.shapeIndex, selectedIndices, currentObjects.length)
+  if (!indexResult.valid) {
+    return indexResult
   }
 
   if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
@@ -1636,30 +1034,17 @@ function validateMoveShape(
     }
   }
 
-  return { valid: true }
+  return { valid: true, shapeIndex: indexResult.shapeIndex }
 }
 
 function validateResizeShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string } {
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    args.shapeIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex !== "number") {
-    return { valid: false, error: "shapeIndex must be a number." }
-  }
-
-  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
-
-  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes (indices 0-${currentObjects.length - 1}).`,
-    }
+): ValidationResult<{ shapeIndex: number }> {
+  const indexResult = resolveShapeIndex(args.shapeIndex, selectedIndices, currentObjects.length)
+  if (!indexResult.valid) {
+    return indexResult
   }
 
   if (args.width !== undefined && (typeof args.width !== "number" || args.width <= 0 || args.width > 2000)) {
@@ -1678,72 +1063,65 @@ function validateResizeShape(
     return { valid: false, error: "Must provide either dimensions (width, height) or scale factor." }
   }
 
-  return { valid: true }
+  return { valid: true, shapeIndex: indexResult.shapeIndex }
 }
 
 function validateRotateShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string } {
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    args.shapeIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex !== "number") {
-    return { valid: false, error: "shapeIndex must be a number." }
+): ValidationResult<{ shapeIndex: number }> {
+  const indexResult = resolveShapeIndex(args.shapeIndex, selectedIndices, currentObjects.length)
+  if (!indexResult.valid) {
+    return indexResult
   }
 
-  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
-
-  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes.`,
-    }
+  if (args.degrees === undefined) {
+    return { valid: false, error: "Rotation degrees are required." }
   }
 
   if (typeof args.degrees !== "number") {
     return { valid: false, error: "Rotation degrees must be a number." }
   }
 
-  return { valid: true }
+  return { valid: true, shapeIndex: indexResult.shapeIndex }
 }
 
 function validateDeleteShape(
   args: any,
   currentObjects: any[],
   selectedIndices: number[],
-): { valid: boolean; error?: string } {
+): ValidationResult<{ shapeIndex?: number }> {
   if (args.all === true) {
     return { valid: true }
   }
 
-  if (args.shapeIndex === "selected") {
-    if (selectedIndices.length === 0) {
-      return { valid: false, error: "No shape is currently selected." }
-    }
-    args.shapeIndex = selectedIndices[0]
-  } else if (typeof args.shapeIndex !== "number") {
-    return { valid: false, error: "shapeIndex must be a number, or set all: true to delete all shapes." }
+  const indexResult = resolveShapeIndex(args.shapeIndex, selectedIndices, currentObjects.length)
+  if (!indexResult.valid) {
+    return indexResult
   }
 
-  const actualIndex = args.shapeIndex === -1 ? currentObjects.length - 1 : args.shapeIndex
-
-  if (actualIndex < 0 || actualIndex >= currentObjects.length) {
-    return {
-      valid: false,
-      error: `Invalid shape index ${args.shapeIndex}. Canvas has ${currentObjects.length} shapes.`,
-    }
-  }
-
-  return { valid: true }
+  return { valid: true, shapeIndex: indexResult.shapeIndex }
 }
 
-function validateArrangeShapes(args: any): { valid: boolean; error?: string } {
+function validateArrangeShapes(args: any, currentObjects: any[]): { valid: boolean; error?: string } {
   if (!args.pattern || !["grid", "row", "column", "circle"].includes(args.pattern)) {
     return { valid: false, error: "Pattern must be one of: grid, row, column, circle." }
+  }
+
+  if (args.shapeIndices && !Array.isArray(args.shapeIndices)) {
+    return { valid: false, error: "shapeIndices must be an array." }
+  }
+
+  if (args.shapeIndices && args.shapeIndices.length > 0) {
+    for (const index of args.shapeIndices) {
+      if (typeof index !== "number" || index < 0 || index >= currentObjects.length) {
+        return {
+          valid: false,
+          error: `Invalid shape index ${index} in shapeIndices. Canvas has ${currentObjects.length} shapes.`,
+        }
+      }
+    }
   }
 
   if (args.spacing !== undefined && (typeof args.spacing !== "number" || args.spacing < 0)) {
@@ -1762,8 +1140,12 @@ function validateCreateText(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Text content is required." }
   }
 
-  if (typeof args.x !== "number" || typeof args.y !== "number") {
-    return { valid: false, error: "Position (x, y) must be numbers." }
+  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
+    return { valid: false, error: "X position must be a number between 0 and 2000." }
+  }
+
+  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 2000)) {
+    return { valid: false, error: "Y position must be a number between 0 and 2000." }
   }
 
   if (args.fontSize !== undefined && (typeof args.fontSize !== "number" || args.fontSize <= 0)) {

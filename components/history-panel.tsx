@@ -119,7 +119,7 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
   const canSaveSnapshot = currentObjects.length > 0 && !isSaving
 
   return (
-    <div className="fixed right-4 top-20 z-40 w-80 max-h-[600px] rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">
+    <div className="fixed right-4 top-20 z-40 w-80 h-[600px] rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">
       {/* Header */}
       <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent border-b border-border/50">
         <div className="flex items-center justify-between mb-2">
@@ -146,7 +146,7 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
       </div>
 
       {/* Save snapshot */}
-      <div className="px-4 py-3 border-b border-border/50 bg-muted/10 space-y-2">
+      <div className="px-4 py-3 flex-shrink-0 border-b border-border/50 bg-muted/10 space-y-2">
         <div className="flex items-center gap-2">
           <Input
             value={description}
@@ -166,7 +166,7 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
       </div>
 
       {/* Content */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 space-y-2">
           {isLoading ? (
             <div className="text-center py-8 text-sm text-muted-foreground">Loading history...</div>

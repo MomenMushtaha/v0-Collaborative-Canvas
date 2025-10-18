@@ -15,6 +15,8 @@ import {
 } from "@/lib/history-utils"
 import type { CanvasObject } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
+import type { UiRect } from "@/lib/types"
+import { useBoundsReporter } from "@/hooks/use-bounds-reporter"
 
 interface HistoryPanelProps {
   canvasId: string
@@ -23,9 +25,18 @@ interface HistoryPanelProps {
   userName: string
   onRestore: (objects: CanvasObject[]) => void
   onClose: () => void
+  onBoundsChange?: (rect: UiRect | null) => void
 }
 
-export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRestore, onClose }: HistoryPanelProps) {
+export function HistoryPanel({
+  canvasId,
+  currentObjects,
+  userId,
+  userName,
+  onRestore,
+  onClose,
+  onBoundsChange,
+}: HistoryPanelProps) {
   const [snapshots, setSnapshots] = useState<HistorySnapshot[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRestoring, setIsRestoring] = useState<string | null>(null)
@@ -34,6 +45,7 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const { toast } = useToast()
+  const boundsRef = useBoundsReporter<HTMLDivElement>(onBoundsChange)
 
   const lastUpdatedLabel = useMemo(() => {
     if (!lastUpdated) return null
@@ -119,7 +131,10 @@ export function HistoryPanel({ canvasId, currentObjects, userId, userName, onRes
   const canSaveSnapshot = currentObjects.length > 0 && !isSaving
 
   return (
-    <div className="fixed right-4 top-20 z-40 w-80 max-h-[600px] rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">
+    <div
+      ref={boundsRef}
+      className="fixed right-4 top-20 z-40 w-80 max-h-[600px] rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl"
+    >
       {/* Header */}
       <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent border-b border-border/50">
         <div className="flex items-center justify-between mb-2">

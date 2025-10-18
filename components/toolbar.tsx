@@ -17,6 +17,8 @@ import { AlignmentToolbar } from "./alignment-toolbar"
 import { GridControls } from "./grid-controls"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import type { UiRect } from "@/lib/types"
+import { useBoundsReporter } from "@/hooks/use-bounds-reporter"
 
 interface ToolbarProps {
   userName: string
@@ -46,6 +48,7 @@ interface ToolbarProps {
   lassoMode?: boolean
   onToggleLassoMode?: () => void
   onSelectAllOfType?: () => void
+  onBoundsChange?: (rect: UiRect | null) => void
 }
 
 export function Toolbar({
@@ -76,9 +79,15 @@ export function Toolbar({
   lassoMode = false,
   onToggleLassoMode,
   onSelectAllOfType,
+  onBoundsChange,
 }: ToolbarProps) {
+  const boundsRef = useBoundsReporter<HTMLDivElement>(onBoundsChange)
+
   return (
-    <div className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b border-border/50 bg-background/95 backdrop-blur-md shadow-sm transition-all duration-200 px-4">
+    <div
+      ref={boundsRef}
+      className="absolute left-0 right-0 top-0 z-10 flex h-14 items-center justify-between border-b border-border/50 bg-background/95 backdrop-blur-md shadow-sm transition-all duration-200 px-4"
+    >
       <div className="flex items-center gap-4">
         <h1 className="text-lg font-semibold">CollabCanvas</h1>
         <span className="text-sm text-muted-foreground">Early Prototype</span>

@@ -12,6 +12,8 @@ import {
   type Comment,
 } from "@/lib/comments-utils"
 import { formatDistanceToNow } from "date-fns"
+import type { UiRect } from "@/lib/types"
+import { useBoundsReporter } from "@/hooks/use-bounds-reporter"
 
 interface CommentsPanelProps {
   canvasId: string
@@ -19,11 +21,21 @@ interface CommentsPanelProps {
   onCommentClick?: (x: number, y: number) => void
   comments: Comment[]
   onCommentsChange: () => void
+  onBoundsChange?: (rect: UiRect | null) => void
 }
 
-export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCommentsChange }: CommentsPanelProps) {
+export function CommentsPanel({
+  canvasId,
+  userId,
+  onCommentClick,
+  comments,
+  onCommentsChange,
+  onBoundsChange,
+}: CommentsPanelProps) {
   const [showResolved, setShowResolved] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
+
+  const boundsRef = useBoundsReporter<HTMLDivElement>(onBoundsChange)
 
   const filteredComments = showResolved ? comments : comments.filter((c) => !c.resolved)
 
@@ -73,7 +85,7 @@ export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCo
 
   if (isCollapsed) {
     return (
-      <div className="fixed left-4 bottom-4 z-40">
+      <div ref={boundsRef} className="fixed left-4 bottom-4 z-40">
         <Button
           variant="outline"
           size="sm"
@@ -92,7 +104,10 @@ export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCo
   }
 
   return (
-    <div className="fixed left-4 bottom-4 z-40 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-200 hover:shadow-2xl flex flex-col w-4/12">
+    <div
+      ref={boundsRef}
+      className="fixed left-4 bottom-4 z-40 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-200 hover:shadow-2xl flex flex-col w-4/12"
+    >
       {/* Header */}
       <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent">
         <div className="flex items-center justify-between mb-4">

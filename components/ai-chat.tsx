@@ -6,7 +6,8 @@ import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Send, Sparkles, Loader2 } from "lucide-react"
-import type { CanvasObject } from "@/lib/types"
+import type { CanvasObject, UiObstructionSnapshot, UiRect } from "@/lib/types"
+import { useBoundsReporter } from "@/hooks/use-bounds-reporter"
 
 interface AiChatProps {
   currentObjects: CanvasObject[]
@@ -16,6 +17,9 @@ interface AiChatProps {
   userName: string
   canvasId: string
   viewport: { x: number; y: number; zoom: number }
+  viewportSize: { width: number; height: number }
+  uiObstructions: UiObstructionSnapshot[]
+  onBoundsChange?: (rect: UiRect | null) => void
 }
 
 interface Message {
@@ -37,6 +41,9 @@ export function AiChat({
   userName,
   canvasId,
   viewport,
+  viewportSize,
+  uiObstructions,
+  onBoundsChange,
 }: AiChatProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
@@ -44,6 +51,7 @@ export function AiChat({
   const [isExpanded, setIsExpanded] = useState(false)
   const [operationProgress, setOperationProgress] = useState<OperationProgress | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const boundsRef = useBoundsReporter<HTMLElement>(onBoundsChange)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -96,6 +104,8 @@ export function AiChat({
           userId,
           userName,
           viewport,
+          viewportSize,
+          uiObstructions,
           currentObjects: sanitizedObjects,
           selectedObjectIds,
           selectedObjects,
@@ -151,6 +161,7 @@ export function AiChat({
   if (!isExpanded) {
     return (
       <button
+        ref={boundsRef as React.Ref<HTMLButtonElement>}
         onClick={() => setIsExpanded(true)}
         className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-xl border border-border/50 bg-gradient-to-r from-blue-600 to-cyan-600 px-6 py-3 text-white shadow-xl backdrop-blur-md transition-all duration-200 hover:shadow-2xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
       >
@@ -161,7 +172,10 @@ export function AiChat({
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex w-96 flex-col rounded-lg border border-border bg-background shadow-2xl overflow-hidden">
+    <div
+      ref={boundsRef as React.Ref<HTMLDivElement>}
+      className="fixed bottom-4 right-4 z-50 flex w-96 flex-col rounded-lg border border-border bg-background shadow-2xl overflow-hidden"
+    >
       {/* Header */}
       <div className="flex items-center justify-between bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-3.5 text-white rounded-t-lg">
         <div className="flex items-center gap-2">

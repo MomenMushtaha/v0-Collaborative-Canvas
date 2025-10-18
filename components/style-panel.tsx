@@ -2,20 +2,29 @@
 
 import { ColorPicker } from "@/components/color-picker"
 import { Label } from "@/components/ui/label"
-import type { CanvasObject } from "@/lib/types"
+import type { CanvasObject, UiRect } from "@/lib/types"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ChevronDown, ChevronRight, Palette } from "lucide-react"
+import { useBoundsReporter } from "@/hooks/use-bounds-reporter"
 
 interface StylePanelProps {
   selectedObjects: CanvasObject[]
   onStyleChange: (updates: Partial<CanvasObject>) => void
   topPosition?: number
   onCollapseChange?: (collapsed: boolean) => void
+  onBoundsChange?: (rect: UiRect | null) => void
 }
 
-export function StylePanel({ selectedObjects, onStyleChange, topPosition = 640, onCollapseChange }: StylePanelProps) {
+export function StylePanel({
+  selectedObjects,
+  onStyleChange,
+  topPosition = 640,
+  onCollapseChange,
+  onBoundsChange,
+}: StylePanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const boundsRef = useBoundsReporter<HTMLDivElement>(onBoundsChange)
 
   const handleCollapseToggle = (collapsed: boolean) => {
     setIsCollapsed(collapsed)
@@ -24,7 +33,7 @@ export function StylePanel({ selectedObjects, onStyleChange, topPosition = 640, 
 
   if (selectedObjects.length === 0 || isCollapsed) {
     return (
-      <div className="absolute right-4 z-10" style={{ top: `${topPosition}px` }}>
+      <div ref={boundsRef} className="absolute right-4 z-10" style={{ top: `${topPosition}px` }}>
         <Button
           variant="outline"
           size="sm"
@@ -47,6 +56,7 @@ export function StylePanel({ selectedObjects, onStyleChange, topPosition = 640, 
 
   return (
     <div
+      ref={boundsRef}
       className="absolute right-4 z-10 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl transition-all duration-200 hover:shadow-2xl overflow-hidden"
       style={{ top: `${topPosition}px` }}
     >

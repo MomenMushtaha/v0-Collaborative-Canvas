@@ -1,10 +1,12 @@
 "use client"
 
-import type { UserPresence } from "@/lib/types"
+import type { UserPresence, UiRect } from "@/lib/types"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMemo, useState } from "react"
+import type React from "react"
 import { ChevronDown, ChevronUp, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useBoundsReporter } from "@/hooks/use-bounds-reporter"
 
 interface PresencePanelProps {
   currentUser: {
@@ -14,10 +16,18 @@ interface PresencePanelProps {
   otherUsers: UserPresence[]
   topPosition?: number
   onCollapseChange?: (collapsed: boolean) => void
+  onBoundsChange?: (rect: UiRect | null) => void
 }
 
-export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCollapseChange }: PresencePanelProps) {
+export function PresencePanel({
+  currentUser,
+  otherUsers,
+  topPosition = 80,
+  onCollapseChange,
+  onBoundsChange,
+}: PresencePanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const boundsRef = useBoundsReporter<HTMLDivElement>(onBoundsChange)
 
   const handleCollapseToggle = (collapsed: boolean) => {
     setIsCollapsed(collapsed)
@@ -49,6 +59,7 @@ export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCol
   if (isCollapsed) {
     return (
       <Button
+        ref={boundsRef as React.Ref<HTMLButtonElement>}
         variant="outline"
         size="sm"
         onClick={() => handleCollapseToggle(false)}
@@ -64,6 +75,7 @@ export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCol
 
   return (
     <div
+      ref={boundsRef}
       className="absolute right-4 z-10 w-64 max-h-[260px] rounded-xl border border-border/50 bg-background/95 shadow-xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl"
       style={{ top: `${topPosition}px` }}
     >

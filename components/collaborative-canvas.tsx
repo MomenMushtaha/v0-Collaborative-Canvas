@@ -18,6 +18,7 @@ import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { useToast } from "@/hooks/use-toast"
 import { CommentMarker } from "@/components/comment-marker"
 import type { Comment } from "@/lib/comments-utils"
+import type { UiRect } from "@/lib/types"
 
 // Generate a random color for each user
 function generateUserColor() {
@@ -64,6 +65,7 @@ interface CollaborativeCanvasProps {
   onSelectAllOfType?: Dispatch<SetStateAction<(() => void) | undefined>> // Added onSelectAllOfType prop type
   historyRestore?: CanvasObject[] | null
   onHistoryRestoreComplete?: (result: "success" | "error") => void
+  onOverlayBoundsChange?: (id: string, rect: UiRect | null) => void
 }
 
 export function CollaborativeCanvas({
@@ -97,6 +99,7 @@ export function CollaborativeCanvas({
   onSelectAllOfType,
   historyRestore = null,
   onHistoryRestoreComplete,
+  onOverlayBoundsChange,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -748,8 +751,16 @@ export function CollaborativeCanvas({
   return (
     <div className="relative h-full w-full">
       <ConnectionStatus isConnected={connectionState.isConnected} queuedOps={connectionState.queuedOps} />
-      <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
-      <StylePanel selectedObjects={selectedObjects} onStyleChange={handleStyleChange} />
+      <PresencePanel
+        currentUser={{ userName, userColor }}
+        otherUsers={otherUsers}
+        onBoundsChange={(rect) => onOverlayBoundsChange?.("presencePanel", rect)}
+      />
+      <StylePanel
+        selectedObjects={selectedObjects}
+        onStyleChange={handleStyleChange}
+        onBoundsChange={(rect) => onOverlayBoundsChange?.("stylePanel", rect)}
+      />
       <LayersPanel
         objects={objects}
         selectedIds={selectedObjectIds}
@@ -757,6 +768,7 @@ export function CollaborativeCanvas({
         onDeleteObject={handleLayerDelete}
         onToggleVisibility={handleToggleVisibility}
         onToggleLock={handleToggleLock}
+        onBoundsChange={(rect) => onOverlayBoundsChange?.("layersPanel", rect)}
       />
       <Canvas
         canvasId={canvasId}

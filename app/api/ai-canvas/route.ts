@@ -19,6 +19,8 @@ export async function POST(request: Request) {
       userId,
       userName,
       viewport,
+      viewportSize,
+      uiObstructions,
     } = body
 
     console.log("[v0] Message:", message)
@@ -142,26 +144,234 @@ export async function POST(request: Request) {
       ),
     }
 
-    const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
-    const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
+    const canvasWidth =
+      typeof viewportSize?.width === "number" && Number.isFinite(viewportSize.width)
+        ? Math.max(1, Math.round(viewportSize.width))
+        : 1920
+    const canvasHeight =
+      typeof viewportSize?.height === "number" && Number.isFinite(viewportSize.height)
+        ? Math.max(1, Math.round(viewportSize.height))
+        : 1080
 
-    const visibleArea = viewport
+    const hasValidViewport =
+      viewport && typeof viewport.zoom === "number" && Number.isFinite(viewport.zoom) && viewport.zoom !== 0
+
+    const viewportRect = hasValidViewport
       ? {
           left: Math.max(0, Math.round(-viewport.x / viewport.zoom)),
           top: Math.max(0, Math.round(-viewport.y / viewport.zoom)),
           right: Math.min(2000, Math.round((-viewport.x + canvasWidth) / viewport.zoom)),
           bottom: Math.min(2000, Math.round((-viewport.y + canvasHeight) / viewport.zoom)),
-          centerX: Math.round((-viewport.x + canvasWidth / 2) / viewport.zoom),
-          centerY: Math.round((-viewport.y + 150) / viewport.zoom),
         }
       : {
           left: 0,
           top: 0,
           right: 1920,
           bottom: 1080,
+        }
+
+    type BasicRect = { left: number; top: number; right: number; bottom: number }
+
+    const intersectionOf = (a: BasicRect, b: BasicRect): BasicRect | null => {
+      const left = Math.max(a.left, b.left)
+      const right = Math.min(a.right, b.right)
+      const top = Math.max(a.top, b.top)
+      const bottom = Math.min(a.bottom, b.bottom)
+
+      if (left >= right || top >= bottom) {
+        return null
+      }
+
+      return { left, top, right, bottom }
+    }
+
+    const subtractRect = (source: BasicRect, cut: BasicRect): BasicRect[] => {
+      const overlap = intersectionOf(source, cut)
+      if (!overlap) {
+        return [source]
+      }
+
+      const results: BasicRect[] = []
+
+      if (source.top < overlap.top) {
+        results.push({ left: source.left, top: source.top, right: source.right, bottom: overlap.top })
+      }
+
+      if (overlap.bottom < source.bottom) {
+        results.push({ left: source.left, top: overlap.bottom, right: source.right, bottom: source.bottom })
+      }
+
+      if (source.left < overlap.left) {
+        results.push({ left: source.left, top: overlap.top, right: overlap.left, bottom: overlap.bottom })
+      }
+
+      if (overlap.right < source.right) {
+        results.push({ left: overlap.right, top: overlap.top, right: source.right, bottom: overlap.bottom })
+      }
+
+      return results.filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
+    }
+
+    const sanitizedUiObstructions = Array.isArray(uiObstructions)
+      ? uiObstructions
+          .map((entry: any) => {
+            if (!entry || typeof entry !== "object") {
+              return null
+            }
+
+            const { id, left, top, right, bottom } = entry
+            if (typeof id !== "string" || id.length === 0) {
+              return null
+            }
+
+            const edges = [left, top, right, bottom]
+            if (edges.some((value) => typeof value !== "number" || !Number.isFinite(value))) {
+              return null
+            }
+
+            return {
+              id,
+              left: left as number,
+              top: top as number,
+              right: right as number,
+              bottom: bottom as number,
+            }
+          })
+          .filter((value): value is { id: string; left: number; top: number; right: number; bottom: number } => Boolean(value))
+      : []
+
+    const canvasObstructions = hasValidViewport
+      ? sanitizedUiObstructions
+          .map((obstruction) => {
+            const convertX = (clientX: number) => Math.round((-viewport.x + clientX) / viewport.zoom)
+            const convertY = (clientY: number) => Math.round((-viewport.y + clientY) / viewport.zoom)
+
+            const left = convertX(obstruction.left)
+            const right = convertX(obstruction.right)
+            const top = convertY(obstruction.top)
+            const bottom = convertY(obstruction.bottom)
+
+            const normalized = {
+              id: obstruction.id,
+              left: Math.min(left, right),
+              right: Math.max(left, right),
+              top: Math.min(top, bottom),
+              bottom: Math.max(top, bottom),
+            }
+
+            const clamped: BasicRect = {
+              left: Math.max(viewportRect.left, Math.min(viewportRect.right, normalized.left)),
+              right: Math.max(viewportRect.left, Math.min(viewportRect.right, normalized.right)),
+              top: Math.max(viewportRect.top, Math.min(viewportRect.bottom, normalized.top)),
+              bottom: Math.max(viewportRect.top, Math.min(viewportRect.bottom, normalized.bottom)),
+            }
+
+            if (clamped.right - clamped.left <= 1 || clamped.bottom - clamped.top <= 1) {
+              return null
+            }
+
+            return { id: obstruction.id, rect: clamped }
+          })
+          .filter((value): value is { id: string; rect: BasicRect } => Boolean(value))
+      : []
+
+    const availableRects = canvasObstructions.reduce<BasicRect[]>((rects, obstruction) => {
+      return rects.flatMap((rect) => subtractRect(rect, obstruction.rect))
+    }, [viewportRect])
+
+    const placementAreas = availableRects
+      .map((rect, index) => {
+        const width = Math.max(0, rect.right - rect.left)
+        const height = Math.max(0, rect.bottom - rect.top)
+        return {
+          id: `area-${index + 1}`,
+          left: Math.round(rect.left),
+          top: Math.round(rect.top),
+          right: Math.round(rect.right),
+          bottom: Math.round(rect.bottom),
+          width: Math.round(width),
+          height: Math.round(height),
+          area: Math.round(width * height),
+          centerX: Math.round(rect.left + width / 2),
+          centerY: Math.round(rect.top + height / 2),
+        }
+      })
+      .filter((area) => area.width > 0 && area.height > 0)
+      .sort((a, b) => b.area - a.area)
+
+    const fallbackArea = hasValidViewport
+      ? {
+          left: viewportRect.left,
+          top: viewportRect.top,
+          right: viewportRect.right,
+          bottom: viewportRect.bottom,
+          width: viewportRect.right - viewportRect.left,
+          height: viewportRect.bottom - viewportRect.top,
+          centerX: Math.round((viewportRect.left + viewportRect.right) / 2),
+          centerY: Math.round((viewportRect.top + viewportRect.bottom) / 2),
+          area: Math.max(0, (viewportRect.right - viewportRect.left) * (viewportRect.bottom - viewportRect.top)),
+        }
+      : {
+          left: 640,
+          top: 0,
+          right: 1280,
+          bottom: 300,
+          width: 640,
+          height: 300,
           centerX: 960,
           centerY: 150,
+          area: 640 * 300,
         }
+
+    const primaryArea = placementAreas[0] ?? fallbackArea
+
+    const visibleArea = {
+      left: primaryArea.left,
+      top: primaryArea.top,
+      right: primaryArea.right,
+      bottom: primaryArea.bottom,
+      width: primaryArea.width,
+      height: primaryArea.height,
+      centerX: primaryArea.centerX,
+      centerY: primaryArea.centerY,
+    }
+
+    const obstructionSummaries = canvasObstructions.map(({ id, rect }) => ({
+      id,
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      right: Math.round(rect.right),
+      bottom: Math.round(rect.bottom),
+      width: Math.round(rect.right - rect.left),
+      height: Math.round(rect.bottom - rect.top),
+    }))
+
+    const rawViewportSummary = hasValidViewport
+      ? `- Raw viewport bounds (before UI overlay adjustments): (${viewportRect.left}, ${viewportRect.top}) to (${viewportRect.right}, ${viewportRect.bottom})`
+      : "- Raw viewport bounds unavailable (using default top-right fallback area)."
+
+    const primaryAreaSummary = `- Primary unobstructed placement area: bounds=(${visibleArea.left}, ${visibleArea.top}) → (${visibleArea.right}, ${visibleArea.bottom}), size=${visibleArea.width}x${visibleArea.height}, center=(${visibleArea.centerX}, ${visibleArea.centerY})`
+
+    const additionalAreasSummary =
+      placementAreas.length > 1
+        ? placementAreas
+            .slice(1, 4)
+            .map(
+              (area, index) =>
+                `${index + 1}. bounds=(${area.left}, ${area.top}) → (${area.right}, ${area.bottom}), size=${area.width}x${area.height}, center=(${area.centerX}, ${area.centerY})`,
+            )
+            .join("\n")
+        : "(No additional unobstructed placement regions detected)"
+
+    const obstructionSummaryText =
+      obstructionSummaries.length > 0
+        ? obstructionSummaries
+            .map(
+              (obstruction) =>
+                `- ${obstruction.id}: (${obstruction.left}, ${obstruction.top}) → (${obstruction.right}, ${obstruction.bottom}) size=${obstruction.width}x${obstruction.height}`,
+            )
+            .join("\n")
+        : "- none detected"
 
     const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
     const clampCenter = (value: number | undefined, size: number, fallback: number) =>
@@ -556,13 +766,20 @@ ${
     ? `
 CURRENT VIEWPORT (User's visible area):
 - Zoom: ${Math.round(viewport.zoom * 100)}%
-- Visible area: (${visibleArea.left}, ${visibleArea.top}) to (${visibleArea.right}, ${visibleArea.bottom})
-- Recommended position for new objects: (${visibleArea.centerX}, ${visibleArea.centerY})
+${rawViewportSummary}
+${primaryAreaSummary}
+- Additional placement areas (sorted by usable size):
+${additionalAreasSummary}
+- UI overlays currently covering the viewport (canvas coordinates):
+${obstructionSummaryText}
 
-⭐ CRITICAL: Always create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) to ensure they appear in the user's accessible viewport area.
+⭐ CRITICAL: Always create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) — this is inside the largest unobstructed area the user can actually see right now.
 `
     : `
-⭐ CRITICAL: Create new objects in the top-right accessible area (default: x=960, y=150) since users have zoom constraints.
+DEFAULT VIEW CONTEXT (viewport unavailable):
+${primaryAreaSummary}
+
+⭐ CRITICAL: Create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) so they appear in the default accessible area.
 `
 }
 
@@ -623,15 +840,14 @@ POSITION REFERENCE:
 ${
   viewport
     ? `
-- **REQUIRED position for new objects**: (${visibleArea.centerX}, ${visibleArea.centerY}) - This is in the user's visible area
-- Visible top-left: (${visibleArea.left}, ${visibleArea.top})
-- Visible top-right: (${visibleArea.right}, ${visibleArea.top})
-- Visible bottom-left: (${visibleArea.left}, ${visibleArea.bottom})
-- Visible bottom-right: (${visibleArea.right}, ${visibleArea.bottom})
+- **REQUIRED primary placement center**: (${visibleArea.centerX}, ${visibleArea.centerY})
+- Safe placement bounds: (${visibleArea.left}, ${visibleArea.top}) to (${visibleArea.right}, ${visibleArea.bottom})
+- Keep new or moved objects inside this rectangle to avoid UI overlays.
 `
     : `
-- **REQUIRED position for new objects**: (960, 150) - Top-right accessible area
-- Accessible area: (0, 0) to (1920, 1080)
+- **REQUIRED primary placement center**: (${visibleArea.centerX}, ${visibleArea.centerY})
+- Safe placement bounds: (${visibleArea.left}, ${visibleArea.top}) to (${visibleArea.right}, ${visibleArea.bottom})
+- Accessible defaults assume top-right workspace is clear.
 `
 }
 
@@ -649,7 +865,8 @@ BEST PRACTICES:
 4. Be conversational and explain what you're doing
 5. If a request is ambiguous, make a reasonable assumption and explain it
 6. **ALWAYS check if there's a selected shape before assuming which shape to operate on**
-7. **CRITICAL: ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) - this is within the user's accessible viewport**
+7. **CRITICAL: ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) - this is inside the user's unobstructed viewport**
+8. Before placing or moving items, confirm they remain inside the safe bounds (${visibleArea.left}, ${visibleArea.top}) → (${visibleArea.right}, ${visibleArea.bottom}) so they are not hidden behind UI panels.
 
 Examples:
 - "Create a blue square" → createShape(rectangle, x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, 100x100, blue)

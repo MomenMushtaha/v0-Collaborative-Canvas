@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { CollaborativeCanvas } from "@/components/collaborative-canvas"
@@ -8,7 +8,7 @@ import { Toolbar } from "@/components/toolbar"
 import { AiChat } from "@/components/ai-chat"
 import { HistoryPanel } from "@/components/history-panel"
 import { CommentsPanel } from "@/components/comments-panel"
-import type { CanvasObject } from "@/lib/types"
+import type { CanvasObject, UiObstructionSnapshot, UiRect } from "@/lib/types"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { exportCanvas } from "@/lib/export-utils"
 import { saveHistorySnapshot } from "@/lib/history-utils"
@@ -35,6 +35,7 @@ export default function CanvasPage() {
   const [snapEnabled, setSnapEnabled] = useState(false)
   const [gridSize, setGridSize] = useState(20)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
+  const [viewportSize, setViewportSize] = useState({ width: 1920, height: 1080 })
   const [showHistory, setShowHistory] = useState(false)
   const [pendingHistoryRestore, setPendingHistoryRestore] = useState<CanvasObject[] | null>(null)
   const [lastSnapshotTime, setLastSnapshotTime] = useState(Date.now())
@@ -42,23 +43,80 @@ export default function CanvasPage() {
   const [comments, setComments] = useState<Comment[]>([])
   const [lassoMode, setLassoMode] = useState(false)
   const [onSelectAllOfType, setOnSelectAllOfType] = useState<(() => void) | undefined>()
-
-  const [presencePanelCollapsed, setPresencePanelCollapsed] = useState(false)
-  const [layersPanelCollapsed, setLayersPanelCollapsed] = useState(false)
-  const [stylePanelCollapsed, setStylePanelCollapsed] = useState(false)
-
-  const PANEL_SPACING = 16 // Gap between panels
-  const COLLAPSED_HEIGHT = 48 // Height of collapsed panel button
-  const PRESENCE_EXPANDED_HEIGHT = 260
-  const LAYERS_EXPANDED_HEIGHT = 280
-
-  const presenceTop = 80 // Below toolbar
-  const layersTop = presenceTop + (presencePanelCollapsed ? COLLAPSED_HEIGHT : PRESENCE_EXPANDED_HEIGHT) + PANEL_SPACING
-  const styleTop = layersTop + (layersPanelCollapsed ? COLLAPSED_HEIGHT : LAYERS_EXPANDED_HEIGHT) + PANEL_SPACING
+  const [uiObstructionMap, setUiObstructionMap] = useState<Record<string, UiRect>>({})
 
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()
+
+  const rectEquals = useCallback((a: UiRect, b: UiRect) => {
+    return (
+      a.left === b.left &&
+      a.top === b.top &&
+      a.right === b.right &&
+      a.bottom === b.bottom &&
+      a.width === b.width &&
+      a.height === b.height
+    )
+  }, [])
+
+  const updateUiObstruction = useCallback(
+    (id: string, rect: UiRect | null) => {
+      setUiObstructionMap((previous) => {
+        if (!rect) {
+          if (!(id in previous)) {
+            return previous
+          }
+          const { [id]: _removed, ...rest } = previous
+          return rest
+        }
+
+        const normalized: UiRect = {
+          left: Math.round(rect.left),
+          top: Math.round(rect.top),
+          right: Math.round(rect.right),
+          bottom: Math.round(rect.bottom),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        }
+
+        const existing = previous[id]
+        if (existing && rectEquals(existing, normalized)) {
+          return previous
+        }
+
+        return { ...previous, [id]: normalized }
+      })
+    },
+    [rectEquals],
+  )
+
+  const uiObstructions: UiObstructionSnapshot[] = useMemo(
+    () =>
+      Object.entries(uiObstructionMap).map(([id, rect]) => ({
+        id,
+        ...rect,
+      })),
+    [uiObstructionMap],
+  )
+
+  useEffect(() => {
+    const updateViewportSize = () => {
+      if (typeof window === "undefined") return
+
+      setViewportSize({
+        width: Math.max(1, window.innerWidth),
+        height: Math.max(1, window.innerHeight),
+      })
+    }
+
+    updateViewportSize()
+    window.addEventListener("resize", updateViewportSize)
+
+    return () => {
+      window.removeEventListener("resize", updateViewportSize)
+    }
+  }, [])
 
   useEffect(() => {
     console.log("[v0] [PAGE] onSelectAllOfType state updated:", onSelectAllOfType)
@@ -273,6 +331,7 @@ export default function CanvasPage() {
           lassoMode={lassoMode}
           onToggleLassoMode={() => setLassoMode(!lassoMode)}
           onSelectAllOfType={onSelectAllOfType}
+          onBoundsChange={(rect) => updateUiObstruction("toolbar", rect)}
         />
       </div>
       <div className="h-full w-full">
@@ -307,6 +366,7 @@ export default function CanvasPage() {
           onSelectAllOfType={setOnSelectAllOfType}
           historyRestore={pendingHistoryRestore}
           onHistoryRestoreComplete={handleHistoryRestoreComplete}
+          onOverlayBoundsChange={updateUiObstruction}
         />
       </div>
       <AiChat
@@ -316,6 +376,10 @@ export default function CanvasPage() {
         userId={user.id}
         userName={user.name}
         canvasId="default"
+        viewport={viewport}
+        viewportSize={viewportSize}
+        uiObstructions={uiObstructions}
+        onBoundsChange={(rect) => updateUiObstruction("aiChat", rect)}
       />
       {showHistory && (
         <HistoryPanel
@@ -325,6 +389,7 @@ export default function CanvasPage() {
           userName={user.name}
           onRestore={handleRestoreHistory}
           onClose={() => setShowHistory(false)}
+          onBoundsChange={(rect) => updateUiObstruction("historyPanel", rect)}
         />
       )}
       <CommentsPanel
@@ -333,6 +398,7 @@ export default function CanvasPage() {
         onCommentClick={handleCommentClick}
         comments={comments}
         onCommentsChange={handleCommentsChange}
+        onBoundsChange={(rect) => updateUiObstruction("commentsPanel", rect)}
       />
     </div>
   )

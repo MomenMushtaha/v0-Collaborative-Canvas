@@ -23,6 +23,19 @@ export interface CanvasObject {
   content?: string // text content for text objects
 }
 
+export interface UiRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+  width: number
+  height: number
+}
+
+export interface UiObstructionSnapshot extends UiRect {
+  id: string
+}
+
 export interface UserPresence {
   id: string
   canvas_id: string

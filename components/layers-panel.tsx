@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import type { CanvasObject } from "@/lib/types"
+import type { CanvasObject, UiRect } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useBoundsReporter } from "@/hooks/use-bounds-reporter"
 import {
   Eye,
   EyeOff,
@@ -29,6 +30,7 @@ interface LayersPanelProps {
   onReorder?: (id: string, newIndex: number) => void
   topPosition?: number
   onCollapseChange?: (collapsed: boolean) => void
+  onBoundsChange?: (rect: UiRect | null) => void
 }
 
 export function LayersPanel({
@@ -41,8 +43,10 @@ export function LayersPanel({
   onReorder,
   topPosition = 360,
   onCollapseChange,
+  onBoundsChange,
 }: LayersPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const boundsRef = useBoundsReporter<HTMLDivElement>(onBoundsChange)
 
   const handleCollapseToggle = (collapsed: boolean) => {
     setIsCollapsed(collapsed)
@@ -79,7 +83,7 @@ export function LayersPanel({
 
   if (isCollapsed) {
     return (
-      <div className="fixed right-4 z-40" style={{ top: `${topPosition}px` }}>
+      <div ref={boundsRef} className="fixed right-4 z-40" style={{ top: `${topPosition}px` }}>
         <Button
           variant="outline"
           size="sm"
@@ -98,6 +102,7 @@ export function LayersPanel({
 
   return (
     <div
+      ref={boundsRef}
       className="fixed right-4 z-40 w-64 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl"
       style={{ top: `${topPosition}px` }}
     >

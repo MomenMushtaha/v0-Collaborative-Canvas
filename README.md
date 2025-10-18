@@ -1,6 +1,6 @@
 # CollabCanvas - Real-Time Collaborative Canvas with AI Agent
 
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-EarlyPrototype)
+[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-mvp)
 [![Built with v0](https://img.shields.io/badge/Built%20with-v0.app-black?style=for-the-badge)](https://v0.app/chat/projects/NUaCCUvSMZL)
 
 A real-time collaborative canvas application with AI-powered design assistance, built with Next.js, Supabase, and the Vercel AI SDK.
@@ -95,8 +95,8 @@ lib/
 
 1. **Clone the repository**
    \`\`\`bash
-   git clone https://github.com/your-username/v0-collaborative-canvas-EarlyPrototype.git
-   cd v0-collaborative-canvas-EarlyPrototype
+   git clone https://github.com/your-username/v0-collaborative-canvas-mvp.git
+   cd v0-collaborative-canvas-mvp
    \`\`\`
 
 2. **Install dependencies**
@@ -260,7 +260,7 @@ To enable Google and GitHub OAuth authentication:
 
 ### Live Demo
 
-**Production URL**: [https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-EarlyPrototype](https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-EarlyPrototype)
+**Production URL**: [https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-mvp](https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-mvp)
 
 ## Development
 

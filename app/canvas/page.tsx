@@ -42,20 +42,6 @@ export default function CanvasPage() {
   const [comments, setComments] = useState<Comment[]>([])
   const [lassoMode, setLassoMode] = useState(false)
   const [onSelectAllOfType, setOnSelectAllOfType] = useState<(() => void) | undefined>()
-
-  const [presencePanelCollapsed, setPresencePanelCollapsed] = useState(false)
-  const [layersPanelCollapsed, setLayersPanelCollapsed] = useState(false)
-  const [stylePanelCollapsed, setStylePanelCollapsed] = useState(false)
-
-  const PANEL_SPACING = 16 // Gap between panels
-  const COLLAPSED_HEIGHT = 48 // Height of collapsed panel button
-  const PRESENCE_EXPANDED_HEIGHT = 260
-  const LAYERS_EXPANDED_HEIGHT = 280
-
-  const presenceTop = 80 // Below toolbar
-  const layersTop = presenceTop + (presencePanelCollapsed ? COLLAPSED_HEIGHT : PRESENCE_EXPANDED_HEIGHT) + PANEL_SPACING
-  const styleTop = layersTop + (layersPanelCollapsed ? COLLAPSED_HEIGHT : LAYERS_EXPANDED_HEIGHT) + PANEL_SPACING
-
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()
@@ -234,17 +220,6 @@ export default function CanvasPage() {
     setComments(loadedComments)
   }
 
-  const usableCanvasDimensions = {
-    // Left side: toolbar takes ~300px
-    leftOffset: 300,
-    // Right side: panels take ~400px when expanded
-    rightOffset: 400,
-    // Top: toolbar takes ~80px
-    topOffset: 80,
-    // Bottom: comments panel takes ~200px when expanded
-    bottomOffset: 200,
-  }
-
   if (isLoading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -327,8 +302,6 @@ export default function CanvasPage() {
         userId={user.id}
         userName={user.name}
         canvasId="default"
-        viewport={viewport}
-        usableCanvasDimensions={usableCanvasDimensions}
       />
       {showHistory && (
         <HistoryPanel

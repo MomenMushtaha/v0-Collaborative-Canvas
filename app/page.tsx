@@ -64,7 +64,7 @@ export default function HomePage() {
     const redirectUrl =
       window.location.hostname === "localhost"
         ? "http://localhost:3000/auth/callback"
-        : "https://v0-collaborative-canvas-EarlyPrototype.vercel.app/auth/callback"
+        : "https://v0-collaborative-canvas-mvp.vercel.app/auth/callback"
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -86,7 +86,7 @@ export default function HomePage() {
     const redirectUrl =
       window.location.hostname === "localhost"
         ? "http://localhost:3000/auth/callback"
-        : "https://v0-collaborative-canvas-EarlyPrototype.vercel.app/auth/callback"
+        : "https://v0-collaborative-canvas-mvp.vercel.app/auth/callback"
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "github",
@@ -110,7 +110,7 @@ export default function HomePage() {
     const redirectUrl =
       window.location.hostname === "localhost"
         ? "http://localhost:3000/auth/callback"
-        : "https://v0-collaborative-canvas-EarlyPrototype.vercel.app/auth/callback"
+        : "https://v0-collaborative-canvas-mvp.vercel.app/auth/callback"
 
     const { data: existingUser } = await supabase
       .from("user_presence")

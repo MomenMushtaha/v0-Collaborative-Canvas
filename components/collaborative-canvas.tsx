@@ -108,8 +108,6 @@ export function CollaborativeCanvas({
   const { objects, isLoading, syncObjects, isConnected, queuedOperations } = useRealtimeCanvas({
     canvasId,
     userId,
-    userName,
-    userColor,
     onConnectionChange: (connected, queued) => {
       setConnectionState({ isConnected: connected, queuedOps: queued })
     },
@@ -258,7 +256,10 @@ export function CollaborativeCanvas({
       )
 
       const uniqueIds = Array.from(
-        new Set([...previousState.map((obj) => obj.id), ...historyRestore.map((obj) => obj.id)]),
+        new Set([
+          ...previousState.map((obj) => obj.id),
+          ...historyRestore.map((obj) => obj.id),
+        ]),
       )
 
       setIsUndoRedoOperation(true)
@@ -433,105 +434,6 @@ export function CollaborativeCanvas({
     })
   }, [selectedObjectIds, objects, toast, onSelectionChange])
 
-  const handleGroup = useCallback(() => {
-    if (selectedObjectIds.length < 2) {
-      toast({
-        title: "Cannot Group",
-        description: "Select at least 2 objects to create a group",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
-
-    // Calculate bounding box for the group
-    const minX = Math.min(...selectedObjs.map((obj) => obj.x))
-    const minY = Math.min(...selectedObjs.map((obj) => obj.y))
-    const maxX = Math.max(...selectedObjs.map((obj) => obj.x + obj.width))
-    const maxY = Math.max(...selectedObjs.map((obj) => obj.y + obj.height))
-
-    const groupId = crypto.randomUUID()
-    const groupObject: CanvasObject = {
-      id: groupId,
-      canvas_id: canvasId,
-      type: "group",
-      x: minX,
-      y: minY,
-      width: maxX - minX,
-      height: maxY - minY,
-      rotation: 0,
-      fill_color: "transparent",
-      stroke_color: "#3b82f6",
-      stroke_width: 2,
-      children: selectedObjectIds,
-    }
-
-    // Update child objects to reference the parent group
-    const updatedObjects = objects.map((obj) => {
-      if (selectedObjectIds.includes(obj.id)) {
-        return { ...obj, parent_group: groupId }
-      }
-      return obj
-    })
-
-    // Add the group object
-    updatedObjects.push(groupObject)
-    syncObjects(updatedObjects)
-
-    // Select the new group
-    setSelectedObjectIds([groupId])
-    console.log("[v0] Grouped", selectedObjectIds.length, "objects into group:", groupId)
-
-    toast({
-      title: "Grouped",
-      description: `${selectedObjectIds.length} objects grouped together`,
-    })
-  }, [selectedObjectIds, objects, syncObjects, canvasId, toast])
-
-  const handleUngroup = useCallback(() => {
-    if (selectedObjectIds.length === 0) return
-
-    const selectedGroups = objects.filter((obj) => selectedObjectIds.includes(obj.id) && obj.type === "group")
-
-    if (selectedGroups.length === 0) {
-      toast({
-        title: "Cannot Ungroup",
-        description: "Select a group to ungroup",
-        variant: "destructive",
-      })
-      return
-    }
-
-    let updatedObjects = [...objects]
-    const newSelectedIds: string[] = []
-
-    selectedGroups.forEach((group) => {
-      if (group.children) {
-        // Remove parent_group reference from children
-        updatedObjects = updatedObjects.map((obj) => {
-          if (group.children?.includes(obj.id)) {
-            newSelectedIds.push(obj.id)
-            return { ...obj, parent_group: undefined }
-          }
-          return obj
-        })
-
-        // Remove the group object
-        updatedObjects = updatedObjects.filter((obj) => obj.id !== group.id)
-      }
-    })
-
-    syncObjects(updatedObjects)
-    setSelectedObjectIds(newSelectedIds)
-    console.log("[v0] Ungrouped", selectedGroups.length, "group(s)")
-
-    toast({
-      title: "Ungrouped",
-      description: `${selectedGroups.length} group${selectedGroups.length > 1 ? "s" : ""} ungrouped`,
-    })
-  }, [selectedObjectIds, objects, syncObjects, toast])
-
   const selectedObjects = useMemo(() => {
     return objects.filter((obj) => selectedObjectIds.includes(obj.id))
   }, [objects, selectedObjectIds])
@@ -545,8 +447,6 @@ export function CollaborativeCanvas({
     onSelectAllOfType: handleSelectAllOfType, // Added select all of type to keyboard shortcuts
     onCopy: handleCopy,
     onPaste: handlePaste,
-    onGroup: handleGroup,
-    onUngroup: handleUngroup,
     canUndo: historyCanUndo,
     canRedo: historyCanRedo,
     hasSelection: selectedObjectIds.length > 0,
@@ -1024,7 +924,9 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       }
 
       case "distribute": {
-        const indices = operation.shapeIndices || updatedObjects.map((_: any, i: number) => i)
+        const indices = Array.isArray(operation.shapeIndices)
+          ? operation.shapeIndices
+          : updatedObjects.map((_: any, i: number) => i)
         const shapesToDistribute = indices.map((i: number) => updatedObjects[i]).filter(Boolean)
 
         if (shapesToDistribute.length >= 2) {
@@ -1043,7 +945,9 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       }
 
       case "align": {
-        const indices = operation.shapeIndices || updatedObjects.map((_: any, i: number) => i)
+        const indices = Array.isArray(operation.shapeIndices)
+          ? operation.shapeIndices
+          : updatedObjects.map((_: any, i: number) => i)
         const shapesToAlign = indices.map((i: number) => updatedObjects[i]).filter(Boolean)
 
         if (shapesToAlign.length >= 2) {
@@ -1112,59 +1016,180 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
         break
       }
 
-      case "group": {
-        const groupId = operation.groupId
-        const childrenIds = operation.childrenIds || []
-        const groupObject: CanvasObject = {
-          id: groupId,
-          canvas_id: operation.canvasId,
-          type: "group",
-          x: operation.x,
-          y: operation.y,
-          width: operation.width,
-          height: operation.height,
-          rotation: 0,
-          fill_color: operation.fill_color || "transparent",
-          stroke_color: operation.stroke_color || "#3b82f6",
-          stroke_width: operation.stroke_width || 2,
-          children: childrenIds,
+      case "updateStyle": {
+        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
+          return { objects, error: "No shapes provided for style update." }
         }
 
-        // Update child objects to reference the parent group
-        const processedObjects = updatedObjects.map((obj) => {
-          if (childrenIds.includes(obj.id)) {
-            return { ...obj, parent_group: groupId }
+        const targetIndices = Array.from(new Set(operation.shapeIndices))
+        const invalidIndex = targetIndices.find((idx: number) => idx < 0 || idx >= updatedObjects.length)
+
+        if (invalidIndex !== undefined) {
+          return {
+            objects,
+            error: `Cannot style shape at index ${invalidIndex}. Only ${updatedObjects.length} shapes exist.`,
           }
-          return obj
+        }
+
+        const hasFill = typeof operation.fillColor === "string"
+        const hasStroke = typeof operation.strokeColor === "string"
+        const hasStrokeWidth = typeof operation.strokeWidth === "number"
+        const hasTextColor = typeof operation.textColor === "string"
+
+        if (!hasFill && !hasStroke && !hasStrokeWidth && !hasTextColor) {
+          return { objects, error: "No style changes were provided." }
+        }
+
+        updatedObjects = updatedObjects.map((obj, idx) => {
+          if (!targetIndices.includes(idx)) {
+            return obj
+          }
+
+          const updates: Partial<CanvasObject> = {}
+
+          if (hasFill) {
+            updates.fill_color = operation.fillColor
+          }
+
+          if (hasStroke) {
+            updates.stroke_color = operation.strokeColor
+          }
+
+          if (hasStrokeWidth) {
+            updates.stroke_width = operation.strokeWidth
+          }
+
+          if (hasTextColor && obj.type === "text") {
+            updates.fill_color = operation.textColor
+            updates.stroke_color = operation.textColor
+          }
+
+          return { ...obj, ...updates }
         })
 
-        // Add the group object
-        processedObjects.push(groupObject)
-        updatedObjects = processedObjects
         break
       }
 
-      case "ungroup": {
-        const groupIdsToUngroup = operation.groupIds || []
-        const childrenToRemoveGroupRef: string[] = []
+      case "duplicate": {
+        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
+          return { objects, error: "No shapes provided to duplicate." }
+        }
 
-        updatedObjects = updatedObjects.filter((obj) => {
-          if (obj.type === "group" && groupIdsToUngroup.includes(obj.id)) {
-            if (obj.children) {
-              childrenToRemoveGroupRef.push(...obj.children)
-            }
-            return false // Remove the group object
-          }
-          return true
-        })
+        const uniqueIndices = Array.from(new Set(operation.shapeIndices))
+        const invalidIndex = uniqueIndices.find((idx: number) => idx < 0 || idx >= updatedObjects.length)
 
-        // Remove parent_group reference from children
-        updatedObjects = updatedObjects.map((obj) => {
-          if (childrenToRemoveGroupRef.includes(obj.id)) {
-            return { ...obj, parent_group: undefined }
+        if (invalidIndex !== undefined) {
+          return {
+            objects,
+            error: `Cannot duplicate shape at index ${invalidIndex}. Only ${updatedObjects.length} shapes exist.`,
           }
-          return obj
-        })
+        }
+
+        const offsetX = typeof operation.offsetX === "number" ? operation.offsetX : 20
+        const offsetY = typeof operation.offsetY === "number" ? operation.offsetY : 20
+
+        const duplicates = uniqueIndices
+          .map((idx) => updatedObjects[idx])
+          .filter(Boolean)
+          .map((source) => ({
+            ...source,
+            id: crypto.randomUUID(),
+            x: source.x + offsetX,
+            y: source.y + offsetY,
+          }))
+
+        updatedObjects = [...updatedObjects, ...duplicates]
+
+        break
+      }
+
+      case "bringToFront": {
+        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
+          return { objects, error: "No shapes provided to bring to front." }
+        }
+
+        const indexSet = new Set(operation.shapeIndices)
+        const selected = updatedObjects.filter((_, idx) => indexSet.has(idx))
+        if (selected.length === 0) {
+          return { objects, error: "None of the specified shapes could be found." }
+        }
+
+        const remaining = updatedObjects.filter((_, idx) => !indexSet.has(idx))
+        updatedObjects = [...remaining, ...selected]
+
+        break
+      }
+
+      case "sendToBack": {
+        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
+          return { objects, error: "No shapes provided to send to back." }
+        }
+
+        const indexSet = new Set(operation.shapeIndices)
+        const selected = updatedObjects.filter((_, idx) => indexSet.has(idx))
+        if (selected.length === 0) {
+          return { objects, error: "None of the specified shapes could be found." }
+        }
+
+        const remaining = updatedObjects.filter((_, idx) => !indexSet.has(idx))
+        updatedObjects = [...selected, ...remaining]
+
+        break
+      }
+
+      case "bringForward": {
+        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
+          return { objects, error: "No shapes provided to bring forward." }
+        }
+
+        const idSet = new Set(
+          operation.shapeIndices
+            .map((idx: number) => updatedObjects[idx])
+            .filter(Boolean)
+            .map((obj: CanvasObject) => obj.id),
+        )
+
+        if (idSet.size === 0) {
+          return { objects, error: "None of the specified shapes could be found." }
+        }
+
+        for (let i = updatedObjects.length - 2; i >= 0; i--) {
+          const current = updatedObjects[i]
+          const next = updatedObjects[i + 1]
+          if (idSet.has(current.id) && !idSet.has(next.id)) {
+            updatedObjects[i] = next
+            updatedObjects[i + 1] = current
+          }
+        }
+
+        break
+      }
+
+      case "sendBackward": {
+        if (!Array.isArray(operation.shapeIndices) || operation.shapeIndices.length === 0) {
+          return { objects, error: "No shapes provided to send backward." }
+        }
+
+        const idSet = new Set(
+          operation.shapeIndices
+            .map((idx: number) => updatedObjects[idx])
+            .filter(Boolean)
+            .map((obj: CanvasObject) => obj.id),
+        )
+
+        if (idSet.size === 0) {
+          return { objects, error: "None of the specified shapes could be found." }
+        }
+
+        for (let i = 1; i < updatedObjects.length; i++) {
+          const current = updatedObjects[i]
+          const previous = updatedObjects[i - 1]
+          if (idSet.has(current.id) && !idSet.has(previous.id)) {
+            updatedObjects[i] = previous
+            updatedObjects[i - 1] = current
+          }
+        }
+
         break
       }
 

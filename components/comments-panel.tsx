@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Check, Trash2, X, ChevronDown, ChevronLeft, MessageSquare } from "lucide-react"
+import { Check, Trash2, X } from "lucide-react"
 import {
   resolveComment,
   deleteComment,
@@ -23,7 +23,6 @@ interface CommentsPanelProps {
 
 export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCommentsChange }: CommentsPanelProps) {
   const [showResolved, setShowResolved] = useState(false)
-  const [isCollapsed, setIsCollapsed] = useState(false)
 
   const filteredComments = showResolved ? comments : comments.filter((c) => !c.resolved)
 
@@ -71,41 +70,11 @@ export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCo
     }
   }
 
-  if (isCollapsed) {
-    return (
-      <div className="fixed left-4 bottom-4 z-40">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsCollapsed(false)}
-          className="bg-background/95 backdrop-blur-md shadow-lg hover:shadow-xl transition-all hover:scale-105 border border-border/50 gap-2"
-        >
-          <MessageSquare className="h-4 w-4" />
-          <span className="text-xs font-medium">
-            {comments.filter((c) => !c.resolved).length} Comment
-            {comments.filter((c) => !c.resolved).length !== 1 ? "s" : ""}
-          </span>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-      </div>
-    )
-  }
-
   return (
     <div className="fixed left-4 bottom-4 z-40 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-200 hover:shadow-2xl flex flex-col w-4/12">
       {/* Header */}
       <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold tracking-tight flex-1 text-center">Comments</h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsCollapsed(true)}
-            className="h-7 w-7 p-0 hover:bg-background/80 transition-colors"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </Button>
-        </div>
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-center">Comments</h3>
         {comments.length > 0 && (
           <div className="flex items-center justify-center gap-2">
             <Button

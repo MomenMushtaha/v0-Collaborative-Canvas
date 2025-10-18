@@ -2,9 +2,7 @@
 
 import type { UserPresence } from "@/lib/types"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useMemo, useState } from "react"
-import { ChevronDown, ChevronUp, Users } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { useMemo } from "react"
 
 interface PresencePanelProps {
   currentUser: {
@@ -12,18 +10,9 @@ interface PresencePanelProps {
     userColor: string
   }
   otherUsers: UserPresence[]
-  topPosition?: number
-  onCollapseChange?: (collapsed: boolean) => void
 }
 
-export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCollapseChange }: PresencePanelProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false)
-
-  const handleCollapseToggle = (collapsed: boolean) => {
-    setIsCollapsed(collapsed)
-    onCollapseChange?.(collapsed)
-  }
-
+export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
   // Consider a user online if their last_seen is within the last 10 seconds
   const isUserOnline = (lastSeen: string) => {
     const lastSeenTime = new Date(lastSeen).getTime()
@@ -46,39 +35,10 @@ export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCol
   const onlineUsers = uniqueUsers.filter((user) => isUserOnline(user.last_seen))
   const offlineUsers = uniqueUsers.filter((user) => !isUserOnline(user.last_seen))
 
-  if (isCollapsed) {
-    return (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => handleCollapseToggle(false)}
-        className="absolute right-4 z-10 h-10 px-3 rounded-lg border-border/50 bg-background/95 backdrop-blur-md shadow-xl hover:shadow-2xl transition-all duration-200"
-        style={{ top: `${topPosition}px` }}
-      >
-        <Users className="h-4 w-4 mr-2" />
-        <span className="text-xs font-medium">{onlineUsers.length + 1} Active</span>
-        <ChevronDown className="h-4 w-4 ml-2" />
-      </Button>
-    )
-  }
-
   return (
-    <div
-      className="absolute right-4 z-10 w-64 max-h-[260px] rounded-xl border border-border/50 bg-background/95 shadow-xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl"
-      style={{ top: `${topPosition}px` }}
-    >
+    <div className="absolute right-4 top-20 z-10 w-64 max-h-[260px] rounded-xl border border-border/50 bg-background/95 shadow-xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">
       <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold tracking-tight flex-1 text-center">Active Users</h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleCollapseToggle(true)}
-            className="h-6 w-6 p-0 hover:bg-accent/50 -mr-2"
-          >
-            <ChevronUp className="h-4 w-4" />
-          </Button>
-        </div>
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-center">Active Users</h3>
 
         {/* Current User */}
         <div className="mb-2 flex items-center gap-3 rounded-lg p-2.5 -mx-2 transition-all duration-150 hover:bg-accent/50 hover:shadow-sm">

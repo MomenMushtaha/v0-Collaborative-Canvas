@@ -5,10 +5,6 @@ import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
-  Eye,
-  EyeOff,
-  Lock,
-  Unlock,
   Trash2,
   ChevronDown,
   ChevronRight,
@@ -26,8 +22,6 @@ interface LayersPanelProps {
   selectedIds: string[]
   onSelectObject: (id: string, addToSelection: boolean) => void
   onDeleteObject: (id: string) => void
-  onToggleVisibility?: (id: string) => void
-  onToggleLock?: (id: string) => void
   onReorder?: (id: string, newIndex: number) => void
   topPosition?: number
   onCollapseChange?: (collapsed: boolean) => void
@@ -38,8 +32,6 @@ export function LayersPanel({
   selectedIds,
   onSelectObject,
   onDeleteObject,
-  onToggleVisibility,
-  onToggleLock,
   onReorder,
   topPosition = 360,
   onCollapseChange,
@@ -105,8 +97,6 @@ export function LayersPanel({
 
   const renderObject = (obj: CanvasObject, depth = 0) => {
     const isSelected = selectedIds.includes(obj.id)
-    const isVisible = obj.visible !== false
-    const isLocked = obj.locked === true
     const isGroup = obj.type === "group"
     const isExpanded = expandedGroups.has(obj.id)
 
@@ -161,42 +151,6 @@ export function LayersPanel({
 
           {/* Actions */}
           <div className="flex items-center gap-0.5 flex-shrink-0">
-            {onToggleVisibility && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 hover:bg-background/80 transition-all"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggleVisibility(obj.id)
-                }}
-              >
-                {isVisible ? (
-                  <Eye className="h-3.5 w-3.5 text-foreground/70" />
-                ) : (
-                  <EyeOff className="h-3.5 w-3.5 text-muted-foreground/50" />
-                )}
-              </Button>
-            )}
-
-            {onToggleLock && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 hover:bg-background/80 transition-all"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggleLock(obj.id)
-                }}
-              >
-                {isLocked ? (
-                  <Lock className="h-3.5 w-3.5 text-foreground/70" />
-                ) : (
-                  <Unlock className="h-3.5 w-3.5 text-muted-foreground/50" />
-                )}
-              </Button>
-            )}
-
             <Button
               variant="ghost"
               size="sm"

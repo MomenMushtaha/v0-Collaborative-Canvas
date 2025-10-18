@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       userId,
       userName,
       viewport,
+      viewportSize,
     } = body
 
     console.log("[v0] Message:", message)
@@ -142,8 +143,14 @@ export async function POST(request: Request) {
       ),
     }
 
-    const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
-    const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
+    const canvasWidth =
+      typeof viewportSize?.width === "number" && Number.isFinite(viewportSize.width)
+        ? Math.max(1, Math.round(viewportSize.width))
+        : 1920
+    const canvasHeight =
+      typeof viewportSize?.height === "number" && Number.isFinite(viewportSize.height)
+        ? Math.max(1, Math.round(viewportSize.height))
+        : 1080
 
     const visibleArea = viewport
       ? {

@@ -35,6 +35,7 @@ export default function CanvasPage() {
   const [snapEnabled, setSnapEnabled] = useState(false)
   const [gridSize, setGridSize] = useState(20)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
+  const [viewportSize, setViewportSize] = useState({ width: 1920, height: 1080 })
   const [showHistory, setShowHistory] = useState(false)
   const [pendingHistoryRestore, setPendingHistoryRestore] = useState<CanvasObject[] | null>(null)
   const [lastSnapshotTime, setLastSnapshotTime] = useState(Date.now())
@@ -59,6 +60,24 @@ export default function CanvasPage() {
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()
+
+  useEffect(() => {
+    const updateViewportSize = () => {
+      if (typeof window === "undefined") return
+
+      setViewportSize({
+        width: Math.max(1, window.innerWidth),
+        height: Math.max(1, window.innerHeight),
+      })
+    }
+
+    updateViewportSize()
+    window.addEventListener("resize", updateViewportSize)
+
+    return () => {
+      window.removeEventListener("resize", updateViewportSize)
+    }
+  }, [])
 
   useEffect(() => {
     console.log("[v0] [PAGE] onSelectAllOfType state updated:", onSelectAllOfType)
@@ -316,6 +335,8 @@ export default function CanvasPage() {
         userId={user.id}
         userName={user.name}
         canvasId="default"
+        viewport={viewport}
+        viewportSize={viewportSize}
       />
       {showHistory && (
         <HistoryPanel

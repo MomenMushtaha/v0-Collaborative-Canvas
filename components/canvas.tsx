@@ -92,6 +92,21 @@ export function Canvas({
 
   const [commentDraft, setCommentDraft] = useState<{ x: number; y: number; content: string } | null>(null)
 
+  const [currentTime, setCurrentTime] = useState(Date.now())
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentTime(Date.now()), 1000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  const editIndicators = useMemo(() => {
+    return objects.filter((obj) => {
+      if (obj.visible === false) return false
+      const lastEdit = obj.meta?.lastModifiedAt
+      return typeof lastEdit === "number" && currentTime - lastEdit < 5000
+    })
+  }, [objects, currentTime])
+
   const selectedIds = internalSelectedIds
 
   useEffect(() => {
@@ -457,6 +472,50 @@ export function Canvas({
           </div>
         </div>
       )}
+
+      {/* Last edited indicators */}
+      <div className="pointer-events-none absolute inset-0">
+        {editIndicators.map((obj) => {
+          const meta = obj.meta
+          if (!meta?.lastModifiedAt) return null
+
+          const centerX = obj.x + obj.width / 2
+          const labelX =
+            canvasMetrics.offsetX + (viewportX + centerX * viewportZoom) * canvasMetrics.scaleX
+          const labelY =
+            canvasMetrics.offsetY + (viewportY + obj.y * viewportZoom) * canvasMetrics.scaleY
+          const color = meta.lastModifiedColor ?? "#6366f1"
+          const secondsAgo = Math.max(0, Math.round((currentTime - meta.lastModifiedAt) / 1000))
+          const timeText = secondsAgo <= 1 ? "just now" : `${secondsAgo}s ago`
+
+          return (
+            <div
+              key={`edit-indicator-${obj.id}`}
+              className="absolute z-30"
+              style={{
+                left: `${labelX}px`,
+                top: `${labelY}px`,
+                transform: "translate(-50%, -140%)",
+              }}
+            >
+              <div
+                className="flex items-center gap-2 rounded-full border bg-background/95 px-3 py-1 text-xs font-medium shadow-lg backdrop-blur"
+                style={{ borderColor: color }}
+              >
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="text-muted-foreground">Edited by</span>
+                <span className="font-semibold" style={{ color }}>
+                  {meta.lastModifiedByName ?? meta.lastModifiedBy ?? "Unknown"}
+                </span>
+                <span className="text-muted-foreground">• {timeText}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
 
       {/* Multiplayer cursors overlay */}
       <div className="pointer-events-none absolute inset-0">

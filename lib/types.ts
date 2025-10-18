@@ -23,6 +23,15 @@ export interface CanvasObject {
   content?: string // text content for text objects
   children?: string[] // IDs of child objects in a group
   parent_group?: string // ID of parent group if this object is in a group
+  meta?: CanvasObjectMetadata
+}
+
+export interface CanvasObjectMetadata {
+  lastModifiedBy?: string
+  lastModifiedByName?: string
+  lastModifiedColor?: string
+  lastModifiedAt?: number
+  lastOperation?: "create" | "update" | "delete"
 }
 
 export interface UserPresence {

@@ -108,6 +108,8 @@ export function CollaborativeCanvas({
   const { objects, isLoading, syncObjects, isConnected, queuedOperations } = useRealtimeCanvas({
     canvasId,
     userId,
+    userName,
+    userColor,
     onConnectionChange: (connected, queued) => {
       setConnectionState({ isConnected: connected, queuedOps: queued })
     },

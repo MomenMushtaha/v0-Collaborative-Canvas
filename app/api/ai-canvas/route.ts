@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       userId,
       userName,
       viewport,
-      viewportSize,
+      usableCanvasDimensions,
     } = body
 
     console.log("[v0] Message:", message)
@@ -31,6 +31,7 @@ export async function POST(request: Request) {
     console.log("[v0] Selected objects count:", safeSelectedIds.length)
     console.log("[v0] Canvas ID:", canvasId)
     console.log("[v0] User:", userName)
+    console.log("[v0] Usable canvas dimensions:", usableCanvasDimensions)
 
     if (!message) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 })
@@ -143,14 +144,8 @@ export async function POST(request: Request) {
       ),
     }
 
-    const canvasWidth =
-      typeof viewportSize?.width === "number" && Number.isFinite(viewportSize.width)
-        ? Math.max(1, Math.round(viewportSize.width))
-        : 1920
-    const canvasHeight =
-      typeof viewportSize?.height === "number" && Number.isFinite(viewportSize.height)
-        ? Math.max(1, Math.round(viewportSize.height))
-        : 1080
+    const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
+    const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
 
     const visibleArea = viewport
       ? {
@@ -158,23 +153,73 @@ export async function POST(request: Request) {
           top: Math.max(0, Math.round(-viewport.y / viewport.zoom)),
           right: Math.min(2000, Math.round((-viewport.x + canvasWidth) / viewport.zoom)),
           bottom: Math.min(2000, Math.round((-viewport.y + canvasHeight) / viewport.zoom)),
+          width: Math.round(canvasWidth / viewport.zoom),
+          height: Math.round(canvasHeight / viewport.zoom),
           centerX: Math.round((-viewport.x + canvasWidth / 2) / viewport.zoom),
-          centerY: Math.round((-viewport.y + 150) / viewport.zoom),
+          centerY: Math.round((-viewport.y + canvasHeight / 2) / viewport.zoom),
         }
       : {
           left: 0,
           top: 0,
           right: 1920,
           bottom: 1080,
+          width: 1920,
+          height: 1080,
           centerX: 960,
-          centerY: 150,
+          centerY: 540,
         }
 
+    const usableArea =
+      usableCanvasDimensions && viewport
+        ? {
+            // Convert panel offsets from screen pixels to canvas coordinates
+            leftOffset: Math.round(usableCanvasDimensions.leftOffset / viewport.zoom),
+            rightOffset: Math.round(usableCanvasDimensions.rightOffset / viewport.zoom),
+            topOffset: Math.round(usableCanvasDimensions.topOffset / viewport.zoom),
+            bottomOffset: Math.round(usableCanvasDimensions.bottomOffset / viewport.zoom),
+            // Calculate usable bounds
+            left: visibleArea.left + Math.round(usableCanvasDimensions.leftOffset / viewport.zoom),
+            top: visibleArea.top + Math.round(usableCanvasDimensions.topOffset / viewport.zoom),
+            right: visibleArea.right - Math.round(usableCanvasDimensions.rightOffset / viewport.zoom),
+            bottom: visibleArea.bottom - Math.round(usableCanvasDimensions.bottomOffset / viewport.zoom),
+            // Calculate usable dimensions
+            width: Math.round(
+              (canvasWidth - usableCanvasDimensions.leftOffset - usableCanvasDimensions.rightOffset) / viewport.zoom,
+            ),
+            height: Math.round(
+              (canvasHeight - usableCanvasDimensions.topOffset - usableCanvasDimensions.bottomOffset) / viewport.zoom,
+            ),
+            // Calculate center of usable area
+            centerX: Math.round(
+              (-viewport.x +
+                (canvasWidth - usableCanvasDimensions.rightOffset + usableCanvasDimensions.leftOffset) / 2) /
+                viewport.zoom,
+            ),
+            centerY: Math.round(
+              (-viewport.y +
+                (canvasHeight - usableCanvasDimensions.bottomOffset + usableCanvasDimensions.topOffset) / 2) /
+                viewport.zoom,
+            ),
+          }
+        : {
+            leftOffset: 0,
+            rightOffset: 0,
+            topOffset: 0,
+            bottomOffset: 0,
+            left: visibleArea.left,
+            top: visibleArea.top,
+            right: visibleArea.right,
+            bottom: visibleArea.bottom,
+            width: visibleArea.width,
+            height: visibleArea.height,
+            centerX: visibleArea.centerX,
+            centerY: visibleArea.centerY,
+          }
+
+    console.log("[v0] Visible area:", visibleArea)
+    console.log("[v0] Usable area:", usableArea)
+
     const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-    const clampCenter = (value: number | undefined, size: number, fallback: number) =>
-      clamp(value ?? fallback, size / 2, 2000 - size / 2)
-    const clampTopLeft = (value: number | undefined, size: number, fallback: number) =>
-      clamp(value ?? fallback, 0, 2000 - size)
 
     const NAMED_COLORS: Record<string, string> = {
       black: "#000000",
@@ -214,7 +259,7 @@ export async function POST(request: Request) {
     const tools = {
       getCanvasState: tool({
         description:
-          "Query information about the current canvas state. Use this to answer questions about shapes, count objects, or get information before making changes.",
+          "Query information about the current canvas state. Use this to answer questions about shapes, count objects, or get information before making making changes.",
         inputSchema: z.object({
           query: z.string().describe("What information to retrieve (e.g., 'count', 'list all', 'find blue shapes')"),
         }),
@@ -232,8 +277,8 @@ export async function POST(request: Request) {
         description: "Create a text layer on the canvas with customizable content, position, size, and color",
         inputSchema: z.object({
           text: z.string().describe("The text content to display"),
-          x: z.number().describe("X coordinate position on the canvas"),
-          y: z.number().describe("Y coordinate position on the canvas"),
+          x: z.number().optional().describe("X coordinate position on the canvas"),
+          y: z.number().optional().describe("Y coordinate position on the canvas"),
           fontSize: z.number().optional().describe("Font size in pixels (default: 16)"),
           color: z.string().optional().describe("Text color as hex code (e.g., #000000 for black)"),
         }),
@@ -245,25 +290,34 @@ export async function POST(request: Request) {
           }
 
           const finalColor = normalizeColorInput(color, "#000000")
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.centerY
 
           operations.push({
             type: "createText",
             text,
-            x,
-            y,
+            x: finalX,
+            y: finalY,
             fontSize: fontSize || 16,
             color: finalColor,
           })
 
-          return { success: true, text, x, y, fontSize: fontSize || 16, color: finalColor }
+          return {
+            success: true,
+            text,
+            x: finalX,
+            y: finalY,
+            fontSize: fontSize || 16,
+            color: finalColor,
+          }
         },
       }),
       createShape: tool({
         description: "Create a new shape on the canvas",
         inputSchema: z.object({
           shape: z.enum(["rectangle", "circle", "triangle", "line"]).describe("The type of shape to create"),
-          x: z.number().describe("X coordinate position on the canvas"),
-          y: z.number().describe("Y coordinate position on the canvas"),
+          x: z.number().optional().describe("X coordinate position on the canvas"),
+          y: z.number().optional().describe("Y coordinate position on the canvas"),
           width: z.number().describe("Width of the shape in pixels"),
           height: z.number().describe("Height of the shape in pixels"),
           color: z.string().describe("Hex color code (e.g., #ff0000 for red, #3b82f6 for blue)"),
@@ -276,14 +330,16 @@ export async function POST(request: Request) {
           }
 
           const finalColor = normalizeColorInput(color, "#3b82f6")
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.centerY
 
           operations.push({
             type: "create",
             object: {
               id: crypto.randomUUID(),
               type: shape,
-              x,
-              y,
+              x: finalX,
+              y: finalY,
               width,
               height,
               rotation: 0,
@@ -293,7 +349,15 @@ export async function POST(request: Request) {
             },
           })
 
-          return { success: true, shape, x, y, width, height, color: finalColor }
+          return {
+            success: true,
+            shape,
+            x: finalX,
+            y: finalY,
+            width,
+            height,
+            color: finalColor,
+          }
         },
       }),
       moveShape: tool({
@@ -308,7 +372,11 @@ export async function POST(request: Request) {
           deltaY: z.number().optional().describe("Relative Y movement (alternative to absolute y)"),
         }),
         execute: async ({ shapeIndex, x, y, deltaX, deltaY }) => {
-          const validation = validateMoveShape({ shapeIndex, x, y, deltaX, deltaY }, safeCurrentObjects, selectedIndices)
+          const validation = validateMoveShape(
+            { shapeIndex, x, y, deltaX, deltaY },
+            safeCurrentObjects,
+            selectedIndices,
+          )
           if (!validation.valid) {
             validationErrors.push(`moveShape: ${validation.error}`)
             return { error: validation.error }
@@ -337,7 +405,11 @@ export async function POST(request: Request) {
           scale: z.number().optional().describe("Scale factor (e.g., 2 for twice as big, 0.5 for half size)"),
         }),
         execute: async ({ shapeIndex, width, height, scale }) => {
-          const validation = validateResizeShape({ shapeIndex, width, height, scale }, safeCurrentObjects, selectedIndices)
+          const validation = validateResizeShape(
+            { shapeIndex, width, height, scale },
+            safeCurrentObjects,
+            selectedIndices,
+          )
           if (!validation.valid) {
             validationErrors.push(`resizeShape: ${validation.error}`)
             return { error: validation.error }
@@ -386,9 +458,9 @@ export async function POST(request: Request) {
       deleteShape: tool({
         description: "Delete one or more shapes from the canvas",
         inputSchema: z.object({
-          shapeIndex: shapeIndexSchema.optional().describe(
-            "Index of the shape to delete (0-based, or 'selected' for currently selected shape)",
-          ),
+          shapeIndex: shapeIndexSchema
+            .optional()
+            .describe("Index of the shape to delete (0-based, or 'selected' for currently selected shape)"),
           all: z.boolean().optional().describe("If true, delete all shapes from the canvas"),
         }),
         execute: async ({ shapeIndex, all }) => {
@@ -405,6 +477,79 @@ export async function POST(request: Request) {
           })
 
           return { success: true, shapeIndex: validation.shapeIndex, all }
+        },
+      }),
+      deleteShapesByType: tool({
+        description:
+          "Delete all shapes of a specific type (e.g., all rectangles, all circles). Use this when user asks to delete shapes by type.",
+        inputSchema: z.object({
+          shapeType: z
+            .enum(["rectangle", "circle", "triangle", "line", "text"])
+            .describe("The type of shapes to delete"),
+        }),
+        execute: async ({ shapeType }) => {
+          const matchingIndices = canvasContext
+            .filter((obj: any) => obj.type === shapeType)
+            .map((obj: any) => obj.index)
+
+          if (matchingIndices.length === 0) {
+            return {
+              success: false,
+              error: `No ${shapeType} shapes found on the canvas.`,
+              deletedCount: 0,
+            }
+          }
+
+          matchingIndices.reverse().forEach((index: number) => {
+            operations.push({
+              type: "delete",
+              shapeIndex: index,
+              all: false,
+            })
+          })
+
+          return {
+            success: true,
+            shapeType,
+            deletedCount: matchingIndices.length,
+            message: `Deleted ${matchingIndices.length} ${shapeType}${matchingIndices.length > 1 ? "s" : ""}`,
+          }
+        },
+      }),
+      deleteShapesByColor: tool({
+        description: "Delete all shapes of a specific color. Use this when user asks to delete shapes by color.",
+        inputSchema: z.object({
+          color: z.string().describe("The color to match (hex code like #ff0000 or color name like 'red')"),
+        }),
+        execute: async ({ color }) => {
+          const normalizedColor = normalizeColorInput(color, "")
+
+          const matchingIndices = canvasContext
+            .filter((obj: any) => obj.color === normalizedColor || obj.strokeColor === normalizedColor)
+            .map((obj: any) => obj.index)
+
+          if (matchingIndices.length === 0) {
+            return {
+              success: false,
+              error: `No shapes with color ${color} found on the canvas.`,
+              deletedCount: 0,
+            }
+          }
+
+          matchingIndices.reverse().forEach((index: number) => {
+            operations.push({
+              type: "delete",
+              shapeIndex: index,
+              all: false,
+            })
+          })
+
+          return {
+            success: true,
+            color: normalizedColor,
+            deletedCount: matchingIndices.length,
+            message: `Deleted ${matchingIndices.length} shape${matchingIndices.length > 1 ? "s" : ""} with color ${color}`,
+          }
         },
       }),
       arrangeShapes: tool({
@@ -449,14 +594,16 @@ export async function POST(request: Request) {
         execute: async ({ x, y, title, subtitle, primaryColor }) => {
           const formWidth = 360
           const formHeight = 320
-          const centerX = clampCenter(x, formWidth, visibleArea.centerX)
-          const centerY = clampCenter(y, formHeight, visibleArea.centerY)
+
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.centerY
+
           const buttonColor = normalizeColorInput(primaryColor, "#3b82f6")
 
           operations.push({
             type: "createLoginForm",
-            x: centerX,
-            y: centerY,
+            x: finalX,
+            y: finalY,
             width: formWidth,
             height: formHeight,
             titleText: title || "Welcome back",
@@ -473,9 +620,10 @@ export async function POST(request: Request) {
             helpText: "Forgot password?",
           })
 
-          return { success: true, x: centerX, y: centerY, width: formWidth, height: formHeight }
+          return { success: true, x: finalX, y: finalY, width: formWidth, height: formHeight }
         },
       }),
+
       createNavigationBar: tool({
         description:
           "Create a horizontal navigation bar with a brand label and evenly spaced menu items across the top of the canvas.",
@@ -490,9 +638,12 @@ export async function POST(request: Request) {
           const navItems = clamp(items ?? 4, 2, 8)
           const navWidth = Math.max(420, Math.min(960, navItems * 140))
           const navHeight = 64
-          const centerX = clampCenter(x, navWidth, visibleArea.centerX)
-          const topY = clampTopLeft(y, navHeight, visibleArea.top)
-          const leftX = clamp(centerX - navWidth / 2, 0, 2000 - navWidth)
+
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.top + navHeight / 2 + 20
+
+          const leftX = finalX - navWidth / 2
+          const topY = finalY - navHeight / 2
           const highlightColor = normalizeColorInput(accentColor, "#3b82f6")
 
           operations.push({
@@ -527,14 +678,16 @@ export async function POST(request: Request) {
         execute: async ({ x, y, title, description, buttonText, accentColor }) => {
           const cardWidth = 320
           const cardHeight = 220
-          const centerX = clampCenter(x, cardWidth, visibleArea.centerX)
-          const centerY = clampCenter(y, cardHeight, visibleArea.centerY)
+
+          const finalX = x !== undefined ? x : usableArea.centerX
+          const finalY = y !== undefined ? y : usableArea.centerY
+
           const accent = normalizeColorInput(accentColor, "#3b82f6")
 
           operations.push({
             type: "createCard",
-            x: centerX,
-            y: centerY,
+            x: finalX,
+            y: finalY,
             width: cardWidth,
             height: cardHeight,
             titleText: title || "Card title",
@@ -547,7 +700,7 @@ export async function POST(request: Request) {
             buttonTextColor: "#ffffff",
           })
 
-          return { success: true, x: centerX, y: centerY, width: cardWidth, height: cardHeight }
+          return { success: true, x: finalX, y: finalY, width: cardWidth, height: cardHeight }
         },
       }),
     }
@@ -559,17 +712,49 @@ CANVAS CENTER: (1000, 1000)
 VIEWPORT: Users can pan and zoom (100% to 300%)
 
 ${
-  viewport
+  viewport && usableCanvasDimensions
     ? `
 CURRENT VIEWPORT (User's visible area):
 - Zoom: ${Math.round(viewport.zoom * 100)}%
-- Visible area: (${visibleArea.left}, ${visibleArea.top}) to (${visibleArea.right}, ${visibleArea.bottom})
-- Recommended position for new objects: (${visibleArea.centerX}, ${visibleArea.centerY})
+- Full visible bounds: Left=${visibleArea.left}, Top=${visibleArea.top}, Right=${visibleArea.right}, Bottom=${visibleArea.bottom}
+- Full visible size: ${visibleArea.width}x${visibleArea.height} pixels
 
-⭐ CRITICAL: Always create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) to ensure they appear in the user's accessible viewport area.
+⭐ USABLE CANVAS AREA (excluding UI panels):
+- **Usable bounds: Left=${usableArea.left}, Top=${usableArea.top}, Right=${usableArea.right}, Bottom=${usableArea.bottom}**
+- **Usable size: ${usableArea.width}x${usableArea.height} pixels**
+- **Center of usable area: (${usableArea.centerX}, ${usableArea.centerY})** ← USE THIS FOR NEW OBJECTS
+- UI panel offsets: Left=${usableArea.leftOffset}px, Right=${usableArea.rightOffset}px, Top=${usableArea.topOffset}px, Bottom=${usableArea.bottomOffset}px
+
+⭐ CRITICAL POSITIONING RULES: 
+1. **ALWAYS create new objects at (${usableArea.centerX}, ${usableArea.centerY})** - the center of the usable area
+2. The user has panels open that cover parts of the canvas:
+   - Left side (toolbar): ~${usableArea.leftOffset}px
+   - Right side (panels): ~${usableArea.rightOffset}px
+   - Top (toolbar): ~${usableArea.topOffset}px
+   - Bottom (comments): ~${usableArea.bottomOffset}px
+3. **NEVER create objects in areas covered by panels** - they won't be visible to the user
+4. When user requests relative positioning (e.g., "5cm down", "below X"), calculate from existing objects but ensure result is within usable area
+5. For navigation bars, position near top of usable area: y ≈ ${usableArea.top + 50}
+6. For forms/cards, use center of usable area: (${usableArea.centerX}, ${usableArea.centerY})
+7. The usable area is where the user can actually see and interact with objects
 `
-    : `
-⭐ CRITICAL: Create new objects in the top-right accessible area (default: x=960, y=150) since users have zoom constraints.
+    : viewport
+      ? `
+CURRENT VIEWPORT (User's visible area):
+- Zoom: ${Math.round(viewport.zoom * 100)}%
+- Visible bounds: Left=${visibleArea.left}, Top=${visibleArea.top}, Right=${visibleArea.right}, Bottom=${visibleArea.bottom}
+- Visible size: ${visibleArea.width}x${visibleArea.height} pixels
+- **Center of visible area: (${visibleArea.centerX}, ${visibleArea.centerY})**
+
+⭐ POSITIONING GUIDELINES: 
+1. Default position for new objects: (${visibleArea.centerX}, ${visibleArea.centerY}) - center of user's view
+2. When user requests relative positioning (e.g., "5cm down", "below X"), calculate from existing objects
+3. Ensure objects are positioned within or near the visible viewport for best user experience
+4. For navigation bars, position near top of viewport: y ≈ ${visibleArea.top + 50}
+5. For forms/cards, use center of viewport: (${visibleArea.centerX}, ${visibleArea.centerY})
+`
+      : `
+⭐ DEFAULT POSITIONING: Create new objects at (960, 540) - center of default view.
 `
 }
 
@@ -600,11 +785,13 @@ AVAILABLE FUNCTIONS:
 4. resizeShape - Resize existing shapes
 5. rotateShape - Rotate existing shapes
 6. deleteShape - Delete specific shapes or clear all
-7. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
-8. createText - Create a text layer on the canvas
-9. createLoginForm - Build a multi-element login form layout with labels and button
-10. createNavigationBar - Create a navigation bar with menu items
-11. createCardLayout - Create a card with media area, text, and button
+7. deleteShapesByType - Delete all shapes of a specific type (e.g., all rectangles)
+8. deleteShapesByColor - Delete all shapes of a specific color
+9. arrangeShapes - Arrange multiple shapes in patterns (grid, row, column, circle)
+10. createText - Create a text layer on the canvas
+11. createLoginForm - Build a multi-element login form layout with labels and button
+12. createNavigationBar - Create a navigation bar with menu items
+13. createCardLayout - Create a card with media area, text, and button
 
 SHAPE IDENTIFICATION RULES:
 - **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
@@ -628,26 +815,43 @@ COLOR REFERENCE (use hex codes):
 
 POSITION REFERENCE:
 ${
-  viewport
+  usableCanvasDimensions && viewport
     ? `
-- **REQUIRED position for new objects**: (${visibleArea.centerX}, ${visibleArea.centerY}) - This is in the user's visible area
+- **DEFAULT position**: (${usableArea.centerX}, ${usableArea.centerY}) - Center of USABLE area (visible to user)
+- Usable top-left: (${usableArea.left}, ${usableArea.top})
+- Usable top-right: (${usableArea.right}, ${usableArea.top})
+- Usable bottom-left: (${usableArea.left}, ${usableArea.bottom})
+- Usable bottom-right: (${usableArea.right}, ${usableArea.bottom})
+- **AVOID areas covered by panels** (outside usable bounds)
+`
+    : viewport
+      ? `
+- **DEFAULT position**: (${visibleArea.centerX}, ${visibleArea.centerY}) - Center of user's visible area
 - Visible top-left: (${visibleArea.left}, ${visibleArea.top})
 - Visible top-right: (${visibleArea.right}, ${visibleArea.top})
 - Visible bottom-left: (${visibleArea.left}, ${visibleArea.bottom})
 - Visible bottom-right: (${visibleArea.right}, ${visibleArea.bottom})
 `
-    : `
-- **REQUIRED position for new objects**: (960, 150) - Top-right accessible area
+      : `
+- **DEFAULT position**: (960, 540) - Center of default view
 - Accessible area: (0, 0) to (1920, 1080)
 `
 }
+
+RELATIVE POSITIONING:
+- When user says "5cm down" or "below X", calculate relative to existing objects or viewport center
+- 1cm ≈ 37.8 pixels (standard screen DPI)
+- "above" = negative Y, "below" = positive Y
+- "left of" = negative X, "right of" = positive X
+- Calculate positions to keep objects visible and well-positioned in the usable area
+- **Ensure calculated positions stay within usable bounds to remain visible**
 
 DEFAULT VALUES:
 - Shape size: 100x100 pixels
 - Spacing: 50 pixels
 - Grid columns: 3
 - Font size: 16 pixels
-- **REQUIRED default position: (${visibleArea.centerX}, ${visibleArea.centerY}) - Always use this for new objects**
+- **DEFAULT position: (${usableArea.centerX}, ${usableArea.centerY}) - Center of usable area**
 
 BEST PRACTICES:
 1. For questions about the canvas, use getCanvasState first
@@ -656,15 +860,19 @@ BEST PRACTICES:
 4. Be conversational and explain what you're doing
 5. If a request is ambiguous, make a reasonable assumption and explain it
 6. **ALWAYS check if there's a selected shape before assuming which shape to operate on**
-7. **CRITICAL: ALWAYS create new objects at (${visibleArea.centerX}, ${visibleArea.centerY}) - this is within the user's accessible viewport**
+7. **Position objects in the usable area (${usableArea.centerX}, ${usableArea.centerY}) so they're visible to the user**
+8. **When user requests relative positioning, calculate from existing objects but ensure result is within usable bounds**
+9. **When deleting by type or color, use deleteShapesByType or deleteShapesByColor**
+10. **The usable area excludes UI panels - objects created there will be visible and accessible**
 
 Examples:
-- "Create a blue square" → createShape(rectangle, x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, 100x100, blue)
+- "Create a blue square" → createShape(rectangle, x: ${usableArea.centerX}, y: ${usableArea.centerY}, 100x100, blue)
+- "Add text 5cm below the header" → Find header Y position, add ~189 pixels (5cm), createText at that position (ensure within usable area)
 - "Move the circle left" → moveShape(find circle index, deltaX: -100)
 - "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
 - "How many shapes?" → getCanvasState(query: "count")
-- "Delete all red shapes" → Find all red shapes and delete each one
-- "Add text 'Hello World'" → createText(text: 'Hello World', x: ${visibleArea.centerX}, y: ${visibleArea.centerY}, fontSize: 24, color: '#000000')`
+- "Delete all rectangles" → deleteShapesByType(shapeType: "rectangle")
+- "Create a login form" → createLoginForm at usable area center (${usableArea.centerX}, ${usableArea.centerY})`
 
     const result = await generateText({
       model: "openai/gpt-4o-mini",
@@ -770,8 +978,12 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Invalid shape type. Must be rectangle, circle, triangle, or line." }
   }
 
-  if (typeof args.x !== "number" || typeof args.y !== "number") {
-    return { valid: false, error: "Position (x, y) must be numbers." }
+  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
+    return { valid: false, error: "X position must be a number between 0 and 2000." }
+  }
+
+  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 2000)) {
+    return { valid: false, error: "Y position must be a number between 0 and 2000." }
   }
 
   if (typeof args.width !== "number" || typeof args.height !== "number") {
@@ -784,10 +996,6 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
 
   if (args.width > 2000 || args.height > 2000) {
     return { valid: false, error: "Dimensions cannot exceed 2000 pixels." }
-  }
-
-  if (args.x < 0 || args.x > 2000 || args.y < 0 || args.y > 2000) {
-    return { valid: false, error: "Position must be within canvas bounds (0-2000)." }
   }
 
   return { valid: true }
@@ -932,8 +1140,12 @@ function validateCreateText(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Text content is required." }
   }
 
-  if (typeof args.x !== "number" || typeof args.y !== "number") {
-    return { valid: false, error: "Position (x, y) must be numbers." }
+  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
+    return { valid: false, error: "X position must be a number between 0 and 2000." }
+  }
+
+  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 2000)) {
+    return { valid: false, error: "Y position must be a number between 0 and 2000." }
   }
 
   if (args.fontSize !== undefined && (typeof args.fontSize !== "number" || args.fontSize <= 0)) {

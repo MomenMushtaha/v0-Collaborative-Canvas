@@ -17,6 +17,8 @@ import {
   Triangle,
   Minus,
   Type,
+  Folder,
+  FolderOpen,
 } from "lucide-react"
 
 interface LayersPanelProps {
@@ -43,13 +45,30 @@ export function LayersPanel({
   onCollapseChange,
 }: LayersPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   const handleCollapseToggle = (collapsed: boolean) => {
     setIsCollapsed(collapsed)
     onCollapseChange?.(collapsed)
   }
 
+  const toggleGroupExpansion = (groupId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupId)) {
+        next.delete(groupId)
+      } else {
+        next.add(groupId)
+      }
+      return next
+    })
+  }
+
   const getObjectIcon = (obj: CanvasObject) => {
+    if (obj.type === "group") {
+      const isExpanded = expandedGroups.has(obj.id)
+      return isExpanded ? <FolderOpen className="h-4 w-4" /> : <Folder className="h-4 w-4" />
+    }
     if (obj.type === "text") return <Type className="h-4 w-4" />
     switch (obj.shape) {
       case "rectangle":
@@ -66,16 +85,143 @@ export function LayersPanel({
   }
 
   const getObjectLabel = (obj: CanvasObject) => {
+    if (obj.type === "group") {
+      const childCount = obj.children_ids?.length || 0
+      return `Group (${childCount})`
+    }
     if (obj.type === "text") {
       return "Text"
     }
 
-    // Return the capitalized type name (rectangle, circle, triangle, line)
     return obj.type.charAt(0).toUpperCase() + obj.type.slice(1)
   }
 
   // Sort objects by z-index (reverse so highest z-index is at top)
   const sortedObjects = [...objects].sort((a, b) => (b.z || 0) - (a.z || 0))
+
+  const topLevelObjects = sortedObjects.filter((obj) => {
+    return !objects.some((other) => other.type === "group" && other.children_ids?.includes(obj.id))
+  })
+
+  const renderObject = (obj: CanvasObject, depth = 0) => {
+    const isSelected = selectedIds.includes(obj.id)
+    const isVisible = obj.visible !== false
+    const isLocked = obj.locked === true
+    const isGroup = obj.type === "group"
+    const isExpanded = expandedGroups.has(obj.id)
+
+    return (
+      <div key={obj.id}>
+        <div
+          className={`
+            flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer
+            transition-all duration-200
+            ${
+              isSelected
+                ? "bg-primary/10 border border-primary/20 shadow-sm"
+                : "hover:bg-accent/50 border border-transparent"
+            }
+          `}
+          style={{ marginLeft: `${depth * 16}px` }}
+          onClick={(e) => onSelectObject(obj.id, e.shiftKey)}
+        >
+          {isGroup && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 w-5 p-0 hover:bg-background/80"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleGroupExpansion(obj.id)
+              }}
+            >
+              {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            </Button>
+          )}
+
+          {/* Icon */}
+          <div
+            className={`
+              flex-shrink-0 p-1.5 rounded-md transition-colors
+              ${isSelected ? "bg-primary/20 text-primary" : "bg-muted/50 text-muted-foreground"}
+            `}
+          >
+            {getObjectIcon(obj)}
+          </div>
+
+          {/* Label */}
+          <div
+            className={`
+              flex-1 text-sm truncate transition-colors
+              ${isSelected ? "font-medium text-foreground" : "text-foreground/80"}
+            `}
+          >
+            {getObjectLabel(obj)}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {onToggleVisibility && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 hover:bg-background/80 transition-all"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleVisibility(obj.id)
+                }}
+              >
+                {isVisible ? (
+                  <Eye className="h-3.5 w-3.5 text-foreground/70" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5 text-muted-foreground/50" />
+                )}
+              </Button>
+            )}
+
+            {onToggleLock && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 hover:bg-background/80 transition-all"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleLock(obj.id)
+                }}
+              >
+                {isLocked ? (
+                  <Lock className="h-3.5 w-3.5 text-foreground/70" />
+                ) : (
+                  <Unlock className="h-3.5 w-3.5 text-muted-foreground/50" />
+                )}
+              </Button>
+            )}
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-all"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDeleteObject(obj.id)
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        {isGroup && isExpanded && obj.children_ids && obj.children_ids.length > 0 && (
+          <div className="mt-1">
+            {obj.children_ids.map((childId) => {
+              const child = objects.find((o) => o.id === childId)
+              return child ? renderObject(child, depth + 1) : null
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   if (isCollapsed) {
     return (
@@ -118,7 +264,7 @@ export function LayersPanel({
       {/* Layers List */}
       <ScrollArea className="h-[150px]">
         <div className="p-2 space-y-1">
-          {sortedObjects.length === 0 ? (
+          {topLevelObjects.length === 0 ? (
             <div className="text-center text-sm text-muted-foreground py-8 px-4">
               <div className="mb-2 opacity-50">
                 <Square className="h-8 w-8 mx-auto" />
@@ -127,101 +273,7 @@ export function LayersPanel({
               <p className="text-xs mt-1">Start drawing on the canvas</p>
             </div>
           ) : (
-            sortedObjects.map((obj) => {
-              const isSelected = selectedIds.includes(obj.id)
-              const isVisible = obj.visible !== false
-              const isLocked = obj.locked === true
-
-              return (
-                <div
-                  key={obj.id}
-                  className={`
-                    flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer
-                    transition-all duration-200
-                    ${
-                      isSelected
-                        ? "bg-primary/10 border border-primary/20 shadow-sm"
-                        : "hover:bg-accent/50 border border-transparent"
-                    }
-                  `}
-                  onClick={(e) => onSelectObject(obj.id, e.shiftKey)}
-                >
-                  {/* Icon */}
-                  <div
-                    className={`
-                    flex-shrink-0 p-1.5 rounded-md transition-colors
-                    ${isSelected ? "bg-primary/20 text-primary" : "bg-muted/50 text-muted-foreground"}
-                  `}
-                  >
-                    {getObjectIcon(obj)}
-                  </div>
-
-                  {/* Label */}
-                  <div
-                    className={`
-                    flex-1 text-sm truncate transition-colors
-                    ${isSelected ? "font-medium text-foreground" : "text-foreground/80"}
-                  `}
-                  >
-                    {getObjectLabel(obj)}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-0.5 flex-shrink-0">
-                    {/* Visibility Toggle */}
-                    {onToggleVisibility && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 hover:bg-background/80 transition-all"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onToggleVisibility(obj.id)
-                        }}
-                      >
-                        {isVisible ? (
-                          <Eye className="h-3.5 w-3.5 text-foreground/70" />
-                        ) : (
-                          <EyeOff className="h-3.5 w-3.5 text-muted-foreground/50" />
-                        )}
-                      </Button>
-                    )}
-
-                    {/* Lock Toggle */}
-                    {onToggleLock && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 hover:bg-background/80 transition-all"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onToggleLock(obj.id)
-                        }}
-                      >
-                        {isLocked ? (
-                          <Lock className="h-3.5 w-3.5 text-foreground/70" />
-                        ) : (
-                          <Unlock className="h-3.5 w-3.5 text-muted-foreground/50" />
-                        )}
-                      </Button>
-                    )}
-
-                    {/* Delete */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-all"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onDeleteObject(obj.id)
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              )
-            })
+            topLevelObjects.map((obj) => renderObject(obj, 0))
           )}
         </div>
       </ScrollArea>

@@ -6,6 +6,7 @@ import type { CanvasObject } from "@/lib/types"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ChevronDown, ChevronRight, Palette } from "lucide-react"
+import { useRecentColors } from "@/hooks/use-recent-colors"
 
 interface StylePanelProps {
   selectedObjects: CanvasObject[]
@@ -16,10 +17,21 @@ interface StylePanelProps {
 
 export function StylePanel({ selectedObjects, onStyleChange, topPosition = 640, onCollapseChange }: StylePanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const { recentColors, addRecentColor } = useRecentColors()
 
   const handleCollapseToggle = (collapsed: boolean) => {
     setIsCollapsed(collapsed)
     onCollapseChange?.(collapsed)
+  }
+
+  const handleStyleChange = (updates: Partial<CanvasObject>) => {
+    if (updates.fill_color) {
+      addRecentColor(updates.fill_color)
+    }
+    if (updates.stroke_color) {
+      addRecentColor(updates.stroke_color)
+    }
+    onStyleChange(updates)
   }
 
   if (selectedObjects.length === 0 || isCollapsed) {
@@ -69,15 +81,21 @@ export function StylePanel({ selectedObjects, onStyleChange, topPosition = 640, 
       <div className="p-4 space-y-4">
         <div className="space-y-2">
           <Label>Fill Color</Label>
-          <ColorPicker color={fillColor} onChange={(color) => onStyleChange({ fill_color: color })} label="Fill" />
+          <ColorPicker
+            color={fillColor}
+            onChange={(color) => handleStyleChange({ fill_color: color })}
+            label="Fill"
+            recentColors={recentColors}
+          />
         </div>
 
         <div className="space-y-2">
           <Label>Stroke Color</Label>
           <ColorPicker
             color={strokeColor}
-            onChange={(color) => onStyleChange({ stroke_color: color })}
+            onChange={(color) => handleStyleChange({ stroke_color: color })}
             label="Stroke"
+            recentColors={recentColors}
           />
         </div>
 

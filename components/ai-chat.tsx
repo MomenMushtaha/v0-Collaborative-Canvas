@@ -16,7 +16,12 @@ interface AiChatProps {
   userName: string
   canvasId: string
   viewport: { x: number; y: number; zoom: number }
-  viewportSize: { width: number; height: number }
+  usableCanvasDimensions?: {
+    leftOffset: number
+    rightOffset: number
+    topOffset: number
+    bottomOffset: number
+  }
 }
 
 interface Message {
@@ -38,7 +43,7 @@ export function AiChat({
   userName,
   canvasId,
   viewport,
-  viewportSize,
+  usableCanvasDimensions,
 }: AiChatProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
@@ -98,7 +103,7 @@ export function AiChat({
           userId,
           userName,
           viewport,
-          viewportSize,
+          usableCanvasDimensions,
           currentObjects: sanitizedObjects,
           selectedObjectIds,
           selectedObjects,

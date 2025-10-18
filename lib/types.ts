@@ -1,7 +1,7 @@
 export interface CanvasObject {
   id: string
   canvas_id: string
-  type: "rectangle" | "circle" | "triangle" | "line" | "text"
+  type: "rectangle" | "circle" | "triangle" | "line" | "text" | "group" // Added "group" type
   x: number
   y: number
   width: number
@@ -21,6 +21,8 @@ export interface CanvasObject {
   locked?: boolean // lock to prevent editing
   shape?: "rectangle" | "circle" | "triangle" | "line" // shape type for non-text objects
   content?: string // text content for text objects
+  children?: string[] // IDs of child objects in a group
+  parent_group?: string // ID of parent group if this object is in a group
 }
 
 export interface UserPresence {

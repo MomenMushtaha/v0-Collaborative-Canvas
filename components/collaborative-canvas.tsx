@@ -256,10 +256,7 @@ export function CollaborativeCanvas({
       )
 
       const uniqueIds = Array.from(
-        new Set([
-          ...previousState.map((obj) => obj.id),
-          ...historyRestore.map((obj) => obj.id),
-        ]),
+        new Set([...previousState.map((obj) => obj.id), ...historyRestore.map((obj) => obj.id)]),
       )
 
       setIsUndoRedoOperation(true)
@@ -434,6 +431,105 @@ export function CollaborativeCanvas({
     })
   }, [selectedObjectIds, objects, toast, onSelectionChange])
 
+  const handleGroup = useCallback(() => {
+    if (selectedObjectIds.length < 2) {
+      toast({
+        title: "Cannot Group",
+        description: "Select at least 2 objects to create a group",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+
+    // Calculate bounding box for the group
+    const minX = Math.min(...selectedObjs.map((obj) => obj.x))
+    const minY = Math.min(...selectedObjs.map((obj) => obj.y))
+    const maxX = Math.max(...selectedObjs.map((obj) => obj.x + obj.width))
+    const maxY = Math.max(...selectedObjs.map((obj) => obj.y + obj.height))
+
+    const groupId = crypto.randomUUID()
+    const groupObject: CanvasObject = {
+      id: groupId,
+      canvas_id: canvasId,
+      type: "group",
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      rotation: 0,
+      fill_color: "transparent",
+      stroke_color: "#3b82f6",
+      stroke_width: 2,
+      children: selectedObjectIds,
+    }
+
+    // Update child objects to reference the parent group
+    const updatedObjects = objects.map((obj) => {
+      if (selectedObjectIds.includes(obj.id)) {
+        return { ...obj, parent_group: groupId }
+      }
+      return obj
+    })
+
+    // Add the group object
+    updatedObjects.push(groupObject)
+    syncObjects(updatedObjects)
+
+    // Select the new group
+    setSelectedObjectIds([groupId])
+    console.log("[v0] Grouped", selectedObjectIds.length, "objects into group:", groupId)
+
+    toast({
+      title: "Grouped",
+      description: `${selectedObjectIds.length} objects grouped together`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, canvasId, toast])
+
+  const handleUngroup = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedGroups = objects.filter((obj) => selectedObjectIds.includes(obj.id) && obj.type === "group")
+
+    if (selectedGroups.length === 0) {
+      toast({
+        title: "Cannot Ungroup",
+        description: "Select a group to ungroup",
+        variant: "destructive",
+      })
+      return
+    }
+
+    let updatedObjects = [...objects]
+    const newSelectedIds: string[] = []
+
+    selectedGroups.forEach((group) => {
+      if (group.children) {
+        // Remove parent_group reference from children
+        updatedObjects = updatedObjects.map((obj) => {
+          if (group.children?.includes(obj.id)) {
+            newSelectedIds.push(obj.id)
+            return { ...obj, parent_group: undefined }
+          }
+          return obj
+        })
+
+        // Remove the group object
+        updatedObjects = updatedObjects.filter((obj) => obj.id !== group.id)
+      }
+    })
+
+    syncObjects(updatedObjects)
+    setSelectedObjectIds(newSelectedIds)
+    console.log("[v0] Ungrouped", selectedGroups.length, "group(s)")
+
+    toast({
+      title: "Ungrouped",
+      description: `${selectedGroups.length} group${selectedGroups.length > 1 ? "s" : ""} ungrouped`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
   const selectedObjects = useMemo(() => {
     return objects.filter((obj) => selectedObjectIds.includes(obj.id))
   }, [objects, selectedObjectIds])
@@ -447,6 +543,8 @@ export function CollaborativeCanvas({
     onSelectAllOfType: handleSelectAllOfType, // Added select all of type to keyboard shortcuts
     onCopy: handleCopy,
     onPaste: handlePaste,
+    onGroup: handleGroup,
+    onUngroup: handleUngroup,
     canUndo: historyCanUndo,
     canRedo: historyCanRedo,
     hasSelection: selectedObjectIds.length > 0,
@@ -1009,6 +1107,62 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
 
       case "createForm": {
         updatedObjects = createForm(updatedObjects, operation)
+        break
+      }
+
+      case "group": {
+        const groupId = operation.groupId
+        const childrenIds = operation.childrenIds || []
+        const groupObject: CanvasObject = {
+          id: groupId,
+          canvas_id: operation.canvasId,
+          type: "group",
+          x: operation.x,
+          y: operation.y,
+          width: operation.width,
+          height: operation.height,
+          rotation: 0,
+          fill_color: operation.fill_color || "transparent",
+          stroke_color: operation.stroke_color || "#3b82f6",
+          stroke_width: operation.stroke_width || 2,
+          children: childrenIds,
+        }
+
+        // Update child objects to reference the parent group
+        const processedObjects = updatedObjects.map((obj) => {
+          if (childrenIds.includes(obj.id)) {
+            return { ...obj, parent_group: groupId }
+          }
+          return obj
+        })
+
+        // Add the group object
+        processedObjects.push(groupObject)
+        updatedObjects = processedObjects
+        break
+      }
+
+      case "ungroup": {
+        const groupIdsToUngroup = operation.groupIds || []
+        const childrenToRemoveGroupRef: string[] = []
+
+        updatedObjects = updatedObjects.filter((obj) => {
+          if (obj.type === "group" && groupIdsToUngroup.includes(obj.id)) {
+            if (obj.children) {
+              childrenToRemoveGroupRef.push(...obj.children)
+            }
+            return false // Remove the group object
+          }
+          return true
+        })
+
+        // Remove parent_group reference from children
+        updatedObjects = updatedObjects.map((obj) => {
+          if (childrenToRemoveGroupRef.includes(obj.id)) {
+            return { ...obj, parent_group: undefined }
+          }
+          return obj
+        })
         break
       }
 

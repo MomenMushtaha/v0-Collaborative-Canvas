@@ -89,6 +89,8 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
               text_content: op.object.text_content,
               font_size: op.object.font_size,
               font_family: op.object.font_family,
+              visible: op.object.visible,
+              locked: op.object.locked,
               updated_at: new Date().toISOString(),
             })
             .eq("id", op.object.id)
@@ -254,6 +256,8 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
                 text_content: obj.text_content,
                 font_size: obj.font_size,
                 font_family: obj.font_family,
+                visible: obj.visible,
+                locked: obj.locked,
                 updated_at: new Date().toISOString(),
               })
               .eq("id", obj.id)

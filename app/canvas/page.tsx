@@ -140,11 +140,15 @@ export default function CanvasPage() {
   }, [currentObjects, user, lastSnapshotTime])
 
   const handleSignOut = async () => {
+    console.log("[v0] Sign out initiated for user:", user?.id)
+
     if (user) {
-      await deleteSession(supabase, user.id)
+      const sessionDeleted = await deleteSession(supabase, user.id)
+      console.log("[v0] Session deletion result:", sessionDeleted)
     }
 
     await supabase.auth.signOut()
+    console.log("[v0] Supabase auth sign out complete")
     router.push("/")
   }
 

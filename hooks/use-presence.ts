@@ -30,7 +30,17 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
     async function initPresence() {
       console.log("[v0] Initializing presence for user:", userName, userId)
 
-      await supabase.from("user_presence").delete().eq("canvas_id", canvasId).eq("user_id", userId)
+      // This ensures cleanup even if previous session didn't clean up properly
+      const { error: deleteError } = await supabase.from("user_presence").delete().eq("user_id", userId)
+
+      if (deleteError) {
+        console.error("[v0] Error deleting old presence records:", deleteError)
+      } else {
+        console.log("[v0] Deleted all old presence records for user")
+      }
+
+      // Small delay to ensure deletion completes
+      await new Promise((resolve) => setTimeout(resolve, 100))
 
       const { data, error } = await supabase
         .from("user_presence")
@@ -63,8 +73,8 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
         if (presenceIdRef.current) {
           await supabase.from("user_presence").delete().eq("id", presenceIdRef.current)
         }
-        // Fallback: also delete by user_id and canvas_id to ensure cleanup
-        await supabase.from("user_presence").delete().eq("canvas_id", canvasId).eq("user_id", userId)
+        await supabase.from("user_presence").delete().eq("user_id", userId)
+        console.log("[v0] Presence cleanup complete")
       }
       cleanup()
     }

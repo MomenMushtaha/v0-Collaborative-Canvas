@@ -24,7 +24,15 @@ export default function HomePage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
+    const code = params.get("code")
     const errorParam = params.get("error")
+
+    // If there's a code parameter, redirect to the proper callback route
+    if (code) {
+      console.log("[v0] OAuth code detected on home page, redirecting to callback route")
+      window.location.href = `/auth/callback${window.location.search}`
+      return
+    }
 
     if (errorParam === "already_logged_in") {
       setError("You are already logged in on another device. Please log out from that device first.")

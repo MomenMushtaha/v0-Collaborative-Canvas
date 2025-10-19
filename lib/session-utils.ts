@@ -40,8 +40,50 @@ export async function checkExistingSession(supabase: SupabaseClient, userId: str
     return null
   }
 
+  if (data) {
+    const isValid = await isSessionStillValid(data.session_id)
+    if (!isValid) {
+      console.log("[v0] Found stale session, deleting it")
+      // Session is stale (JWT expired or invalid), delete it
+      await supabase.from("user_sessions").delete().eq("id", data.id)
+      return null
+    }
+  }
+
   console.log("[v0] Found existing session:", data)
   return data
+}
+
+/**
+ * Check if a JWT session token is still valid
+ */
+async function isSessionStillValid(sessionId: string): Promise<boolean> {
+  try {
+    // Decode the JWT to check expiration
+    const parts = sessionId.split(".")
+    if (parts.length !== 3) {
+      console.log("[v0] Invalid JWT format")
+      return false
+    }
+
+    const payload = JSON.parse(atob(parts[1]))
+    const expirationTime = payload.exp * 1000 // Convert to milliseconds
+
+    // Check if token is expired (with 5 minute buffer)
+    const now = Date.now()
+    const isExpired = now >= expirationTime - 5 * 60 * 1000
+
+    if (isExpired) {
+      console.log("[v0] Session JWT is expired")
+      return false
+    }
+
+    console.log("[v0] Session JWT is still valid")
+    return true
+  } catch (error) {
+    console.error("[v0] Error validating session JWT:", error)
+    return false
+  }
 }
 
 /**

@@ -27,9 +27,6 @@ export default function CanvasPage() {
   const [onRedo, setOnRedo] = useState<(() => void) | undefined>()
   const [onAlign, setOnAlign] = useState<((type: AlignmentType) => void) | undefined>()
   const [onDistribute, setOnDistribute] = useState<((type: DistributeType) => void) | undefined>()
-  const [onGroup, setOnGroup] = useState<(() => void) | undefined>()
-  const [onUngroup, setOnUngroup] = useState<(() => void) | undefined>()
-  const [hasGroupedSelection, setHasGroupedSelection] = useState(false)
   const [gridEnabled, setGridEnabled] = useState(false)
   const [snapEnabled, setSnapEnabled] = useState(false)
   const [gridSize, setGridSize] = useState(20)
@@ -92,6 +89,17 @@ export default function CanvasPage() {
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     router.push("/")
+  }
+
+  const handleCopy = () => {
+    if (selectedObjectIds.length === 0) return
+    const selectedObjs = currentObjects.filter((obj) => selectedObjectIds.includes(obj.id))
+    // Store in a state that can be accessed by the collaborative canvas
+    console.log("[v0] Copy triggered from toolbar for", selectedObjectIds.length, "objects")
+  }
+
+  const handlePaste = () => {
+    console.log("[v0] Paste triggered from toolbar")
   }
 
   const handleOperations = (operations: any[], queueItemId: string) => {
@@ -209,9 +217,8 @@ export default function CanvasPage() {
           onShowHistory={() => setShowHistory(true)}
           commentMode={commentMode}
           onToggleCommentMode={() => setCommentMode(!commentMode)}
-          onGroup={onGroup}
-          onUngroup={onUngroup}
-          hasGroupedSelection={hasGroupedSelection}
+          onCopy={handleCopy}
+          onPaste={handlePaste}
         />
       </div>
       <div className="h-full w-full">
@@ -231,9 +238,6 @@ export default function CanvasPage() {
           canRedo={setCanRedo}
           onAlign={setOnAlign}
           onDistribute={setOnDistribute}
-          onGroup={setOnGroup}
-          onUngroup={setOnUngroup}
-          hasGroupedSelection={setHasGroupedSelection}
           gridEnabled={gridEnabled}
           snapEnabled={snapEnabled}
           gridSize={gridSize}

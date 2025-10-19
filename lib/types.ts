@@ -21,7 +21,6 @@ export interface CanvasObject {
   locked?: boolean // lock to prevent editing
   shape?: "rectangle" | "circle" | "triangle" | "line" // shape type for non-text objects
   content?: string // text content for text objects
-  group_id?: string // group identifier for grouped objects
 }
 
 export interface UserPresence {
@@ -48,12 +47,4 @@ export interface HistoryCommand {
   beforeState?: CanvasObject[]
   afterState?: CanvasObject[]
   timestamp: number
-}
-
-export interface CanvasGroup {
-  id: string
-  canvas_id: string
-  name?: string
-  created_at?: string
-  object_ids: string[]
 }

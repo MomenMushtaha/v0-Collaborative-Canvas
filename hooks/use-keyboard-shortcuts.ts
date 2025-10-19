@@ -10,8 +10,6 @@ interface KeyboardShortcutsProps {
   onSelectAll?: () => void
   onCopy?: () => void
   onPaste?: () => void
-  onGroup?: () => void
-  onUngroup?: () => void
   canUndo?: boolean
   canRedo?: boolean
   hasSelection?: boolean
@@ -25,8 +23,6 @@ export function useKeyboardShortcuts({
   onSelectAll,
   onCopy,
   onPaste,
-  onGroup,
-  onUngroup,
   canUndo = false,
   canRedo = false,
   hasSelection = false,
@@ -66,20 +62,6 @@ export function useKeyboardShortcuts({
         return
       }
 
-      if (modifier && e.key === "g" && hasSelection && onGroup) {
-        e.preventDefault()
-        onGroup()
-        console.log("[v0] Keyboard shortcut: Group")
-        return
-      }
-
-      if (modifier && e.shiftKey && e.key === "g" && hasSelection && onUngroup) {
-        e.preventDefault()
-        onUngroup()
-        console.log("[v0] Keyboard shortcut: Ungroup")
-        return
-      }
-
       // Undo: Ctrl+Z (Windows/Linux) or Cmd+Z (Mac)
       if (modifier && e.key === "z" && !e.shiftKey && canUndo && onUndo) {
         e.preventDefault()
@@ -115,18 +97,5 @@ export function useKeyboardShortcuts({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [
-    onUndo,
-    onRedo,
-    onDelete,
-    onDuplicate,
-    onSelectAll,
-    onCopy,
-    onPaste,
-    onGroup,
-    onUngroup,
-    canUndo,
-    canRedo,
-    hasSelection,
-  ])
+  }, [onUndo, onRedo, onDelete, onDuplicate, onSelectAll, onCopy, onPaste, canUndo, canRedo, hasSelection])
 }

@@ -15,7 +15,6 @@ import { StylePanel } from "@/components/style-panel"
 import { LayersPanel } from "@/components/layers-panel"
 import { alignObjects, distributeObjects } from "@/lib/alignment-utils"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
-import { groupObjects, ungroupObjects, isObjectInGroup } from "@/lib/group-utils"
 import { useToast } from "@/hooks/use-toast"
 import { CommentMarker } from "@/components/comment-marker"
 import type { Comment } from "@/lib/comments-utils"
@@ -50,9 +49,6 @@ interface CollaborativeCanvasProps {
   canRedo?: (canRedo: boolean) => void
   onAlign?: Dispatch<SetStateAction<((type: AlignmentType) => void) | undefined>>
   onDistribute?: Dispatch<SetStateAction<((type: DistributeType) => void) | undefined>>
-  onGroup?: Dispatch<SetStateAction<(() => void) | undefined>>
-  onUngroup?: Dispatch<SetStateAction<(() => void) | undefined>>
-  hasGroupedSelection?: (hasGrouped: boolean) => void
   gridEnabled?: boolean
   snapEnabled?: boolean
   gridSize?: number
@@ -78,9 +74,6 @@ export function CollaborativeCanvas({
   canRedo,
   onAlign,
   onDistribute,
-  onGroup,
-  onUngroup,
-  hasGroupedSelection,
   gridEnabled = false,
   snapEnabled = false,
   gridSize = 20,
@@ -340,61 +333,86 @@ export function CollaborativeCanvas({
     console.log("[v0] Selected all objects:", allIds.length)
   }, [objects])
 
-  const handleGroup = useCallback(() => {
-    if (selectedObjectIds.length < 2) {
-      toast({
-        title: "Cannot Group",
-        description: "Select at least 2 objects to group",
-        variant: "destructive",
-      })
-      return
+  const selectedObjects = useMemo(() => {
+    return objects.filter((obj) => selectedObjectIds.includes(obj.id))
+  }, [objects, selectedObjectIds])
+
+  useKeyboardShortcuts({
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    onDelete: handleDelete,
+    onDuplicate: handleDuplicate,
+    onSelectAll: handleSelectAll,
+    onCopy: handleCopy,
+    onPaste: handlePaste,
+    canUndo: historyCanUndo,
+    canRedo: historyCanRedo,
+    hasSelection: selectedObjectIds.length > 0,
+  })
+
+  useEffect(() => {
+    if (onUndo) {
+      onUndo(() => handleUndo)
     }
-
-    const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
-    const groupedObjs = groupObjects(selectedObjs, groupId)
-
-    const updatedObjects = objects.map((obj) => {
-      const grouped = groupedObjs.find((g) => g.id === obj.id)
-      return grouped || obj
-    })
-
-    syncObjects(updatedObjects)
-    console.log("[v0] Grouped", selectedObjectIds.length, "objects with ID:", groupId)
-
-    toast({
-      title: "Grouped",
-      description: `${selectedObjectIds.length} objects grouped together`,
-    })
-  }, [selectedObjectIds, objects, syncObjects, toast])
-
-  const handleUngroup = useCallback(() => {
-    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
-    const hasGrouped = selectedObjs.some((obj) => isObjectInGroup(obj))
-
-    if (!hasGrouped) {
-      toast({
-        title: "Cannot Ungroup",
-        description: "No grouped objects in selection",
-        variant: "destructive",
-      })
-      return
+    if (onRedo) {
+      onRedo(() => handleRedo)
     }
+  }, [handleUndo, handleRedo, onUndo, onRedo])
 
-    const ungroupedObjs = ungroupObjects(selectedObjs)
-    const updatedObjects = objects.map((obj) => {
-      const ungrouped = ungroupedObjs.find((u) => u.id === obj.id)
-      return ungrouped || obj
-    })
+  useEffect(() => {
+    canUndo?.(historyCanUndo)
+    canRedo?.(historyCanRedo)
+  }, [historyCanUndo, historyCanRedo, canUndo, canRedo])
 
-    syncObjects(updatedObjects)
-    console.log("[v0] Ungrouped", selectedObjectIds.length, "objects")
+  useEffect(() => {
+    if (aiOperations.length > 0) {
+      console.log("[v0] Processing AI operations:", aiOperations)
 
-    toast({
-      title: "Ungrouped",
-      description: `${selectedObjectIds.length} objects ungrouped`,
-    })
-  }, [selectedObjectIds, objects, syncObjects, toast])
+      // Process operations sequentially with delays
+      const processOperationsSequentially = async () => {
+        let updatedObjects = [...objects]
+        const failedOperations: string[] = []
+
+        for (let i = 0; i < aiOperations.length; i++) {
+          const operation = aiOperations[i]
+          console.log(`[v0] Processing operation ${i + 1}/${aiOperations.length}:`, operation.type)
+
+          try {
+            const result = applyOperation(updatedObjects, operation)
+            if (result.error) {
+              failedOperations.push(`${operation.type}: ${result.error}`)
+              console.warn(`[v0] Operation failed:`, result.error)
+            } else {
+              updatedObjects = result.objects
+              // Sync after each successful operation for visual feedback
+              syncObjects(updatedObjects)
+            }
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : "Unknown error"
+            failedOperations.push(`${operation.type}: ${errorMsg}`)
+            console.error(`[v0] Operation error:`, error)
+          }
+
+          // Add delay between operations (except for the last one)
+          if (i < aiOperations.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 150))
+          }
+        }
+
+        if (failedOperations.length > 0) {
+          console.warn("[v0] Some operations failed:", failedOperations)
+        }
+
+        onAiOperationsProcessed?.()
+      }
+
+      processOperationsSequentially()
+    }
+  }, [aiOperations])
+
+  useEffect(() => {
+    onObjectsChange?.(objects)
+  }, [objects, onObjectsChange])
 
   const handleSelectionChange = (selectedIds: string[]) => {
     setSelectedObjectIds(selectedIds)
@@ -495,104 +513,22 @@ export function CollaborativeCanvas({
   )
 
   useEffect(() => {
-    if (onUndo) {
-      onUndo(() => handleUndo)
+    if (onAlign) {
+      onAlign(() => handleAlign)
     }
-    if (onRedo) {
-      onRedo(() => handleRedo)
+    if (onDistribute) {
+      onDistribute(() => handleDistribute)
     }
-  }, [handleUndo, handleRedo, onUndo, onRedo])
+  }, [handleAlign, handleDistribute, onAlign, onDistribute])
 
-  useEffect(() => {
-    canUndo?.(historyCanUndo)
-    canRedo?.(historyCanRedo)
-  }, [historyCanUndo, historyCanRedo, canUndo, canRedo])
-
-  useEffect(() => {
-    if (aiOperations.length > 0) {
-      console.log("[v0] Processing AI operations:", aiOperations)
-
-      // Process operations sequentially with delays
-      const processOperationsSequentially = async () => {
-        let updatedObjects = [...objects]
-        const failedOperations: string[] = []
-
-        for (let i = 0; i < aiOperations.length; i++) {
-          const operation = aiOperations[i]
-          console.log(`[v0] Processing operation ${i + 1}/${aiOperations.length}:`, operation.type)
-
-          try {
-            const result = applyOperation(updatedObjects, operation)
-            if (result.error) {
-              failedOperations.push(`${operation.type}: ${result.error}`)
-              console.warn(`[v0] Operation failed:`, result.error)
-            } else {
-              updatedObjects = result.objects
-              // Sync after each successful operation for visual feedback
-              syncObjects(updatedObjects)
-            }
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Unknown error"
-            failedOperations.push(`${operation.type}: ${errorMsg}`)
-            console.error(`[v0] Operation error:`, error)
-          }
-
-          // Add delay between operations (except for the last one)
-          if (i < aiOperations.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 150))
-          }
-        }
-
-        if (failedOperations.length > 0) {
-          console.warn("[v0] Some operations failed:", failedOperations)
-        }
-
-        onAiOperationsProcessed?.()
+  const handleCommentCreate = useCallback(
+    (x: number, y: number, content: string) => {
+      if (onCommentCreate) {
+        onCommentCreate(x, y, content)
       }
-
-      processOperationsSequentially()
-    }
-  }, [aiOperations])
-
-  useEffect(() => {
-    onObjectsChange?.(objects)
-  }, [objects, onObjectsChange])
-
-  const selectedObjects = useMemo(() => {
-    return objects.filter((obj) => selectedObjectIds.includes(obj.id))
-  }, [objects, selectedObjectIds])
-
-  const hasGroupedInSelection = useMemo(() => {
-    return selectedObjects.some((obj) => isObjectInGroup(obj))
-  }, [selectedObjects])
-
-  useKeyboardShortcuts({
-    onUndo: handleUndo,
-    onRedo: handleRedo,
-    onDelete: handleDelete,
-    onDuplicate: handleDuplicate,
-    onSelectAll: handleSelectAll,
-    onCopy: handleCopy,
-    onPaste: handlePaste,
-    onGroup: handleGroup,
-    onUngroup: handleUngroup,
-    canUndo: historyCanUndo,
-    canRedo: historyCanRedo,
-    hasSelection: selectedObjectIds.length > 0,
-  })
-
-  useEffect(() => {
-    if (onGroup) {
-      onGroup(() => handleGroup)
-    }
-    if (onUngroup) {
-      onUngroup(() => handleUngroup)
-    }
-  }, [handleGroup, handleUngroup, onGroup, onUngroup])
-
-  useEffect(() => {
-    hasGroupedSelection?.(hasGroupedInSelection)
-  }, [hasGroupedInSelection, hasGroupedSelection])
+    },
+    [onCommentCreate],
+  )
 
   if (isLoading) {
     return (
@@ -630,7 +566,7 @@ export function CollaborativeCanvas({
         snapEnabled={snapEnabled}
         gridSize={gridSize}
         commentMode={commentMode}
-        onCommentCreate={onCommentCreate}
+        onCommentCreate={handleCommentCreate}
       >
         <MultiplayerCursors users={otherUsers} />
         {comments.map((comment) => (

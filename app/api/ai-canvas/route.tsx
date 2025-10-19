@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import { streamText, tool } from "ai"
 import { z } from "zod"
+import { getObjectsToMove } from "@/lib/group-utils"
 
 export const maxDuration = 30
 
@@ -149,6 +150,9 @@ export async function POST(request: Request) {
     const canvasWidth = typeof window !== "undefined" ? window.innerWidth : 1920
     const canvasHeight = typeof window !== "undefined" ? window.innerHeight : 1080
 
+    const MIN_ZOOM = 0.1 // Changed from 0 to 0.1 to set minimum zoom to 10%
+    const MAX_ZOOM = 3
+
     const visibleArea = viewport
       ? {
           left: Math.max(0, Math.round(-viewport.x / viewport.zoom)),
@@ -259,6 +263,85 @@ export async function POST(request: Request) {
     const shapeIndexSchema = z.union([z.number(), z.literal("selected")])
 
     const tools = {
+      fetchAndAnalyzeWebsite: tool({
+        description:
+          "Fetch and analyze a website from a URL to extract design inspiration. Use this when the user provides a URL (like apple.com, stripe.com, etc.) and wants to create a design inspired by it.",
+        inputSchema: z.object({
+          url: z.string().url().describe("The website URL to fetch and analyze (e.g., https://apple.com)"),
+        }),
+        execute: async ({ url }) => {
+          try {
+            console.log("[v0] Fetching website:", url)
+
+            // Fetch the website HTML
+            const response = await fetch(url, {
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+              },
+            })
+
+            if (!response.ok) {
+              return {
+                success: false,
+                error: `Failed to fetch website: ${response.status} ${response.statusText}`,
+              }
+            }
+
+            const html = await response.text()
+
+            // Extract design elements from HTML
+            const designAnalysis = analyzeWebsiteDesign(html, url)
+
+            // Generate canvas objects inspired by the design
+            const inspirationObjects = generateCanvasFromDesign(designAnalysis, usableArea)
+
+            // Add operations to create the inspired design
+            inspirationObjects.forEach((obj) => {
+              if (obj.type === "text") {
+                operations.push({
+                  type: "createText",
+                  text: obj.text,
+                  x: obj.x,
+                  y: obj.y,
+                  fontSize: obj.fontSize,
+                  color: obj.color,
+                })
+              } else {
+                operations.push({
+                  type: "create",
+                  object: {
+                    id: crypto.randomUUID(),
+                    type: obj.shapeType,
+                    x: obj.x,
+                    y: obj.y,
+                    width: obj.width,
+                    height: obj.height,
+                    rotation: 0,
+                    fill_color: obj.color,
+                    stroke_color: obj.color,
+                    stroke_width: 2,
+                  },
+                })
+              }
+            })
+
+            return {
+              success: true,
+              url,
+              designAnalysis,
+              objectsCreated: inspirationObjects.length,
+              message: `Analyzed ${url} and created ${inspirationObjects.length} design elements inspired by it.`,
+            }
+          } catch (error) {
+            console.error("[v0] Error fetching website:", error)
+            return {
+              success: false,
+              error: `Failed to fetch website: ${error instanceof Error ? error.message : String(error)}`,
+            }
+          }
+        },
+      }),
       getCanvasState: tool({
         description:
           "Query information about the current canvas state. Use this to answer questions about shapes, count objects, or get information before making making changes.",
@@ -363,16 +446,20 @@ export async function POST(request: Request) {
         },
       }),
       moveShape: tool({
-        description: "Move one or more existing shapes to a new position",
+        description:
+          "Move one or more existing shapes to a new position. If a shape is part of a group, the entire group will move together.",
         inputSchema: z.object({
           shapeIdentifier: z
             .union([
               z.number(),
               z.literal("selected"),
-              z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+              z.object({
+                type: z.enum(["rectangle", "circle", "triangle", "line", "group"]),
+                color: z.string().optional(),
+              }),
             ])
             .describe(
-              "Identifier for the shape(s) to move. Can be an index (0-based, -1 for last), 'selected', or an object specifying shape type and optional color (e.g., { type: 'circle', color: '#ff0000' }).",
+              "Identifier for the shape(s) to move. Can be an index (0-based, -1 for last), 'selected', or an object specifying shape type and optional color (e.g., { type: 'circle', color: '#ff0000' }). Note: Moving a shape that's part of a group will move the entire group.",
             ),
           x: z.number().optional().describe("New X coordinate (absolute position)"),
           y: z.number().optional().describe("New Y coordinate (absolute position)"),
@@ -394,7 +481,15 @@ export async function POST(request: Request) {
               validationErrors.push(`moveShape: ${indexResult.error}`)
               return { error: indexResult.error }
             }
-            resolvedShapeIndices = [indexResult.shapeIndex]
+            const objectId = safeCurrentObjects[indexResult.shapeIndex]?.id
+            if (objectId) {
+              const objectsToMove = getObjectsToMove(objectId, safeCurrentObjects)
+              resolvedShapeIndices = objectsToMove
+                .map((id) => safeCurrentObjects.findIndex((obj) => obj.id === id))
+                .filter((idx) => idx !== -1)
+            } else {
+              resolvedShapeIndices = [indexResult.shapeIndex]
+            }
           } else if (typeof shapeIdentifier === "object" && shapeIdentifier.type) {
             const matchingShapes = canvasContext.filter(
               (obj) =>
@@ -414,7 +509,20 @@ export async function POST(request: Request) {
               validationErrors.push(`moveShape: Ambiguous request. ${clarification}`)
               return { error: clarification }
             } else {
-              resolvedShapeIndices = matchingShapes.map((s) => s.index)
+              const allIndicesToMove = new Set<number>()
+              for (const shape of matchingShapes) {
+                const objectId = safeCurrentObjects[shape.index]?.id
+                if (objectId) {
+                  const objectsToMove = getObjectsToMove(objectId, safeCurrentObjects)
+                  objectsToMove.forEach((id) => {
+                    const idx = safeCurrentObjects.findIndex((obj) => obj.id === id)
+                    if (idx !== -1) allIndicesToMove.add(idx)
+                  })
+                } else {
+                  allIndicesToMove.add(shape.index)
+                }
+              }
+              resolvedShapeIndices = Array.from(allIndicesToMove)
             }
           } else {
             validationErrors.push("moveShape: Invalid shapeIdentifier provided.")
@@ -455,7 +563,7 @@ export async function POST(request: Request) {
             deltaX,
             deltaY,
             count: resolvedShapeIndices.length,
-            message: `Moved ${resolvedShapeIndices.length} shape${resolvedShapeIndices.length > 1 ? "s" : ""}`,
+            message: `Moved ${resolvedShapeIndices.length} shape${resolvedShapeIndices.length > 1 ? "s" : ""}${resolvedShapeIndices.length > 1 ? " (including group members)" : ""}`,
           }
         },
       }),
@@ -1146,9 +1254,9 @@ Maintain a mental model of which objects the user is currently working with:
 
 ${spatialReasoningPrompt}
 
-CANVAS DIMENSIONS: 2000x2000 pixels
-CANVAS CENTER: (1000, 1000)
-VIEWPORT: Users can pan and zoom (100% to 300%)
+CANVAS DIMENSIONS: 20000x20000 pixels
+CANVAS CENTER: (10000, 10000)
+VIEWPORT: Users can pan and zoom (10% to 300%)
 
 ${
   viewport && usableCanvasDimensions
@@ -1193,7 +1301,7 @@ CURRENT VIEWPORT (User's visible area):
 5. For forms/cards, use center of viewport: (${visibleArea.centerX}, ${visibleArea.centerY})
 `
       : `
-⭐ DEFAULT POSITIONING: Create new objects at (960, 540) - center of default view.
+⭐ DEFAULT POSITIONING: Create new objects at (10000, 10000) - center of default view.
 `
 }
 
@@ -1239,13 +1347,13 @@ Examples:
 - "make all the blue shapes bigger" → resizeShape({ type: 'rectangle', color: '#3b82f6' }, scale: 1.5, applyToAll: true) for each type
 
 Examples:
-- User says "double the size of the circle" → Find all circles on canvas
+- "double the size of the circle" → Find all circles on canvas
   - If 1 circle exists at index 3 → Use index 3, don't ask about selection
   - If 2+ circles exist → Ask "Which circle? There's a blue one and a green one"
-- User says "move the rectangle left" → Find all rectangles
+- "move the rectangle left" → Find all rectangles
   - If 1 rectangle exists → Use that rectangle's index automatically
   - If 2+ rectangles exist → Ask for clarification
-- User says "delete the triangle" → Find all triangles
+- "delete the triangle" → Find all triangles
   - If 1 triangle exists → Delete it by index
   - If 0 triangles exist → Say "There are no triangles on the canvas"
 
@@ -1286,6 +1394,7 @@ AVAILABLE FUNCTIONS:
 11. createLoginForm - Build a multi-element login form layout with labels and button
 12. createNavigationBar - Create a navigation bar with menu items
 13. createCardLayout - Create a card with media area, text, and button
+14. fetchAndAnalyzeWebsite - Fetch and analyze a website for design inspiration.
 
 TEXT LAYER RULES:
 - Use createText to add text layers
@@ -1319,8 +1428,8 @@ ${
 - Visible bottom-right: (${visibleArea.right}, ${visibleArea.bottom})
 `
       : `
-- **DEFAULT position**: (960, 540) - Center of default view
-- Accessible area: (0, 0) to (1920, 1080)
+- **DEFAULT position**: (10000, 10000) - Center of default view
+- Accessible area: (0, 0) to (20000, 20000)
 `
 }
 
@@ -1530,13 +1639,14 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Invalid shape type. Must be rectangle, circle, triangle, or line." }
   }
 
-  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
-    return { valid: false, error: "X position must be a number between 0 and 2000." }
+  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 20000)) {
+    return { valid: false, error: "X position must be a number between 0 and 20000." }
   }
 
-  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 2000)) {
-    return { valid: false, error: "Y position must be a number between 0 and 2000." }
+  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 20000)) {
+    return { valid: false, error: "Y position must be a number between 0 and 20000." }
   }
+  // </CHANGE>
 
   if (typeof args.width !== "number" || typeof args.height !== "number") {
     return { valid: false, error: "Dimensions (width, height) must be numbers." }
@@ -1546,9 +1656,10 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Dimensions must be positive numbers." }
   }
 
-  if (args.width > 2000 || args.height > 2000) {
-    return { valid: false, error: "Dimensions cannot exceed 2000 pixels." }
+  if (args.width > 5000 || args.height > 5000) {
+    return { valid: false, error: "Dimensions cannot exceed 5000 pixels." }
   }
+  // </CHANGE>
 
   return { valid: true }
 }
@@ -1563,13 +1674,14 @@ function validateMoveShape(
     return { valid: false, error: "Internal error: shapeIndex not resolved." }
   }
 
-  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
-    return { valid: false, error: "X position must be a number between 0 and 2000." }
+  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 20000)) {
+    return { valid: false, error: "X position must be a number between 0 and 20000." }
   }
 
-  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 2000)) {
-    return { valid: false, error: "Y position must be a number between 0 and 2000." }
+  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 20000)) {
+    return { valid: false, error: "Y position must be a number between 0 and 20000." }
   }
+  // </CHANGE>
 
   if (args.deltaX !== undefined && typeof args.deltaX !== "number") {
     return { valid: false, error: "deltaX must be a number." }
@@ -1599,13 +1711,14 @@ function validateResizeShape(
     return { valid: false, error: "Internal error: shapeIndex not resolved." }
   }
 
-  if (args.width !== undefined && (typeof args.width !== "number" || args.width <= 0 || args.width > 2000)) {
-    return { valid: false, error: "Width must be a positive number not exceeding 2000." }
+  if (args.width !== undefined && (typeof args.width !== "number" || args.width <= 0 || args.width > 5000)) {
+    return { valid: false, error: "Width must be a positive number not exceeding 5000." }
   }
 
-  if (args.height !== undefined && (typeof args.height !== "number" || args.height <= 0 || args.height > 2000)) {
-    return { valid: false, error: "Height must be a positive number not exceeding 2000." }
+  if (args.height !== undefined && (typeof args.height !== "number" || args.height <= 0 || args.height > 5000)) {
+    return { valid: false, error: "Height must be a positive number not exceeding 5000." }
   }
+  // </CHANGE>
 
   if (args.scale !== undefined && (typeof args.scale !== "number" || args.scale <= 0 || args.scale > 10)) {
     return { valid: false, error: "Scale must be a positive number between 0 and 10." }
@@ -1692,13 +1805,14 @@ function validateCreateText(args: any): { valid: boolean; error?: string } {
     return { valid: false, error: "Text content is required." }
   }
 
-  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
-    return { valid: false, error: "X position must be a number between 0 and 2000." }
+  if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 20000)) {
+    return { valid: false, error: "X position must be a number between 0 and 20000." }
   }
 
-  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 2000)) {
-    return { valid: false, error: "Y position must be a number between 0 and 2000." }
+  if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 20000)) {
+    return { valid: false, error: "Y position must be a number between 0 and 20000." }
   }
+  // </CHANGE>
 
   if (args.fontSize !== undefined && (typeof args.fontSize !== "number" || args.fontSize <= 0)) {
     return { valid: false, error: "Font size must be a positive number." }
@@ -1709,4 +1823,208 @@ function validateCreateText(args: any): { valid: boolean; error?: string } {
   }
 
   return { valid: true }
+}
+
+function analyzeWebsiteDesign(html: string, url: string) {
+  const analysis = {
+    colors: [] as string[],
+    hasHero: false,
+    hasNavigation: false,
+    hasCards: false,
+    hasCTA: false,
+    textContent: [] as string[],
+    layoutStyle: "unknown" as string,
+  }
+
+  // Extract colors from inline styles and style tags
+  const colorRegex = /#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})\b/g
+  const colors = html.match(colorRegex) || []
+  analysis.colors = [...new Set(colors)].slice(0, 5) // Get up to 5 unique colors
+
+  // Detect common design patterns
+  analysis.hasHero = /hero|banner|jumbotron/i.test(html)
+  analysis.hasNavigation = /<nav|navigation|menu/i.test(html)
+  analysis.hasCards = /card|grid|feature/i.test(html)
+  analysis.hasCTA = /button|cta|call-to-action/i.test(html)
+
+  // Extract text content from headings
+  const h1Match = html.match(/<h1[^>]*>(.*?)<\/h1>/i)
+  const h2Matches = html.match(/<h2[^>]*>(.*?)<\/h2>/gi)
+
+  if (h1Match) {
+    const cleanText = h1Match[1].replace(/<[^>]*>/g, "").trim()
+    if (cleanText.length > 0 && cleanText.length < 100) {
+      analysis.textContent.push(cleanText)
+    }
+  }
+
+  if (h2Matches && h2Matches.length > 0) {
+    h2Matches.slice(0, 3).forEach((match) => {
+      const cleanText = match.replace(/<[^>]*>/g, "").trim()
+      if (cleanText.length > 0 && cleanText.length < 100) {
+        analysis.textContent.push(cleanText)
+      }
+    })
+  }
+
+  // Determine layout style based on URL and patterns
+  if (url.includes("apple.com")) {
+    analysis.layoutStyle = "minimalist-hero"
+  } else if (url.includes("stripe.com")) {
+    analysis.layoutStyle = "modern-gradient"
+  } else if (analysis.hasCards) {
+    analysis.layoutStyle = "card-grid"
+  } else if (analysis.hasHero) {
+    analysis.layoutStyle = "hero-centric"
+  } else {
+    analysis.layoutStyle = "standard"
+  }
+
+  return analysis
+}
+
+function generateCanvasFromDesign(analysis: any, usableArea: any) {
+  const objects: any[] = []
+  const primaryColor = analysis.colors[0] || "#3b82f6"
+  const secondaryColor = analysis.colors[1] || "#6366f1"
+  const accentColor = analysis.colors[2] || "#8b5cf6"
+
+  // Create navigation bar if detected
+  if (analysis.hasNavigation) {
+    objects.push({
+      type: "shape",
+      shapeType: "rectangle",
+      x: usableArea.centerX,
+      y: usableArea.top + 30,
+      width: usableArea.width * 0.9,
+      height: 60,
+      color: primaryColor,
+    })
+
+    objects.push({
+      type: "text",
+      text: "Navigation",
+      x: usableArea.left + 100,
+      y: usableArea.top + 30,
+      fontSize: 18,
+      color: "#ffffff",
+    })
+  }
+
+  // Create hero section if detected
+  if (analysis.hasHero) {
+    const heroY = analysis.hasNavigation ? usableArea.top + 150 : usableArea.top + 100
+
+    objects.push({
+      type: "shape",
+      shapeType: "rectangle",
+      x: usableArea.centerX,
+      y: heroY,
+      width: usableArea.width * 0.8,
+      height: 300,
+      color: secondaryColor,
+    })
+
+    if (analysis.textContent.length > 0) {
+      objects.push({
+        type: "text",
+        text: analysis.textContent[0],
+        x: usableArea.centerX,
+        y: heroY - 50,
+        fontSize: 32,
+        color: "#ffffff",
+      })
+    }
+
+    if (analysis.hasCTA) {
+      objects.push({
+        type: "shape",
+        shapeType: "rectangle",
+        x: usableArea.centerX,
+        y: heroY + 80,
+        width: 200,
+        height: 50,
+        color: accentColor,
+      })
+
+      objects.push({
+        type: "text",
+        text: "Get Started",
+        x: usableArea.centerX,
+        y: heroY + 80,
+        fontSize: 16,
+        color: "#ffffff",
+      })
+    }
+  }
+
+  // Create card grid if detected
+  if (analysis.hasCards) {
+    const cardY = analysis.hasHero ? usableArea.top + 500 : usableArea.top + 200
+    const cardWidth = 250
+    const cardHeight = 200
+    const spacing = 50
+    const cardsPerRow = 3
+
+    for (let i = 0; i < 3; i++) {
+      const col = i % cardsPerRow
+      const startX = usableArea.centerX - ((cardsPerRow - 1) * (cardWidth + spacing)) / 2
+
+      objects.push({
+        type: "shape",
+        shapeType: "rectangle",
+        x: startX + col * (cardWidth + spacing),
+        y: cardY,
+        width: cardWidth,
+        height: cardHeight,
+        color: "#ffffff",
+      })
+
+      if (analysis.textContent[i + 1]) {
+        objects.push({
+          type: "text",
+          text: analysis.textContent[i + 1],
+          x: startX + col * (cardWidth + spacing),
+          y: cardY - 60,
+          fontSize: 20,
+          color: primaryColor,
+        })
+      }
+    }
+  }
+
+  // If no specific patterns detected, create a simple inspired layout
+  if (objects.length === 0) {
+    objects.push({
+      type: "shape",
+      shapeType: "rectangle",
+      x: usableArea.centerX,
+      y: usableArea.centerY - 100,
+      width: 600,
+      height: 400,
+      color: primaryColor,
+    })
+
+    objects.push({
+      type: "text",
+      text: "Inspired Design",
+      x: usableArea.centerX,
+      y: usableArea.centerY - 150,
+      fontSize: 36,
+      color: "#ffffff",
+    })
+
+    if (analysis.textContent.length > 0) {
+      objects.push({
+        type: "text",
+        text: analysis.textContent[0],
+        x: usableArea.centerX,
+        y: usableArea.centerY,
+        fontSize: 18,
+        color: "#ffffff",
+      })
+    }
+  }
+
+  return objects
 }

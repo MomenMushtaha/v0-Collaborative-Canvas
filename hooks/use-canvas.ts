@@ -53,7 +53,7 @@ export function useCanvas({
   const [rotateStart, setRotateStart] = useState({ angle: 0, objRotation: 0, centerX: 0, centerY: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [dragOffsets, setDragOffsets] = useState<Map<string, { x: number; y: number }>>(new Map())
-  const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line" | "text">("select")
+  const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line" | "text" | "pan">("select")
   const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null)
   const [linePreview, setLinePreview] = useState<{ x: number; y: number } | null>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
@@ -551,9 +551,13 @@ export function useCanvas({
         return
       }
 
-      if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      if (e.button === 1 || (e.button === 0 && e.altKey) || (tool === "pan" && e.button === 0)) {
         setIsPanning(true)
         setDragStart({ x: e.clientX, y: e.clientY })
+        return
+      }
+
+      if (tool === "pan") {
         return
       }
 
@@ -746,14 +750,31 @@ export function useCanvas({
           return
         }
 
+        let objectsToSelect: string[]
+
+        // If clicked object is a group, only select the group itself
+        if (clickedObj.type === "group") {
+          objectsToSelect = [clickedObj.id]
+        }
+        // If clicked object belongs to a group, select the parent group only
+        else if (clickedObj.parent_group) {
+          objectsToSelect = [clickedObj.parent_group]
+        }
+        // Otherwise, select just the clicked object
+        else {
+          objectsToSelect = [clickedObj.id]
+        }
+
+        const primaryObjectId = clickedObj.parent_group || clickedObj.id
+
         if (e.shiftKey) {
-          if (selectedIds.includes(clickedObj.id)) {
-            setSelectedIds(selectedIds.filter((id) => id !== clickedObj.id))
+          if (selectedIds.includes(primaryObjectId)) {
+            setSelectedIds(selectedIds.filter((id) => !objectsToSelect.includes(id)))
           } else {
-            setSelectedIds([...selectedIds, clickedObj.id])
+            setSelectedIds([...selectedIds, ...objectsToSelect.filter((id) => !selectedIds.includes(id))])
           }
         } else {
-          if (selectedIds.includes(clickedObj.id)) {
+          if (selectedIds.includes(primaryObjectId)) {
             setIsDragging(true)
             const offsets = new Map<string, { x: number; y: number }>()
             selectedIds.forEach((id) => {
@@ -764,10 +785,15 @@ export function useCanvas({
             })
             setDragOffsets(offsets)
           } else {
-            setSelectedIds([clickedObj.id])
+            setSelectedIds(objectsToSelect)
             setIsDragging(true)
             const offsets = new Map<string, { x: number; y: number }>()
-            offsets.set(clickedObj.id, { x: pos.x - clickedObj.x, y: pos.y - clickedObj.y })
+            objectsToSelect.forEach((id) => {
+              const obj = objects.find((o) => o.id === id)
+              if (obj) {
+                offsets.set(id, { x: pos.x - obj.x, y: pos.y - obj.y })
+              }
+            })
             setDragOffsets(offsets)
           }
         }
@@ -942,6 +968,19 @@ export function useCanvas({
           if (selectedIds.includes(o.id)) {
             const offset = dragOffsets.get(o.id)
             if (offset) {
+              if (o.type === "group") {
+                const deltaX = pos.x - offset.x - o.x
+                const deltaY = pos.y - offset.y - o.y
+
+                const updatedGroup = {
+                  ...o,
+                  x: pos.x - offset.x,
+                  y: pos.y - offset.y,
+                }
+
+                return updatedGroup
+              }
+
               return {
                 ...o,
                 x: pos.x - offset.x,
@@ -949,6 +988,22 @@ export function useCanvas({
               }
             }
           }
+
+          if (o.parent_group && selectedIds.includes(o.parent_group)) {
+            const parentGroup = objects.find((obj) => obj.id === o.parent_group)
+            const parentOffset = dragOffsets.get(o.parent_group)
+            if (parentGroup && parentOffset) {
+              const deltaX = pos.x - parentOffset.x - parentGroup.x
+              const deltaY = pos.y - parentOffset.y - parentGroup.y
+
+              return {
+                ...o,
+                x: o.x + deltaX,
+                y: o.y + deltaY,
+              }
+            }
+          }
+
           return o
         })
         onObjectsChange(updatedObjects)
@@ -1009,7 +1064,7 @@ export function useCanvas({
     setLassoPath([])
   }, [isSelecting, selectionBox, objects, isObjectInSelectionBox, isLassoSelecting, lassoPath, isRotating])
 
-  const MIN_ZOOM = 1
+  const MIN_ZOOM = 0.1 // Changed from 0 to 0.1 to set minimum zoom to 10%
   const MAX_ZOOM = 3
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {

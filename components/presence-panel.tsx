@@ -35,10 +35,11 @@ export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCol
   const uniqueUsers = useMemo(() => {
     const userMap = new Map<string, UserPresence>()
     otherUsers.forEach((user) => {
-      const existing = userMap.get(user.user_id)
-      // Keep the most recent entry for each user_id
+      const key = user.user_id ?? `name:${user.user_name.toLowerCase()}`
+      const existing = userMap.get(key)
+      // Keep the most recent entry for each user identifier
       if (!existing || new Date(user.last_seen) > new Date(existing.last_seen)) {
-        userMap.set(user.user_id, user)
+        userMap.set(key, user)
       }
     })
     return Array.from(userMap.values()).filter((user) => user.user_id !== currentUser.userId)
@@ -104,7 +105,7 @@ export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCol
           <div className="space-y-1">
             {onlineUsers.map((user) => (
               <div
-                key={user.user_id}
+                key={user.user_id ?? `online-${user.user_name.toLowerCase()}`}
                 className="flex items-center gap-3 rounded-lg p-2.5 -mx-2 transition-all duration-150 hover:bg-accent/50 hover:translate-x-0.5 hover:shadow-sm"
               >
                 <div className="relative flex h-2.5 w-2.5 items-center justify-center">
@@ -133,7 +134,7 @@ export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCol
             <div className="space-y-1">
               {offlineUsers.map((user) => (
                 <div
-                  key={user.user_id}
+                  key={user.user_id ?? `offline-${user.user_name.toLowerCase()}`}
                   className="flex items-center gap-3 rounded-lg p-2.5 -mx-2 opacity-60 transition-all duration-150 hover:opacity-80 hover:bg-accent/30"
                 >
                   <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40 ring-2 ring-background" />

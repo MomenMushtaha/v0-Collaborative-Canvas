@@ -2,17 +2,29 @@
 
 import type { UserPresence } from "@/lib/types"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
+import { ChevronDown, ChevronUp, Users } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 interface PresencePanelProps {
   currentUser: {
+    userId: string
     userName: string
     userColor: string
   }
   otherUsers: UserPresence[]
+  topPosition?: number
+  onCollapseChange?: (collapsed: boolean) => void
 }
 
-export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
+export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCollapseChange }: PresencePanelProps) {
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
+  const handleCollapseToggle = (collapsed: boolean) => {
+    setIsCollapsed(collapsed)
+    onCollapseChange?.(collapsed)
+  }
+
   // Consider a user online if their last_seen is within the last 10 seconds
   const isUserOnline = (lastSeen: string) => {
     const lastSeenTime = new Date(lastSeen).getTime()
@@ -23,22 +35,52 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
   const uniqueUsers = useMemo(() => {
     const userMap = new Map<string, UserPresence>()
     otherUsers.forEach((user) => {
-      const existing = userMap.get(user.user_id)
-      // Keep the most recent entry for each user_id
+      const key = user.user_id ?? `name:${user.user_name.toLowerCase()}`
+      const existing = userMap.get(key)
+      // Keep the most recent entry for each user identifier
       if (!existing || new Date(user.last_seen) > new Date(existing.last_seen)) {
-        userMap.set(user.user_id, user)
+        userMap.set(key, user)
       }
     })
-    return Array.from(userMap.values())
-  }, [otherUsers])
+    return Array.from(userMap.values()).filter((user) => user.user_id !== currentUser.userId)
+  }, [currentUser.userId, otherUsers])
 
   const onlineUsers = uniqueUsers.filter((user) => isUserOnline(user.last_seen))
   const offlineUsers = uniqueUsers.filter((user) => !isUserOnline(user.last_seen))
 
+  if (isCollapsed) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => handleCollapseToggle(false)}
+        className="absolute right-4 z-10 h-10 px-3 rounded-lg border-border/50 bg-background/95 backdrop-blur-md shadow-xl hover:shadow-2xl transition-all duration-200"
+        style={{ top: `${topPosition}px` }}
+      >
+        <Users className="h-4 w-4 mr-2" />
+        <span className="text-xs font-medium">{onlineUsers.length + 1} Active</span>
+        <ChevronDown className="h-4 w-4 ml-2" />
+      </Button>
+    )
+  }
+
   return (
-    <div className="absolute right-4 top-20 z-10 w-64 max-h-[260px] rounded-xl border border-border/50 bg-background/95 shadow-xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl">
+    <div
+      className="absolute right-4 z-10 w-64 max-h-[260px] rounded-xl border border-border/50 bg-background/95 shadow-xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 hover:shadow-2xl"
+      style={{ top: `${topPosition}px` }}
+    >
       <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent">
-        <h3 className="mb-4 text-sm font-semibold tracking-tight text-center">Active Users</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold tracking-tight flex-1 text-center">Active Users</h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleCollapseToggle(true)}
+            className="h-6 w-6 p-0 hover:bg-accent/50 -mr-2"
+          >
+            <ChevronUp className="h-4 w-4" />
+          </Button>
+        </div>
 
         {/* Current User */}
         <div className="mb-2 flex items-center gap-3 rounded-lg p-2.5 -mx-2 transition-all duration-150 hover:bg-accent/50 hover:shadow-sm">
@@ -63,7 +105,7 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
           <div className="space-y-1">
             {onlineUsers.map((user) => (
               <div
-                key={user.user_id}
+                key={user.user_id ?? `online-${user.user_name.toLowerCase()}`}
                 className="flex items-center gap-3 rounded-lg p-2.5 -mx-2 transition-all duration-150 hover:bg-accent/50 hover:translate-x-0.5 hover:shadow-sm"
               >
                 <div className="relative flex h-2.5 w-2.5 items-center justify-center">
@@ -92,7 +134,7 @@ export function PresencePanel({ currentUser, otherUsers }: PresencePanelProps) {
             <div className="space-y-1">
               {offlineUsers.map((user) => (
                 <div
-                  key={user.user_id}
+                  key={user.user_id ?? `offline-${user.user_name.toLowerCase()}`}
                   className="flex items-center gap-3 rounded-lg p-2.5 -mx-2 opacity-60 transition-all duration-150 hover:opacity-80 hover:bg-accent/30"
                 >
                   <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40 ring-2 ring-background" />

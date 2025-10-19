@@ -8,8 +8,11 @@ interface KeyboardShortcutsProps {
   onDelete?: () => void
   onDuplicate?: () => void
   onSelectAll?: () => void
+  onSelectAllOfType?: () => void // New prop for select all of type
   onCopy?: () => void
   onPaste?: () => void
+  onGroup?: () => void
+  onUngroup?: () => void
   canUndo?: boolean
   canRedo?: boolean
   hasSelection?: boolean
@@ -21,8 +24,11 @@ export function useKeyboardShortcuts({
   onDelete,
   onDuplicate,
   onSelectAll,
+  onSelectAllOfType, // New parameter
   onCopy,
   onPaste,
+  onGroup,
+  onUngroup,
   canUndo = false,
   canRedo = false,
   hasSelection = false,
@@ -38,8 +44,29 @@ export function useKeyboardShortcuts({
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
       const modifier = isMac ? e.metaKey : e.ctrlKey
 
+      if (modifier && e.key === "g" && !e.shiftKey && hasSelection && onGroup) {
+        e.preventDefault()
+        onGroup()
+        console.log("[v0] Keyboard shortcut: Group")
+        return
+      }
+
+      if (modifier && e.shiftKey && e.key === "g" && hasSelection && onUngroup) {
+        e.preventDefault()
+        onUngroup()
+        console.log("[v0] Keyboard shortcut: Ungroup")
+        return
+      }
+
+      if (modifier && e.shiftKey && e.key === "a" && hasSelection && onSelectAllOfType) {
+        e.preventDefault()
+        onSelectAllOfType()
+        console.log("[v0] Keyboard shortcut: Select All of Type")
+        return
+      }
+
       // Select All: Ctrl+A (Windows/Linux) or Cmd+A (Mac)
-      if (modifier && e.key === "a" && onSelectAll) {
+      if (modifier && e.key === "a" && !e.shiftKey && onSelectAll) {
         e.preventDefault()
         onSelectAll()
         console.log("[v0] Keyboard shortcut: Select All")
@@ -97,5 +124,19 @@ export function useKeyboardShortcuts({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [onUndo, onRedo, onDelete, onDuplicate, onSelectAll, onCopy, onPaste, canUndo, canRedo, hasSelection])
+  }, [
+    onUndo,
+    onRedo,
+    onDelete,
+    onDuplicate,
+    onSelectAll,
+    onSelectAllOfType,
+    onCopy,
+    onPaste,
+    onGroup,
+    onUngroup,
+    canUndo,
+    canRedo,
+    hasSelection,
+  ])
 }

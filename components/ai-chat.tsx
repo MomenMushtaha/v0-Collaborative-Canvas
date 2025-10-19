@@ -16,11 +16,18 @@ interface AiChatProps {
   userName: string
   canvasId: string
   viewport: { x: number; y: number; zoom: number }
+  usableCanvasDimensions?: {
+    leftOffset: number
+    rightOffset: number
+    topOffset: number
+    bottomOffset: number
+  }
 }
 
 interface Message {
   role: "user" | "assistant"
   content: string
+  operations?: any[]
 }
 
 interface OperationProgress {
@@ -37,6 +44,7 @@ export function AiChat({
   userName,
   canvasId,
   viewport,
+  usableCanvasDimensions,
 }: AiChatProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
@@ -67,26 +75,67 @@ export function AiChat({
 
     try {
       console.log("[v0] Sending AI request:", userMessage)
+      console.log("[v0] Conversation history length:", messages.length)
+
+      const sanitizedObjects = currentObjects.map((obj) => ({
+        id: obj.id,
+        type: obj.type,
+        x: obj.x,
+        y: obj.y,
+        width: obj.width,
+        height: obj.height,
+        rotation: obj.rotation,
+        fill_color: obj.fill_color,
+        stroke_color: obj.stroke_color,
+        stroke_width: obj.stroke_width,
+        text_content: obj.text_content,
+        font_size: obj.font_size,
+        font_family: obj.font_family,
+        locked: obj.locked ?? false,
+        visible: obj.visible ?? true,
+      }))
+
+      const selectedObjects = sanitizedObjects.filter((obj) => selectedObjectIds.includes(obj.id))
+
+      const conversationHistory = messages.map((msg) => {
+        if (msg.role === "assistant" && msg.operations && msg.operations.length > 0) {
+          // Include what operations the AI performed in the conversation context
+          const operationSummary = msg.operations
+            .map((op: any) => {
+              if (op.type === "create") {
+                return `Created ${op.object.type} at (${op.object.x}, ${op.object.y})`
+              } else if (op.type === "createText") {
+                return `Created text "${op.text}" at (${op.x}, ${op.y})`
+              }
+              return `Performed ${op.type} operation`
+            })
+            .join(", ")
+
+          return {
+            role: msg.role,
+            content: `${msg.content}\n\n[Operations performed: ${operationSummary}]`,
+          }
+        }
+        return {
+          role: msg.role,
+          content: msg.content,
+        }
+      })
+
       const response = await fetch("/api/ai-canvas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMessage,
+          messages: conversationHistory, // Send enriched conversation history
           canvasId,
           userId,
           userName,
           viewport,
-          currentObjects: currentObjects.map((obj) => ({
-            type: obj.type,
-            x: obj.x,
-            y: obj.y,
-            width: obj.width,
-            height: obj.height,
-            rotation: obj.rotation,
-            fill_color: obj.fill_color,
-            stroke_color: obj.stroke_color,
-          })),
+          usableCanvasDimensions,
+          currentObjects: sanitizedObjects,
           selectedObjectIds,
+          selectedObjects,
         }),
       })
 
@@ -103,6 +152,7 @@ export function AiChat({
 
       const data = await response.json()
       console.log("[v0] AI response data:", data)
+      console.log("[v0] Operations returned:", data.operations?.length || 0)
 
       if (data.operations && data.operations.length > 0) {
         console.log(`[v0] [PERF] AI generated ${data.operations.length} operations in ${aiResponseTime.toFixed(0)}ms`)
@@ -114,7 +164,14 @@ export function AiChat({
         assistantMessage += `\n\nNote: ${data.validationErrors.join(", ")}`
       }
 
-      setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage }])
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: assistantMessage,
+          operations: data.operations || [],
+        },
+      ])
 
       if (data.operations && data.operations.length > 0) {
         console.log("[v0] AI operations:", data.operations)
@@ -167,14 +224,47 @@ export function AiChat({
       {/* Messages */}
       <div className="flex h-96 flex-col gap-3 overflow-y-auto p-4 bg-muted/30">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground px-4">
-            <div className="bg-gradient-to-br from-blue-500 to-cyan-500 p-3 rounded-full mb-4">
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-4 text-center text-muted-foreground">
+            <div className="mb-2 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 p-3">
               <Sparkles className="h-8 w-8 text-white" />
             </div>
-            <p className="text-sm font-medium mb-2">Ask me to create shapes, arrange objects, or build layouts!</p>
-            <p className="text-xs text-muted-foreground/70 leading-relaxed">
-              Try: "Create a blue rectangle" or "Move the last shape to the center"
+            <p className="text-sm font-medium text-foreground">
+              Ask me to create shapes, arrange objects, or build layouts!
             </p>
+            <div className="w-full max-w-sm space-y-3 text-left text-xs leading-relaxed text-muted-foreground/80">
+              <div>
+                <p className="font-semibold text-foreground">Creation Commands</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>"Create a red circle at position 100, 200"</li>
+                  <li>"Add a text layer that says 'Hello World'"</li>
+                  <li>"Make a 200x300 rectangle"</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Manipulation Commands</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>"Move the blue rectangle to the center"</li>
+                  <li>"Resize the circle to be twice as big"</li>
+                  <li>"Rotate the text 45 degrees"</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Layout Commands</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>"Arrange these shapes in a horizontal row"</li>
+                  <li>"Create a grid of 3x3 squares"</li>
+                  <li>"Space these elements evenly"</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Complex Commands</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>"Create a login form with username and password fields"</li>
+                  <li>"Build a navigation bar with 4 menu items"</li>
+                  <li>"Make a card layout with title, image, and description"</li>
+                </ul>
+              </div>
+            </div>
           </div>
         )}
         {messages.map((message, index) => (

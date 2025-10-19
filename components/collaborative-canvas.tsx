@@ -5,7 +5,7 @@ import { MultiplayerCursors } from "@/components/multiplayer-cursors"
 import { PresencePanel } from "@/components/presence-panel"
 import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
-import { useMemo, useEffect, useState, useCallback, type Dispatch, type SetStateAction } from "react"
+import { useMemo, useEffect, useState, useCallback, useRef, type Dispatch, type SetStateAction } from "react"
 import type { CanvasObject } from "@/lib/types"
 import { useAIQueue } from "@/hooks/use-ai-queue"
 import { ConnectionStatus } from "@/components/connection-status"
@@ -56,6 +56,15 @@ interface CollaborativeCanvasProps {
   commentMode?: boolean
   onCommentCreate?: (x: number, y: number, content: string) => void
   comments?: Comment[]
+  onBringToFront?: Dispatch<SetStateAction<(() => void) | undefined>>
+  onSendToBack?: Dispatch<SetStateAction<(() => void) | undefined>>
+  onBringForward?: Dispatch<SetStateAction<(() => void) | undefined>>
+  onSendBackward?: Dispatch<SetStateAction<(() => void) | undefined>>
+  lassoMode?: boolean // Added lassoMode prop type
+  onSelectAllOfType?: Dispatch<SetStateAction<(() => void) | undefined>> // Added onSelectAllOfType prop type
+  historyRestore?: CanvasObject[] | null
+  onHistoryRestoreComplete?: (result: "success" | "error") => void
+  onCommentModeChange?: (enabled: boolean) => void
 }
 
 export function CollaborativeCanvas({
@@ -81,6 +90,15 @@ export function CollaborativeCanvas({
   commentMode = false,
   onCommentCreate,
   comments = [],
+  onBringToFront,
+  onSendToBack,
+  onBringForward,
+  onSendBackward,
+  lassoMode = false,
+  onSelectAllOfType,
+  historyRestore = null,
+  onHistoryRestoreComplete,
+  onCommentModeChange,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -112,6 +130,11 @@ export function CollaborativeCanvas({
   const { addCommand, undo, redo, canUndo: historyCanUndo, canRedo: historyCanRedo } = useHistory()
   const [previousObjects, setPreviousObjects] = useState<CanvasObject[]>([])
   const [newTextObjectIds, setNewTextObjectIds] = useState<Set<string>>(new Set()) // Track new text objects
+  const objectsRef = useRef<CanvasObject[]>(objects)
+
+  useEffect(() => {
+    objectsRef.current = objects
+  }, [objects])
 
   useEffect(() => {
     if (isUndoRedoOperation) {
@@ -219,6 +242,55 @@ export function CollaborativeCanvas({
 
     setPreviousObjects(objects)
   }, [objects, isUndoRedoOperation, newTextObjectIds])
+
+  useEffect(() => {
+    if (!historyRestore) return
+
+    const applyRestore = async () => {
+      const previousState = objectsRef.current || []
+
+      console.log(
+        "[v0] Applying history restore:",
+        historyRestore.length,
+        "object(s) replacing",
+        previousState.length,
+        "object(s)",
+      )
+
+      const uniqueIds = Array.from(
+        new Set([...previousState.map((obj) => obj.id), ...historyRestore.map((obj) => obj.id)]),
+      )
+
+      setIsUndoRedoOperation(true)
+
+      try {
+        await syncObjects(historyRestore)
+
+        addCommand({
+          type: "restore",
+          objectIds: uniqueIds,
+          beforeState: previousState,
+          afterState: historyRestore,
+          timestamp: Date.now(),
+        })
+
+        setNewTextObjectIds(new Set())
+        setPreviousObjects(historyRestore)
+        setSelectedObjectIds([])
+        onSelectionChange?.([])
+
+        console.log("[v0] History restore applied successfully")
+
+        onHistoryRestoreComplete?.("success")
+      } catch (error) {
+        console.error("[v0] Failed to apply history restore:", error)
+        setIsUndoRedoOperation(false)
+        onHistoryRestoreComplete?.("error")
+      }
+    }
+
+    void applyRestore()
+  }, [historyRestore, addCommand, syncObjects, onSelectionChange, onHistoryRestoreComplete])
 
   const handleUndo = useCallback(() => {
     const newObjects = undo(objects)
@@ -333,6 +405,133 @@ export function CollaborativeCanvas({
     console.log("[v0] Selected all objects:", allIds.length)
   }, [objects])
 
+  const handleSelectAllOfType = useCallback(() => {
+    console.log("[v0] handleSelectAllOfType called")
+    console.log("[v0] selectedObjectIds:", selectedObjectIds)
+    console.log("[v0] objects:", objects.length)
+
+    if (selectedObjectIds.length === 0) {
+      console.log("[v0] No objects selected, returning")
+      return
+    }
+
+    // Get the types of all currently selected objects
+    const selectedTypes = new Set(objects.filter((obj) => selectedObjectIds.includes(obj.id)).map((obj) => obj.type))
+    console.log("[v0] selectedTypes:", Array.from(selectedTypes))
+
+    // Select all objects that match any of the selected types
+    const matchingIds = objects.filter((obj) => selectedTypes.has(obj.type)).map((obj) => obj.id)
+    console.log("[v0] matchingIds:", matchingIds)
+
+    setSelectedObjectIds(matchingIds)
+    onSelectionChange?.(matchingIds) // Sync to parent component
+    console.log("[v0] Updated selection to:", matchingIds.length, "objects")
+
+    toast({
+      title: "Selected by Type",
+      description: `Selected ${matchingIds.length} ${Array.from(selectedTypes).join(", ")} object${matchingIds.length > 1 ? "s" : ""}`,
+    })
+  }, [selectedObjectIds, objects, toast, onSelectionChange])
+
+  const handleGroup = useCallback(() => {
+    if (selectedObjectIds.length < 2) {
+      toast({
+        title: "Cannot Group",
+        description: "Select at least 2 objects to create a group",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+
+    // Calculate bounding box for the group
+    const minX = Math.min(...selectedObjs.map((obj) => obj.x))
+    const minY = Math.min(...selectedObjs.map((obj) => obj.y))
+    const maxX = Math.max(...selectedObjs.map((obj) => obj.x + obj.width))
+    const maxY = Math.max(...selectedObjs.map((obj) => obj.y + obj.height))
+
+    const groupId = crypto.randomUUID()
+    const groupObject: CanvasObject = {
+      id: groupId,
+      canvas_id: canvasId,
+      type: "group",
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      rotation: 0,
+      fill_color: "transparent",
+      stroke_color: "#3b82f6",
+      stroke_width: 2,
+      children: selectedObjectIds,
+    }
+
+    // Update child objects to reference the parent group
+    const updatedObjects = objects.map((obj) => {
+      if (selectedObjectIds.includes(obj.id)) {
+        return { ...obj, parent_group: groupId }
+      }
+      return obj
+    })
+
+    // Add the group object
+    updatedObjects.push(groupObject)
+    syncObjects(updatedObjects)
+
+    // Select the new group
+    setSelectedObjectIds([groupId])
+    console.log("[v0] Grouped", selectedObjectIds.length, "objects into group:", groupId)
+
+    toast({
+      title: "Grouped",
+      description: `${selectedObjectIds.length} objects grouped together`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, canvasId, toast])
+
+  const handleUngroup = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedGroups = objects.filter((obj) => selectedObjectIds.includes(obj.id) && obj.type === "group")
+
+    if (selectedGroups.length === 0) {
+      toast({
+        title: "Cannot Ungroup",
+        description: "Select a group to ungroup",
+        variant: "destructive",
+      })
+      return
+    }
+
+    let updatedObjects = [...objects]
+    const newSelectedIds: string[] = []
+
+    selectedGroups.forEach((group) => {
+      if (group.children) {
+        // Remove parent_group reference from children
+        updatedObjects = updatedObjects.map((obj) => {
+          if (group.children?.includes(obj.id)) {
+            newSelectedIds.push(obj.id)
+            return { ...obj, parent_group: undefined }
+          }
+          return obj
+        })
+
+        // Remove the group object
+        updatedObjects = updatedObjects.filter((obj) => obj.id !== group.id)
+      }
+    })
+
+    syncObjects(updatedObjects)
+    setSelectedObjectIds(newSelectedIds)
+    console.log("[v0] Ungrouped", selectedGroups.length, "group(s)")
+
+    toast({
+      title: "Ungrouped",
+      description: `${selectedGroups.length} group${selectedGroups.length > 1 ? "s" : ""} ungrouped`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
   const selectedObjects = useMemo(() => {
     return objects.filter((obj) => selectedObjectIds.includes(obj.id))
   }, [objects, selectedObjectIds])
@@ -343,8 +542,11 @@ export function CollaborativeCanvas({
     onDelete: handleDelete,
     onDuplicate: handleDuplicate,
     onSelectAll: handleSelectAll,
+    onSelectAllOfType: handleSelectAllOfType, // Added select all of type to keyboard shortcuts
     onCopy: handleCopy,
     onPaste: handlePaste,
+    onGroup: handleGroup,
+    onUngroup: handleUngroup,
     canUndo: historyCanUndo,
     canRedo: historyCanRedo,
     hasSelection: selectedObjectIds.length > 0,
@@ -512,6 +714,90 @@ export function CollaborativeCanvas({
     [selectedObjectIds, objects, syncObjects],
   )
 
+  const handleBringToFront = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+    const otherObjs = objects.filter((obj) => !selectedObjectIds.includes(obj.id))
+
+    // Move selected objects to the end (highest z-index)
+    const updatedObjects = [...otherObjs, ...selectedObjs]
+    syncObjects(updatedObjects)
+    console.log("[v0] Brought", selectedObjectIds.length, "object(s) to front")
+
+    toast({
+      title: "Brought to Front",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} moved to front`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
+  const handleSendToBack = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const selectedObjs = objects.filter((obj) => selectedObjectIds.includes(obj.id))
+    const otherObjs = objects.filter((obj) => !selectedObjectIds.includes(obj.id))
+
+    // Move selected objects to the beginning (lowest z-index)
+    const updatedObjects = [...selectedObjs, ...otherObjs]
+    syncObjects(updatedObjects)
+    console.log("[v0] Sent", selectedObjectIds.length, "object(s) to back")
+
+    toast({
+      title: "Sent to Back",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} moved to back`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
+  const handleBringForward = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const updatedObjects = [...objects]
+
+    // Move each selected object one position forward (higher z-index)
+    // Process from end to start to avoid conflicts
+    for (let i = updatedObjects.length - 2; i >= 0; i--) {
+      if (selectedObjectIds.includes(updatedObjects[i].id) && !selectedObjectIds.includes(updatedObjects[i + 1].id)) {
+        // Swap with next object
+        const temp = updatedObjects[i]
+        updatedObjects[i] = updatedObjects[i + 1]
+        updatedObjects[i + 1] = temp
+      }
+    }
+
+    syncObjects(updatedObjects)
+    console.log("[v0] Brought", selectedObjectIds.length, "object(s) forward")
+
+    toast({
+      title: "Brought Forward",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} moved forward`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
+  const handleSendBackward = useCallback(() => {
+    if (selectedObjectIds.length === 0) return
+
+    const updatedObjects = [...objects]
+
+    // Move each selected object one position backward (lower z-index)
+    // Process from start to end to avoid conflicts
+    for (let i = 1; i < updatedObjects.length; i++) {
+      if (selectedObjectIds.includes(updatedObjects[i].id) && !selectedObjectIds.includes(updatedObjects[i - 1].id)) {
+        // Swap with previous object
+        const temp = updatedObjects[i]
+        updatedObjects[i] = updatedObjects[i - 1]
+        updatedObjects[i - 1] = temp
+      }
+    }
+
+    syncObjects(updatedObjects)
+    console.log("[v0] Sent", selectedObjectIds.length, "object(s) backward")
+
+    toast({
+      title: "Sent Backward",
+      description: `${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? "s" : ""} moved backward`,
+    })
+  }, [selectedObjectIds, objects, syncObjects, toast])
+
   useEffect(() => {
     if (onAlign) {
       onAlign(() => handleAlign)
@@ -521,14 +807,35 @@ export function CollaborativeCanvas({
     }
   }, [handleAlign, handleDistribute, onAlign, onDistribute])
 
-  const handleCommentCreate = useCallback(
-    (x: number, y: number, content: string) => {
-      if (onCommentCreate) {
-        onCommentCreate(x, y, content)
-      }
-    },
-    [onCommentCreate],
-  )
+  useEffect(() => {
+    if (onBringToFront) {
+      onBringToFront(() => handleBringToFront)
+    }
+    if (onSendToBack) {
+      onSendToBack(() => handleSendToBack)
+    }
+    if (onBringForward) {
+      onBringForward(() => handleBringForward)
+    }
+    if (onSendBackward) {
+      onSendBackward(() => handleSendBackward)
+    }
+  }, [
+    handleBringToFront,
+    handleSendToBack,
+    handleBringForward,
+    handleSendBackward,
+    onBringToFront,
+    onSendToBack,
+    onBringForward,
+    onSendBackward,
+  ])
+
+  useEffect(() => {
+    if (onSelectAllOfType) {
+      onSelectAllOfType(() => handleSelectAllOfType)
+    }
+  }, [handleSelectAllOfType, onSelectAllOfType])
 
   if (isLoading) {
     return (
@@ -541,7 +848,7 @@ export function CollaborativeCanvas({
   return (
     <div className="relative h-full w-full">
       <ConnectionStatus isConnected={connectionState.isConnected} queuedOps={connectionState.queuedOps} />
-      <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
+      <PresencePanel currentUser={{ userId, userName, userColor }} otherUsers={otherUsers} />
       <StylePanel selectedObjects={selectedObjects} onStyleChange={handleStyleChange} />
       <LayersPanel
         objects={objects}
@@ -557,6 +864,7 @@ export function CollaborativeCanvas({
         onObjectsChange={syncObjects}
         onCursorMove={updateCursor}
         onSelectionChange={handleSelectionChange}
+        selectedIds={selectedObjectIds}
         viewport={viewport}
         onViewportChange={onViewportChange}
         onAlign={handleAlign}
@@ -566,7 +874,13 @@ export function CollaborativeCanvas({
         snapEnabled={snapEnabled}
         gridSize={gridSize}
         commentMode={commentMode}
-        onCommentCreate={handleCommentCreate}
+        onCommentCreate={onCommentCreate}
+        onBringToFront={handleBringToFront}
+        onSendToBack={handleSendToBack}
+        onBringForward={handleBringForward}
+        onSendBackward={handleSendBackward}
+        lassoMode={lassoMode} // Pass lassoMode to Canvas
+        onCommentModeChange={onCommentModeChange} // Added onCommentModeChange prop
       >
         <MultiplayerCursors users={otherUsers} />
         {comments.map((comment) => (
@@ -799,6 +1113,62 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
         break
       }
 
+      case "group": {
+        const groupId = operation.groupId
+        const childrenIds = operation.childrenIds || []
+        const groupObject: CanvasObject = {
+          id: groupId,
+          canvas_id: operation.canvasId,
+          type: "group",
+          x: operation.x,
+          y: operation.y,
+          width: operation.width,
+          height: operation.height,
+          rotation: 0,
+          fill_color: operation.fill_color || "transparent",
+          stroke_color: operation.stroke_color || "#3b82f6",
+          stroke_width: operation.stroke_width || 2,
+          children: childrenIds,
+        }
+
+        // Update child objects to reference the parent group
+        const processedObjects = updatedObjects.map((obj) => {
+          if (childrenIds.includes(obj.id)) {
+            return { ...obj, parent_group: groupId }
+          }
+          return obj
+        })
+
+        // Add the group object
+        processedObjects.push(groupObject)
+        updatedObjects = processedObjects
+        break
+      }
+
+      case "ungroup": {
+        const groupIdsToUngroup = operation.groupIds || []
+        const childrenToRemoveGroupRef: string[] = []
+
+        updatedObjects = updatedObjects.filter((obj) => {
+          if (obj.type === "group" && groupIdsToUngroup.includes(obj.id)) {
+            if (obj.children) {
+              childrenToRemoveGroupRef.push(...obj.children)
+            }
+            return false // Remove the group object
+          }
+          return true
+        })
+
+        // Remove parent_group reference from children
+        updatedObjects = updatedObjects.map((obj) => {
+          if (childrenToRemoveGroupRef.includes(obj.id)) {
+            return { ...obj, parent_group: undefined }
+          }
+          return obj
+        })
+        break
+      }
+
       default:
         return { objects, error: `Unknown operation type: ${operation.type}` }
     }
@@ -895,119 +1265,350 @@ function handleArrange(objects: CanvasObject[], operation: any): { objects: Canv
   return { objects: updatedObjects }
 }
 
-function createLoginForm(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y } = operation
-  const updatedObjects = [...objects]
+const CANVAS_LIMIT = 2000
 
-  // Username field (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 150,
-    y: y - 100,
-    width: 300,
-    height: 40,
-    rotation: 0,
-    color: "#e5e7eb",
-  })
-
-  // Password field (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 150,
-    y: y - 40,
-    width: 300,
-    height: 40,
-    rotation: 0,
-    color: "#e5e7eb",
-  })
-
-  // Login button (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - 75,
-    y: y + 20,
-    width: 150,
-    height: 40,
-    rotation: 0,
-    color: "#3b82f6",
-  })
-
-  return updatedObjects
+function clampRectToCanvas(x: number, y: number, width: number, height: number) {
+  const clampedX = Math.max(0, Math.min(CANVAS_LIMIT - width, x))
+  const clampedY = Math.max(0, Math.min(CANVAS_LIMIT - height, y))
+  return { x: clampedX, y: clampedY }
 }
 
-function createDashboard(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y } = operation
+function createLoginForm(objects: CanvasObject[], operation: any): CanvasObject[] {
   const updatedObjects = [...objects]
+  const width = Math.min(Math.max(operation.width ?? 360, 260), 640)
+  const height = Math.min(Math.max(operation.height ?? 320, 260), 640)
+  const centerX = operation.x ?? CANVAS_LIMIT / 2
+  const centerY = operation.y ?? CANVAS_LIMIT / 2
+  const desiredLeft = centerX - width / 2
+  const desiredTop = centerY - height / 2
+  const { x, y } = clampRectToCanvas(desiredLeft, desiredTop, width, height)
 
-  // Header (rectangle)
+  const backgroundColor = operation.backgroundColor ?? "#ffffff"
+  const borderColor = operation.borderColor ?? "#e5e7eb"
+  const fieldColor = operation.fieldColor ?? "#f3f4f6"
+  const buttonColor = operation.buttonColor ?? "#3b82f6"
+  const textColor = operation.textColor ?? "#111827"
+  const mutedTextColor = operation.mutedTextColor ?? "#6b7280"
+  const buttonTextColor = operation.buttonTextColor ?? "#ffffff"
+  const titleText = operation.titleText ?? "Welcome back"
+  const subtitleText = operation.subtitleText ?? "Please sign in to continue"
+  const usernameLabel = operation.usernameLabel ?? "Email"
+  const passwordLabel = operation.passwordLabel ?? "Password"
+  const buttonText = operation.buttonText ?? "Sign In"
+  const helpText = operation.helpText ?? "Forgot password?"
+
+  const contentLeft = x + 20
+  const contentWidth = width - 40
+  const titleHeight = 36
+  const subtitleHeight = 28
+  const fieldHeight = 44
+  const fieldSpacing = 70
+  const firstFieldTop = y + 120
+  const secondFieldTop = firstFieldTop + fieldSpacing
+  const buttonWidth = Math.min(contentWidth, 220)
+  const buttonLeft = x + (width - buttonWidth) / 2
+  const buttonTop = y + height - 70
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
     x,
     y,
-    width: 800,
-    height: 60,
+    width,
+    height,
     rotation: 0,
-    color: "#1f2937",
+    fill_color: backgroundColor,
+    stroke_color: borderColor,
+    stroke_width: 2,
   })
 
-  // Sidebar (rectangle)
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: contentLeft,
+    y: y + 24,
+    width: contentWidth,
+    height: titleHeight,
+    rotation: 0,
+    fill_color: textColor,
+    stroke_color: textColor,
+    stroke_width: 0,
+    text_content: titleText,
+    font_size: 28,
+    font_family: "Inter",
+  })
+
+  if (subtitleText) {
+    updatedObjects.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: contentLeft,
+      y: y + 60,
+      width: contentWidth,
+      height: subtitleHeight,
+      rotation: 0,
+      fill_color: mutedTextColor,
+      stroke_color: mutedTextColor,
+      stroke_width: 0,
+      text_content: subtitleText,
+      font_size: 18,
+      font_family: "Inter",
+    })
+  }
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: contentLeft,
+    y: firstFieldTop - 30,
+    width: contentWidth,
+    height: 24,
+    rotation: 0,
+    fill_color: mutedTextColor,
+    stroke_color: mutedTextColor,
+    stroke_width: 0,
+    text_content: usernameLabel,
+    font_size: 16,
+    font_family: "Inter",
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: contentLeft,
+    y: firstFieldTop,
+    width: contentWidth,
+    height: fieldHeight,
+    rotation: 0,
+    fill_color: fieldColor,
+    stroke_color: borderColor,
+    stroke_width: 1,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: contentLeft,
+    y: secondFieldTop - 30,
+    width: contentWidth,
+    height: 24,
+    rotation: 0,
+    fill_color: mutedTextColor,
+    stroke_color: mutedTextColor,
+    stroke_width: 0,
+    text_content: passwordLabel,
+    font_size: 16,
+    font_family: "Inter",
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: contentLeft,
+    y: secondFieldTop,
+    width: contentWidth,
+    height: fieldHeight,
+    rotation: 0,
+    fill_color: fieldColor,
+    stroke_color: borderColor,
+    stroke_width: 1,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 48,
+    rotation: 0,
+    fill_color: buttonColor,
+    stroke_color: buttonColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 48,
+    rotation: 0,
+    fill_color: buttonTextColor,
+    stroke_color: buttonTextColor,
+    stroke_width: 0,
+    text_content: buttonText,
+    font_size: 18,
+    font_family: "Inter",
+  })
+
+  if (helpText) {
+    updatedObjects.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: contentLeft,
+      y: buttonTop + 56,
+      width: contentWidth,
+      height: 24,
+      rotation: 0,
+      fill_color: buttonColor,
+      stroke_color: buttonColor,
+      stroke_width: 0,
+      text_content: helpText,
+      font_size: 16,
+      font_family: "Inter",
+    })
+  }
+
+  return updatedObjects
+}
+
+function createDashboard(objects: CanvasObject[], operation: any): CanvasObject[] {
+  const updatedObjects = [...objects]
+  const width = Math.min(Math.max(operation.width ?? 800, 400), 1200)
+  const height = Math.min(Math.max(operation.height ?? 600, 360), 1200)
+  const { x, y } = clampRectToCanvas(operation.x ?? 160, operation.y ?? 80, width, height)
+
+  const headerHeight = 60
+  const sidebarWidth = Math.min(Math.max(operation.sidebarWidth ?? 220, 160), width / 2)
+  const headerColor = operation.headerColor ?? "#1f2937"
+  const sidebarColor = operation.sidebarColor ?? "#374151"
+  const contentColor = operation.contentColor ?? "#f3f4f6"
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
     x,
-    y: y + 60,
-    width: 200,
-    height: 540,
+    y,
+    width,
+    height: headerHeight,
     rotation: 0,
-    color: "#374151",
+    fill_color: headerColor,
+    stroke_color: headerColor,
+    stroke_width: 0,
   })
 
-  // Main content (rectangle)
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
-    x: x + 200,
-    y: y + 60,
-    width: 600,
-    height: 540,
+    x,
+    y: y + headerHeight,
+    width: sidebarWidth,
+    height: height - headerHeight,
     rotation: 0,
-    color: "#f3f4f6",
+    fill_color: sidebarColor,
+    stroke_color: sidebarColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: x + sidebarWidth,
+    y: y + headerHeight,
+    width: width - sidebarWidth,
+    height: height - headerHeight,
+    rotation: 0,
+    fill_color: contentColor,
+    stroke_color: contentColor,
+    stroke_width: 0,
   })
 
   return updatedObjects
 }
 
 function createNavBar(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { items, x, y } = operation
   const updatedObjects = [...objects]
+  const items = Math.max(2, Math.min(operation.items ?? 4, 8))
+  const width = Math.min(Math.max(operation.width ?? items * 140 + 80, 360), 960)
+  const height = Math.min(Math.max(operation.height ?? 64, 48), 120)
+  const initialX = operation.x ?? 40
+  const initialY = operation.y ?? 40
+  const { x, y } = clampRectToCanvas(initialX, initialY, width, height)
 
-  // Nav bar background (rectangle)
+  const backgroundColor = operation.backgroundColor ?? "#111827"
+  const itemColor = operation.itemColor ?? "#1f2937"
+  const activeItemColor = operation.activeItemColor ?? "#3b82f6"
+  const textColor = operation.textColor ?? "#f9fafb"
+  const brandText = operation.brandText ?? "Product"
+  const menuItems: string[] = Array.isArray(operation.menuItems)
+    ? operation.menuItems.slice(0, items)
+    : Array.from({ length: items }, (_, index) => (index === 0 ? "Home" : `Item ${index + 1}`))
+
+  const horizontalPadding = 24
+  const brandAreaWidth = Math.min(180, Math.max(120, Math.round(width * 0.22)))
+  const menuAreaLeft = x + horizontalPadding + brandAreaWidth
+  const menuAvailableWidth = width - horizontalPadding * 2 - brandAreaWidth
+  const gap = 16
+  let itemWidth = (menuAvailableWidth - gap * (items - 1)) / items
+  itemWidth = Math.max(80, Math.min(140, itemWidth))
+  const totalItemsWidth = itemWidth * items + gap * (items - 1)
+  const startX = menuAreaLeft + Math.max(0, (menuAvailableWidth - totalItemsWidth) / 2)
+  const itemHeight = Math.min(height - 20, 44)
+  const itemTop = y + (height - itemHeight) / 2
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
     x,
     y,
-    width: items * 120 + 40,
-    height: 50,
+    width,
+    height,
     rotation: 0,
-    color: "#1f2937",
+    fill_color: backgroundColor,
+    stroke_color: backgroundColor,
+    stroke_width: 0,
   })
 
-  // Nav items (rectangles)
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: x + horizontalPadding,
+    y: y + (height - 40) / 2,
+    width: brandAreaWidth - 16,
+    height: 40,
+    rotation: 0,
+    fill_color: textColor,
+    stroke_color: textColor,
+    stroke_width: 0,
+    text_content: brandText,
+    font_size: 24,
+    font_family: "Inter",
+  })
+
   for (let i = 0; i < items; i++) {
+    const itemX = startX + i * (itemWidth + gap)
+    const label = menuItems[i] || `Item ${i + 1}`
+    const fill = i === 0 ? activeItemColor : itemColor
+
     updatedObjects.push({
       id: crypto.randomUUID(),
       type: "rectangle",
-      x: x + 20 + i * 120,
-      y: y + 10,
-      width: 100,
-      height: 30,
+      x: itemX,
+      y: itemTop,
+      width: itemWidth,
+      height: itemHeight,
       rotation: 0,
-      color: "#3b82f6",
+      fill_color: fill,
+      stroke_color: fill,
+      stroke_width: 0,
+    })
+
+    updatedObjects.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: itemX,
+      y: itemTop,
+      width: itemWidth,
+      height: itemHeight,
+      rotation: 0,
+      fill_color: textColor,
+      stroke_color: textColor,
+      stroke_width: 0,
+      text_content: label,
+      font_size: 16,
+      font_family: "Inter",
     })
   }
 
@@ -1015,51 +1616,26 @@ function createNavBar(objects: CanvasObject[], operation: any): CanvasObject[] {
 }
 
 function createCard(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y, width, height } = operation
   const updatedObjects = [...objects]
+  const width = Math.min(Math.max(operation.width ?? 320, 240), 520)
+  const height = Math.min(Math.max(operation.height ?? 220, 180), 420)
+  const centerX = operation.x ?? CANVAS_LIMIT / 2
+  const centerY = operation.y ?? CANVAS_LIMIT / 2
+  const desiredLeft = centerX - width / 2
+  const desiredTop = centerY - height / 2
+  const { x, y } = clampRectToCanvas(desiredLeft, desiredTop, width, height)
 
-  // Card background (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y - height / 2,
-    width,
-    height,
-    rotation: 0,
-    color: "#ffffff",
-  })
-
-  // Card header (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y - height / 2,
-    width,
-    height: 60,
-    rotation: 0,
-    color: "#3b82f6",
-  })
-
-  // Card footer (rectangle)
-  updatedObjects.push({
-    id: crypto.randomUUID(),
-    type: "rectangle",
-    x: x - width / 2,
-    y: y + height / 2 - 50,
-    width,
-    height: 50,
-    rotation: 0,
-    color: "#f3f4f6",
-  })
-
-  return updatedObjects
-}
-
-function createButton(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { x, y, width, height, color } = operation
-  const updatedObjects = [...objects]
+  const accentHeight = Math.min(Math.max(operation.mediaHeight ?? Math.round(height * 0.45), 80), height - 90)
+  const backgroundColor = operation.backgroundColor ?? "#ffffff"
+  const borderColor = operation.borderColor ?? "#e5e7eb"
+  const accentColor = operation.accentColor ?? "#dbeafe"
+  const textColor = operation.textColor ?? "#111827"
+  const mutedTextColor = operation.mutedTextColor ?? "#6b7280"
+  const buttonColor = operation.buttonColor ?? operation.accentColor ?? "#3b82f6"
+  const buttonTextColor = operation.buttonTextColor ?? "#ffffff"
+  const titleText = operation.titleText ?? "Card title"
+  const descriptionText = operation.descriptionText ?? "Add supporting details here."
+  const buttonText = operation.buttonText ?? "Learn more"
 
   updatedObjects.push({
     id: crypto.randomUUID(),
@@ -1069,52 +1645,237 @@ function createButton(objects: CanvasObject[], operation: any): CanvasObject[] {
     width,
     height,
     rotation: 0,
-    color,
+    fill_color: backgroundColor,
+    stroke_color: borderColor,
+    stroke_width: 2,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x,
+    y,
+    width,
+    height: accentHeight,
+    rotation: 0,
+    fill_color: accentColor,
+    stroke_color: accentColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: x + 20,
+    y: y + accentHeight + 16,
+    width: width - 40,
+    height: 32,
+    rotation: 0,
+    fill_color: textColor,
+    stroke_color: textColor,
+    stroke_width: 0,
+    text_content: titleText,
+    font_size: 22,
+    font_family: "Inter",
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: x + 20,
+    y: y + accentHeight + 56,
+    width: width - 40,
+    height: 48,
+    rotation: 0,
+    fill_color: mutedTextColor,
+    stroke_color: mutedTextColor,
+    stroke_width: 0,
+    text_content: descriptionText,
+    font_size: 16,
+    font_family: "Inter",
+  })
+
+  const buttonWidth = Math.min(width - 40, 200)
+  const buttonLeft = x + width - buttonWidth - 20
+  const buttonTop = y + height - 60
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 44,
+    rotation: 0,
+    fill_color: buttonColor,
+    stroke_color: buttonColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 44,
+    rotation: 0,
+    fill_color: buttonTextColor,
+    stroke_color: buttonTextColor,
+    stroke_width: 0,
+    text_content: buttonText,
+    font_size: 16,
+    font_family: "Inter",
+  })
+
+  return updatedObjects
+}
+
+function createButton(objects: CanvasObject[], operation: any): CanvasObject[] {
+  const updatedObjects = [...objects]
+  const width = Math.min(Math.max(operation.width ?? 160, 80), 400)
+  const height = Math.min(Math.max(operation.height ?? 48, 32), 160)
+  const centerX = operation.x ?? CANVAS_LIMIT / 2
+  const centerY = operation.y ?? CANVAS_LIMIT / 2
+  const desiredLeft = centerX - width / 2
+  const desiredTop = centerY - height / 2
+  const { x, y } = clampRectToCanvas(desiredLeft, desiredTop, width, height)
+
+  const color = operation.color ?? "#3b82f6"
+  const textColor = operation.textColor ?? "#ffffff"
+  const label = operation.text ?? "Button"
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "rectangle",
+    x,
+    y,
+    width,
+    height,
+    rotation: 0,
+    fill_color: color,
+    stroke_color: color,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x,
+    y,
+    width,
+    height,
+    rotation: 0,
+    fill_color: textColor,
+    stroke_color: textColor,
+    stroke_width: 0,
+    text_content: label,
+    font_size: Math.min(20, Math.max(14, height - 18)),
+    font_family: "Inter",
   })
 
   return updatedObjects
 }
 
 function createForm(objects: CanvasObject[], operation: any): CanvasObject[] {
-  const { fields, x, y } = operation
   const updatedObjects = [...objects]
+  const fields = Math.max(1, Math.min(operation.fields ?? 2, 5))
+  const width = Math.min(Math.max(operation.width ?? 420, 280), 640)
+  const height = Math.min(Math.max(operation.height ?? fields * 70 + 160, 240), 720)
+  const centerX = operation.x ?? CANVAS_LIMIT / 2
+  const centerY = operation.y ?? CANVAS_LIMIT / 2
+  const desiredLeft = centerX - width / 2
+  const desiredTop = centerY - height / 2
+  const { x, y } = clampRectToCanvas(desiredLeft, desiredTop, width, height)
 
-  // Form background (rectangle)
+  const backgroundColor = operation.backgroundColor ?? "#ffffff"
+  const borderColor = operation.borderColor ?? "#e5e7eb"
+  const fieldColor = operation.fieldColor ?? "#f3f4f6"
+  const buttonColor = operation.buttonColor ?? "#3b82f6"
+  const textColor = operation.textColor ?? "#111827"
+  const buttonText = operation.buttonText ?? "Submit"
+
+  const contentLeft = x + 24
+  const contentWidth = width - 48
+  const fieldHeight = 44
+  const spacing = (height - 160) / Math.max(1, fields)
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
-    x: x - 200,
-    y: y - (fields * 60) / 2 - 40,
-    width: 400,
-    height: fields * 60 + 100,
+    x,
+    y,
+    width,
+    height,
     rotation: 0,
-    color: "#ffffff",
+    fill_color: backgroundColor,
+    stroke_color: borderColor,
+    stroke_width: 2,
   })
 
-  // Input fields (rectangles)
   for (let i = 0; i < fields; i++) {
+    const fieldTop = y + 80 + i * spacing
+    updatedObjects.push({
+      id: crypto.randomUUID(),
+      type: "text",
+      x: contentLeft,
+      y: fieldTop - 28,
+      width: contentWidth,
+      height: 24,
+      rotation: 0,
+      fill_color: textColor,
+      stroke_color: textColor,
+      stroke_width: 0,
+      text_content: operation.fieldLabels?.[i] || `Field ${i + 1}`,
+      font_size: 16,
+      font_family: "Inter",
+    })
+
     updatedObjects.push({
       id: crypto.randomUUID(),
       type: "rectangle",
-      x: x - 180,
-      y: y - (fields * 60) / 2 + i * 60,
-      width: 360,
-      height: 40,
+      x: contentLeft,
+      y: fieldTop,
+      width: contentWidth,
+      height: fieldHeight,
       rotation: 0,
-      color: "#e5e7eb",
+      fill_color: fieldColor,
+      stroke_color: borderColor,
+      stroke_width: 1,
     })
   }
 
-  // Submit button (rectangle)
+  const buttonWidth = Math.min(contentWidth, 220)
+  const buttonLeft = x + (width - buttonWidth) / 2
+  const buttonTop = y + height - 80
+
   updatedObjects.push({
     id: crypto.randomUUID(),
     type: "rectangle",
-    x: x - 75,
-    y: y + (fields * 60) / 2 + 20,
-    width: 150,
-    height: 40,
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 48,
     rotation: 0,
-    color: "#3b82f6",
+    fill_color: buttonColor,
+    stroke_color: buttonColor,
+    stroke_width: 0,
+  })
+
+  updatedObjects.push({
+    id: crypto.randomUUID(),
+    type: "text",
+    x: buttonLeft,
+    y: buttonTop,
+    width: buttonWidth,
+    height: 48,
+    rotation: 0,
+    fill_color: "#ffffff",
+    stroke_color: "#ffffff",
+    stroke_width: 0,
+    text_content: buttonText,
+    font_size: 18,
+    font_family: "Inter",
   })
 
   return updatedObjects

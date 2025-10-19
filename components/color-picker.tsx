@@ -10,6 +10,7 @@ interface ColorPickerProps {
   color: string
   onChange: (color: string) => void
   label?: string
+  recentColors?: string[]
 }
 
 const PRESET_COLORS = [
@@ -35,7 +36,7 @@ const PRESET_COLORS = [
   "#9ca3af", // light gray
 ]
 
-export function ColorPicker({ color, onChange, label }: ColorPickerProps) {
+export function ColorPicker({ color, onChange, label, recentColors = [] }: ColorPickerProps) {
   const [hexInput, setHexInput] = useState(color)
 
   const handleHexChange = (value: string) => {
@@ -66,6 +67,29 @@ export function ColorPicker({ color, onChange, label }: ColorPickerProps) {
               maxLength={7}
             />
           </div>
+
+          {recentColors.length > 0 && (
+            <div className="space-y-2">
+              <Label>Recent</Label>
+              <div className="grid grid-cols-6 gap-2">
+                {recentColors.map((recentColor, index) => (
+                  <button
+                    key={`${recentColor}-${index}`}
+                    className="h-8 w-8 rounded border-2 transition-all hover:scale-110"
+                    style={{
+                      backgroundColor: recentColor,
+                      borderColor: color === recentColor ? "#000" : "transparent",
+                    }}
+                    onClick={() => {
+                      onChange(recentColor)
+                      setHexInput(recentColor)
+                    }}
+                    title={recentColor}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Presets</Label>

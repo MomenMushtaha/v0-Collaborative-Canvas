@@ -848,7 +848,7 @@ export function CollaborativeCanvas({
   return (
     <div className="relative h-full w-full">
       <ConnectionStatus isConnected={connectionState.isConnected} queuedOps={connectionState.queuedOps} />
-      <PresencePanel currentUser={{ userName, userColor }} otherUsers={otherUsers} />
+      <PresencePanel currentUser={{ userId, userName, userColor }} otherUsers={otherUsers} />
       <StylePanel selectedObjects={selectedObjects} onStyleChange={handleStyleChange} />
       <LayersPanel
         objects={objects}

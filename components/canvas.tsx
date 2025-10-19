@@ -6,25 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useCanvas } from "@/hooks/use-canvas"
 import type { CanvasObject } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import {
-  Square,
-  MousePointer2,
-  Circle,
-  Triangle,
-  Trash2,
-  Minus,
-  Type,
-  Send,
-  X,
-  Hand,
-  Group,
-  Ungroup,
-} from "lucide-react"
-
-function areSelectionsEqual(a: string[], b: string[]) {
-  if (a.length !== b.length) return false
-  return a.every((value, index) => value === b[index])
-}
+import { Square, MousePointer2, Circle, Triangle, Trash2, Minus, Type, Send, X } from "lucide-react"
 
 interface CanvasProps {
   canvasId: string
@@ -40,9 +22,6 @@ interface CanvasProps {
   gridSize?: number
   commentMode?: boolean
   onCommentCreate?: (x: number, y: number, content: string) => void
-  selectedIds?: string[]
-  lassoMode?: boolean
-  onCommentModeChange?: (enabled: boolean) => void
 }
 
 export function Canvas({
@@ -59,11 +38,7 @@ export function Canvas({
   gridSize,
   commentMode = false,
   onCommentCreate,
-  selectedIds: externalSelectedIds,
-  lassoMode = false,
-  onCommentModeChange,
 }: CanvasProps) {
-  const syncingExternalSelection = useRef(false)
   const {
     canvasRef,
     tool,
@@ -73,8 +48,7 @@ export function Canvas({
     handleMouseUp,
     handleWheel,
     viewport,
-    selectedIds: internalSelectedIds,
-    setSelectedIds: setInternalSelectedIds,
+    selectedIds,
     deleteSelectedObject,
     editingTextId,
     saveTextEdit,
@@ -89,7 +63,6 @@ export function Canvas({
     gridEnabled,
     snapEnabled,
     gridSize,
-    lassoMode,
   })
 
   const textInputRef = useRef<HTMLTextAreaElement>(null)
@@ -106,34 +79,6 @@ export function Canvas({
   })
 
   const [commentDraft, setCommentDraft] = useState<{ x: number; y: number; content: string } | null>(null)
-
-  const selectedIds = internalSelectedIds
-
-  useEffect(() => {
-    if (externalSelectedIds === undefined) return
-    setInternalSelectedIds((prev) => {
-      if (areSelectionsEqual(prev, externalSelectedIds)) {
-        return prev
-      }
-      syncingExternalSelection.current = true
-      return [...externalSelectedIds]
-    })
-  }, [externalSelectedIds, setInternalSelectedIds])
-
-  useEffect(() => {
-    if (!onSelectionChange) return
-    if (syncingExternalSelection.current) {
-      syncingExternalSelection.current = false
-      return
-    }
-    onSelectionChange(selectedIds)
-  }, [selectedIds, onSelectionChange])
-
-  useEffect(() => {
-    if (lassoMode && tool !== "select") {
-      setTool("select")
-    }
-  }, [lassoMode, tool, setTool])
 
   const updateCanvasMetrics = useCallback(() => {
     const canvasEl = canvasRef.current
@@ -219,6 +164,10 @@ export function Canvas({
   }, [canvasRef, updateCanvasMetrics])
 
   useEffect(() => {
+    onSelectionChange?.(selectedIds)
+  }, [selectedIds, onSelectionChange])
+
+  useEffect(() => {
     if (onViewportChange) {
       onViewportChange(viewport)
     }
@@ -275,18 +224,12 @@ export function Canvas({
     if (commentDraft && commentDraft.content.trim() && onCommentCreate) {
       onCommentCreate(commentDraft.x, commentDraft.y, commentDraft.content.trim())
       setCommentDraft(null)
-      if (onCommentModeChange) {
-        onCommentModeChange(false)
-      }
     }
-  }, [commentDraft, onCommentCreate, onCommentModeChange])
+  }, [commentDraft, onCommentCreate])
 
   const handleCommentCancel = useCallback(() => {
     setCommentDraft(null)
-    if (onCommentModeChange) {
-      onCommentModeChange(false)
-    }
-  }, [onCommentModeChange])
+  }, [])
 
   const commentInputStyle: CSSProperties | undefined = useMemo(() => {
     if (!commentDraft) return undefined
@@ -302,114 +245,6 @@ export function Canvas({
     }
   }, [canvasMetrics, commentDraft, viewportX, viewportY, viewportZoom])
 
-  const handleGroup = useCallback(() => {
-    if (selectedIds.length < 2) return
-
-    const groupId = crypto.randomUUID()
-    const childObjects = objects.filter((obj) => selectedIds.includes(obj.id))
-
-    // Calculate group bounds
-    let minX = Number.POSITIVE_INFINITY
-    let minY = Number.POSITIVE_INFINITY
-    let maxX = Number.NEGATIVE_INFINITY
-    let maxY = Number.NEGATIVE_INFINITY
-
-    childObjects.forEach((obj) => {
-      minX = Math.min(minX, obj.x)
-      minY = Math.min(minY, obj.y)
-      maxX = Math.max(maxX, obj.x + obj.width)
-      maxY = Math.max(maxY, obj.y + obj.height)
-    })
-
-    const groupObject: CanvasObject = {
-      id: groupId,
-      canvas_id: canvasId,
-      type: "group",
-      x: minX,
-      y: minY,
-      width: maxX - minX,
-      height: maxY - minY,
-      rotation: 0,
-      fill_color: "transparent",
-      stroke_color: "#9ca3af",
-      stroke_width: 2,
-      children_ids: selectedIds,
-    }
-
-    // Update child objects to reference parent group
-    const updatedObjects = objects.map((obj) =>
-      selectedIds.includes(obj.id) ? { ...obj, parent_group: groupId } : obj,
-    )
-
-    onObjectsChange([...updatedObjects, groupObject])
-    setInternalSelectedIds([groupId])
-  }, [selectedIds, objects, onObjectsChange, canvasId])
-
-  const handleUngroup = useCallback(() => {
-    console.log("[v0] handleUngroup called with selectedIds:", selectedIds)
-
-    const selectedObjects = objects.filter((obj) => selectedIds.includes(obj.id))
-    const groupObj = selectedObjects.find((obj) => obj.type === "group")
-
-    console.log("[v0] Found group object:", groupObj)
-
-    if (!groupObj || !groupObj.children_ids) {
-      console.log("[v0] No valid group object found or no children")
-      return
-    }
-
-    console.log("[v0] Ungrouping with children:", groupObj.children_ids)
-
-    // Remove parent_group reference from children
-    const updatedObjects = objects
-      .filter((obj) => obj.id !== groupObj.id)
-      .map((obj) => (groupObj.children_ids?.includes(obj.id) ? { ...obj, parent_group: undefined } : obj))
-
-    onObjectsChange(updatedObjects)
-    setInternalSelectedIds(groupObj.children_ids)
-
-    console.log("[v0] Ungroup complete")
-  }, [selectedIds, objects, onObjectsChange, setInternalSelectedIds])
-
-  const shouldShowUngroupButton = useMemo(() => {
-    console.log("[v0] shouldShowUngroupButton calculation - selectedIds:", selectedIds)
-
-    if (selectedIds.length === 0) {
-      console.log("[v0] No selection, returning false")
-      return false
-    }
-
-    const selectedObjects = objects.filter((obj) => selectedIds.includes(obj.id))
-    const hasGroupObject = selectedObjects.some((obj) => obj.type === "group")
-
-    if (hasGroupObject) {
-      console.log("[v0] Group object found in selection, returning true")
-      return true
-    }
-
-    // Case 2: Multiple objects selected that all belong to the same group
-    if (selectedIds.length > 1) {
-      const parentGroups = selectedObjects.map((obj) => obj.parent_group).filter(Boolean)
-
-      console.log("[v0] Multiple selection - Parent groups:", parentGroups)
-
-      // All selected objects must have a parent group
-      if (parentGroups.length === selectedObjects.length && parentGroups.length > 0) {
-        const firstGroup = parentGroups[0]
-        // All parent groups must be the same
-        if (parentGroups.every((group) => group === firstGroup)) {
-          console.log("[v0] All objects in same group, returning true")
-          return true
-        }
-      }
-    }
-
-    console.log("[v0] No group condition met, returning false")
-    return false
-  }, [selectedIds, objects])
-
-  console.log("[v0] shouldShowUngroupButton final value:", shouldShowUngroupButton)
-
   return (
     <div className="relative h-full w-full overflow-hidden bg-muted/20">
       {/* Toolbar */}
@@ -417,23 +252,15 @@ export function Canvas({
         <Button
           variant={tool === "select" ? "default" : "ghost"}
           size="icon"
-          onClick={() => setTool(tool === "select" ? "pan" : "select")}
+          onClick={() => setTool("select")}
           title="Select (V)"
         >
           <MousePointer2 className="h-4 w-4" />
         </Button>
         <Button
-          variant={tool === "pan" ? "default" : "ghost"}
-          size="icon"
-          onClick={() => setTool(tool === "pan" ? "select" : "pan")}
-          title="Pan (H) - Drag to move canvas"
-        >
-          <Hand className="h-4 w-4" />
-        </Button>
-        <Button
           variant={tool === "rectangle" ? "default" : "ghost"}
           size="icon"
-          onClick={() => setTool(tool === "rectangle" ? "select" : "rectangle")}
+          onClick={() => setTool("rectangle")}
           title="Rectangle (R) - Blue"
         >
           <Square className="h-4 w-4" />
@@ -441,7 +268,7 @@ export function Canvas({
         <Button
           variant={tool === "circle" ? "default" : "ghost"}
           size="icon"
-          onClick={() => setTool(tool === "circle" ? "select" : "circle")}
+          onClick={() => setTool("circle")}
           title="Circle (C) - Green"
         >
           <Circle className="h-4 w-4" />
@@ -449,7 +276,7 @@ export function Canvas({
         <Button
           variant={tool === "triangle" ? "default" : "ghost"}
           size="icon"
-          onClick={() => setTool(tool === "triangle" ? "select" : "triangle")}
+          onClick={() => setTool("triangle")}
           title="Triangle (T) - Orange"
         >
           <Triangle className="h-4 w-4" />
@@ -459,7 +286,7 @@ export function Canvas({
           size="icon"
           onClick={() => {
             console.log("[v0] Line button clicked")
-            setTool(tool === "line" ? "select" : "line")
+            setTool("line")
           }}
           title="Line (L) - Purple"
         >
@@ -468,7 +295,7 @@ export function Canvas({
         <Button
           variant={tool === "text" ? "default" : "ghost"}
           size="icon"
-          onClick={() => setTool(tool === "text" ? "select" : "text")}
+          onClick={() => setTool("text")}
           title="Text (T) - Black"
         >
           <Type className="h-4 w-4" />
@@ -477,20 +304,6 @@ export function Canvas({
         {selectedIds.length > 0 && (
           <>
             <div className="w-px bg-border" />
-            {shouldShowUngroupButton ? (
-              <Button variant="ghost" size="icon" onClick={handleUngroup} title="Ungroup (Ctrl+Shift+G)">
-                <Ungroup className="h-4 w-4" />
-              </Button>
-            ) : selectedIds.length >= 2 ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleGroup}
-                title={`Group ${selectedIds.length} objects (Ctrl+G)`}
-              >
-                <Group className="h-4 w-4" />
-              </Button>
-            ) : null}
             <Button
               variant="ghost"
               size="icon"
@@ -515,7 +328,7 @@ export function Canvas({
         ref={canvasRef}
         width={typeof window !== "undefined" ? window.innerWidth : 1920}
         height={typeof window !== "undefined" ? window.innerHeight : 1080}
-        className={`h-full w-full ${tool === "pan" ? "cursor-grab active:cursor-grabbing" : commentMode ? "cursor-crosshair" : "cursor-crosshair"}`}
+        className={`h-full w-full ${commentMode ? "cursor-crosshair" : "cursor-crosshair"}`}
         onMouseDown={commentMode ? undefined : handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}

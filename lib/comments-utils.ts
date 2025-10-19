@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js"
+import { createBrowserClient } from "@supabase/ssr"
 
 export interface Comment {
   id: string
@@ -15,7 +15,9 @@ export interface Comment {
   resolved_at?: string
 }
 
-export async function loadComments(supabase: SupabaseClient, canvasId: string): Promise<Comment[]> {
+const supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+
+export async function loadComments(canvasId: string): Promise<Comment[]> {
   const { data, error } = await supabase
     .from("canvas_comments")
     .select("*")
@@ -31,7 +33,6 @@ export async function loadComments(supabase: SupabaseClient, canvasId: string): 
 }
 
 export async function createComment(
-  supabase: SupabaseClient,
   canvasId: string,
   x: number,
   y: number,
@@ -48,7 +49,6 @@ export async function createComment(
       content,
       created_by: userId,
       created_by_name: userName,
-      resolved: false, // Explicitly set to false for new comments
     })
     .select()
     .single()
@@ -58,11 +58,10 @@ export async function createComment(
     return null
   }
 
-  console.log("[v0] Created comment:", data)
   return data
 }
 
-export async function updateComment(supabase: SupabaseClient, commentId: string, content: string): Promise<boolean> {
+export async function updateComment(commentId: string, content: string): Promise<boolean> {
   const { error } = await supabase
     .from("canvas_comments")
     .update({ content, updated_at: new Date().toISOString() })
@@ -76,9 +75,7 @@ export async function updateComment(supabase: SupabaseClient, commentId: string,
   return true
 }
 
-export async function resolveComment(supabase: SupabaseClient, commentId: string, userId: string): Promise<boolean> {
-  console.log("[v0] resolveComment called with:", { commentId, userId })
-
+export async function resolveComment(commentId: string, userId: string): Promise<boolean> {
   const { error } = await supabase
     .from("canvas_comments")
     .update({
@@ -93,11 +90,10 @@ export async function resolveComment(supabase: SupabaseClient, commentId: string
     return false
   }
 
-  console.log("[v0] Comment resolved successfully")
   return true
 }
 
-export async function deleteComment(supabase: SupabaseClient, commentId: string): Promise<boolean> {
+export async function deleteComment(commentId: string): Promise<boolean> {
   const { error } = await supabase.from("canvas_comments").delete().eq("id", commentId)
 
   if (error) {
@@ -108,7 +104,7 @@ export async function deleteComment(supabase: SupabaseClient, commentId: string)
   return true
 }
 
-export async function clearAllComments(supabase: SupabaseClient, canvasId: string): Promise<boolean> {
+export async function clearAllComments(canvasId: string): Promise<boolean> {
   const { error } = await supabase.from("canvas_comments").delete().eq("canvas_id", canvasId)
 
   if (error) {
@@ -119,9 +115,7 @@ export async function clearAllComments(supabase: SupabaseClient, canvasId: strin
   return true
 }
 
-export async function clearResolvedComments(supabase: SupabaseClient, canvasId: string): Promise<boolean> {
-  console.log("[v0] clearResolvedComments called with canvasId:", canvasId)
-
+export async function clearResolvedComments(canvasId: string): Promise<boolean> {
   const { error } = await supabase.from("canvas_comments").delete().eq("canvas_id", canvasId).eq("resolved", true)
 
   if (error) {
@@ -129,11 +123,10 @@ export async function clearResolvedComments(supabase: SupabaseClient, canvasId: 
     return false
   }
 
-  console.log("[v0] Resolved comments cleared successfully")
   return true
 }
 
-export function subscribeToComments(supabase: SupabaseClient, canvasId: string, callback: (comment: Comment) => void) {
+export function subscribeToComments(canvasId: string, callback: (comment: Comment) => void) {
   const channel = supabase
     .channel(`comments:${canvasId}`)
     .on(

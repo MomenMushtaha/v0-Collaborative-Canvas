@@ -1,8 +1,7 @@
 "use client"
 
 import type React from "react"
-import { snapPointToGrid, isObjectInLasso } from "@/lib/grid-utils"
-import { getGroupBounds } from "@/lib/group-utils"
+import { snapToGrid } from "@/lib/grid-utils"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { CanvasObject } from "@/lib/types"
@@ -15,7 +14,6 @@ interface UseCanvasProps {
   gridEnabled?: boolean
   snapEnabled?: boolean
   gridSize?: number
-  lassoMode?: boolean
 }
 
 type ResizeHandle =
@@ -37,7 +35,6 @@ export function useCanvas({
   gridEnabled = false,
   snapEnabled = false,
   gridSize = 20,
-  lassoMode = false,
 }: UseCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
@@ -45,15 +42,13 @@ export function useCanvas({
   const [isDragging, setIsDragging] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
-  const [isRotating, setIsRotating] = useState(false)
   const [isSelecting, setIsSelecting] = useState(false)
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const [resizeHandle, setResizeHandle] = useState<ResizeHandle>(null)
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, objX: 0, objY: 0 })
-  const [rotateStart, setRotateStart] = useState({ angle: 0, objRotation: 0, centerX: 0, centerY: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [dragOffsets, setDragOffsets] = useState<Map<string, { x: number; y: number }>>(new Map())
-  const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line" | "text" | "pan">("select")
+  const [tool, setTool] = useState<"select" | "rectangle" | "circle" | "triangle" | "line" | "text">("select")
   const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null)
   const [linePreview, setLinePreview] = useState<{ x: number; y: number } | null>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
@@ -131,30 +126,6 @@ export function useCanvas({
     [viewport.zoom],
   )
 
-  const getRotationHandleAtPosition = useCallback(
-    (pos: { x: number; y: number }, obj: CanvasObject): boolean => {
-      const handleSize = 8 / viewport.zoom
-      const centerX = obj.x + obj.width / 2
-      const centerY = obj.y + obj.height / 2
-
-      const localHandleX = 0 // relative to center
-      const localHandleY = -obj.height / 2 - 30 / viewport.zoom // above the object
-
-      const rotationRad = (obj.rotation * Math.PI) / 180
-      const cos = Math.cos(rotationRad)
-      const sin = Math.sin(rotationRad)
-
-      const rotatedHandleX = localHandleX * cos - localHandleY * sin
-      const rotatedHandleY = localHandleX * sin + localHandleY * cos
-
-      const rotateHandleX = centerX + rotatedHandleX
-      const rotateHandleY = centerY + rotatedHandleY
-
-      return Math.abs(pos.x - rotateHandleX) < handleSize && Math.abs(pos.y - rotateHandleY) < handleSize
-    },
-    [viewport.zoom],
-  )
-
   const isObjectInSelectionBox = useCallback(
     (obj: CanvasObject, box: { x: number; y: number; width: number; height: number }) => {
       const boxX1 = Math.min(box.x, box.x + box.width)
@@ -189,21 +160,11 @@ export function useCanvas({
       maxWidth = Math.max(maxWidth, metrics.width)
     })
 
-    const width = Math.max(150, maxWidth + 40)
-    const height = Math.max(fontSize * 1.5 + 20, lines.length * lineHeight + 20)
+    const width = Math.max(150, maxWidth + 40) // Increased minimum width and padding
+    const height = Math.max(fontSize * 1.5 + 20, lines.length * lineHeight + 20) // Better minimum height
 
     return { width, height }
   }, [])
-
-  const [lassoPath, setLassoPath] = useState<{ x: number; y: number }[]>([])
-  const [isLassoSelecting, setIsLassoSelecting] = useState(false)
-
-  useEffect(() => {
-    if (!lassoMode) {
-      setIsLassoSelecting(false)
-      setLassoPath([])
-    }
-  }, [lassoMode])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -224,10 +185,12 @@ export function useCanvas({
         const fps = 1000 / frameDelta
         fpsRef.current.push(fps)
 
+        // Keep only last 60 frames for average calculation
         if (fpsRef.current.length > 60) {
           fpsRef.current.shift()
         }
 
+        // Log FPS every 60 frames (approximately once per second at 60fps)
         if (fpsRef.current.length === 60) {
           const avgFps = fpsRef.current.reduce((a, b) => a + b, 0) / fpsRef.current.length
           console.log(`[v0] [PERF] Average FPS: ${avgFps.toFixed(1)} (${objects.length} objects)`)
@@ -263,21 +226,10 @@ export function useCanvas({
         ctx.stroke()
       }
 
-      const groups = objects.filter((obj) => obj.type === "group")
-      const nonGroups = objects.filter((obj) => obj.type !== "group")
-
-      nonGroups.forEach((obj) => {
+      objects.forEach((obj) => {
         ctx.save()
 
         const isSelected = selectedIds.includes(obj.id)
-
-        if (obj.rotation !== 0) {
-          const centerX = obj.x + obj.width / 2
-          const centerY = obj.y + obj.height / 2
-          ctx.translate(centerX, centerY)
-          ctx.rotate((obj.rotation * Math.PI) / 180)
-          ctx.translate(-centerX, -centerY)
-        }
 
         if (obj.type === "line") {
           ctx.strokeStyle = obj.stroke_color
@@ -317,14 +269,18 @@ export function useCanvas({
           ctx.strokeStyle = obj.stroke_color
           ctx.lineWidth = obj.stroke_width
           ctx.beginPath()
+          // Top vertex (center top)
           ctx.moveTo(obj.x + obj.width / 2, obj.y)
+          // Bottom-left vertex
           ctx.lineTo(obj.x, obj.y + obj.height)
+          // Bottom-right vertex
           ctx.lineTo(obj.x + obj.width, obj.y + obj.height)
           ctx.closePath()
           ctx.fill()
           ctx.stroke()
         } else if (obj.type === "text") {
           if (obj.id === editingTextId) {
+            // Draw selection box but not the text itself
             if (isSelected) {
               ctx.strokeStyle = "#3b82f6"
               ctx.lineWidth = 2 / viewport.zoom
@@ -333,6 +289,7 @@ export function useCanvas({
               ctx.setLineDash([])
             }
           } else {
+            // Normal text rendering when not editing
             if (isSelected) {
               ctx.strokeStyle = "#3b82f6"
               ctx.lineWidth = 2 / viewport.zoom
@@ -349,82 +306,12 @@ export function useCanvas({
           }
         }
 
-        if (isSelected) {
+        if (isSelected && obj.type !== "text") {
           ctx.strokeStyle = "#3b82f6"
           ctx.lineWidth = 2 / viewport.zoom
           ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
           ctx.strokeRect(obj.x - 5, obj.y - 5, obj.width + 10, obj.height + 10)
           ctx.setLineDash([])
-
-          if (obj.type !== "line" && obj.type !== "text") {
-            const handleSize = 8 / viewport.zoom
-            const offset = handleSize / 2 + 3 / viewport.zoom
-            const x1 = obj.x
-            const y1 = obj.y
-            const x2 = obj.x + obj.width
-            const y2 = obj.y + obj.height
-            const centerX = obj.x + obj.width / 2
-            const centerY = obj.y + obj.height / 2
-
-            const drawHandle = (x: number, y: number) => {
-              ctx.fillStyle = "#ffffff"
-              ctx.strokeStyle = "#3b82f6"
-              ctx.lineWidth = 2 / viewport.zoom
-              ctx.fillRect(x - handleSize / 2, y - handleSize / 2, handleSize, handleSize)
-              ctx.strokeRect(x - handleSize / 2, y - handleSize / 2, handleSize, handleSize)
-            }
-
-            drawHandle(x1 - offset, y1 - offset)
-            drawHandle(x2 + offset, y1 - offset)
-            drawHandle(x1 - offset, y2 + offset)
-            drawHandle(x2 + offset, y2 + offset)
-
-            drawHandle(centerX, y1 - offset)
-            drawHandle(x2 + offset, centerY)
-            drawHandle(centerX, y2 + offset)
-            drawHandle(x1 - offset, centerY)
-          }
-
-          if (selectedIds.length === 1) {
-            const centerX = obj.x + obj.width / 2
-            const rotateHandleY = obj.y - 30 / viewport.zoom
-
-            ctx.strokeStyle = "#3b82f6"
-            ctx.lineWidth = 2 / viewport.zoom
-            ctx.beginPath()
-            ctx.moveTo(centerX, obj.y)
-            ctx.lineTo(centerX, rotateHandleY)
-            ctx.stroke()
-
-            ctx.fillStyle = "#ffffff"
-            ctx.strokeStyle = "#3b82f6"
-            ctx.lineWidth = 2 / viewport.zoom
-            ctx.beginPath()
-            ctx.arc(centerX, rotateHandleY, 6 / viewport.zoom, 0, Math.PI * 2)
-            ctx.fill()
-            ctx.stroke()
-          }
-        }
-
-        ctx.restore()
-      })
-
-      groups.forEach((group) => {
-        const bounds = getGroupBounds(group, objects)
-        const isSelected = selectedIds.includes(group.id)
-
-        ctx.save()
-
-        ctx.strokeStyle = isSelected ? "#3b82f6" : "#9ca3af"
-        ctx.lineWidth = 2 / viewport.zoom
-        ctx.setLineDash([10 / viewport.zoom, 5 / viewport.zoom])
-        ctx.strokeRect(bounds.x - 5, bounds.y - 5, bounds.width + 10, bounds.height + 10)
-        ctx.setLineDash([])
-
-        if (isSelected) {
-          ctx.fillStyle = "#3b82f6"
-          ctx.font = `${12 / viewport.zoom}px Arial`
-          ctx.fillText("Group", bounds.x, bounds.y - 10 / viewport.zoom)
         }
 
         ctx.restore()
@@ -440,19 +327,13 @@ export function useCanvas({
         ctx.setLineDash([])
       }
 
-      if (isLassoSelecting && lassoPath.length > 1) {
-        ctx.strokeStyle = "#3b82f6"
-        ctx.lineWidth = 2 / viewport.zoom
-        ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
-        ctx.fillStyle = "rgba(59, 130, 246, 0.1)"
-
+      if (lineStart && linePreview) {
+        ctx.strokeStyle = "#a855f7"
+        ctx.lineWidth = 3
+        ctx.setLineDash([5, 5])
         ctx.beginPath()
-        ctx.moveTo(lassoPath[0].x, lassoPath[0].y)
-        for (let i = 1; i < lassoPath.length; i++) {
-          ctx.lineTo(lassoPath[i].x, lassoPath[i].y)
-        }
-        ctx.closePath()
-        ctx.fill()
+        ctx.moveTo(lineStart.x, lineStart.y)
+        ctx.lineTo(linePreview.x, linePreview.y)
         ctx.stroke()
         ctx.setLineDash([])
       }
@@ -474,19 +355,7 @@ export function useCanvas({
         cancelAnimationFrame(animationFrameRef.current)
       }
     }
-  }, [
-    objects,
-    viewport,
-    selectedIds,
-    lineStart,
-    linePreview,
-    selectionBox,
-    editingTextId,
-    gridEnabled,
-    gridSize,
-    isLassoSelecting,
-    lassoPath,
-  ])
+  }, [objects, viewport, selectedIds, lineStart, linePreview, selectionBox, editingTextId, gridEnabled, gridSize])
 
   const handleTextEdit = useCallback((objectId: string) => {
     setEditingTextId(objectId)
@@ -495,6 +364,7 @@ export function useCanvas({
   const saveTextEdit = useCallback(
     (objectId: string, newText: string) => {
       if (!newText.trim()) {
+        // If text is empty or only whitespace, delete the object
         const updatedObjects = objects.filter((o) => o.id !== objectId)
         onObjectsChange(updatedObjects)
         setSelectedIds([])
@@ -527,6 +397,7 @@ export function useCanvas({
     if (editingTextId) {
       const textObj = objects.find((o) => o.id === editingTextId)
       if (textObj && textObj.type === "text" && !textObj.text_content?.trim()) {
+        // Delete the empty text object
         const updatedObjects = objects.filter((o) => o.id !== editingTextId)
         onObjectsChange(updatedObjects)
         setSelectedIds([])
@@ -542,22 +413,9 @@ export function useCanvas({
 
       const pos = screenToCanvas(e.clientX, e.clientY)
 
-      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
-      const modifier = isMac ? e.metaKey : e.ctrlKey
-
-      if ((lassoMode || modifier) && tool === "select" && e.button === 0) {
-        setIsLassoSelecting(true)
-        setLassoPath([pos])
-        return
-      }
-
-      if (e.button === 1 || (e.button === 0 && e.altKey) || (tool === "pan" && e.button === 0)) {
+      if (e.button === 1 || (e.button === 0 && e.altKey)) {
         setIsPanning(true)
         setDragStart({ x: e.clientX, y: e.clientY })
-        return
-      }
-
-      if (tool === "pan") {
         return
       }
 
@@ -675,22 +533,6 @@ export function useCanvas({
       if (selectedIds.length === 1 && tool === "select") {
         const selectedObj = objects.find((o) => o.id === selectedIds[0])
         if (selectedObj) {
-          const isRotateHandle = getRotationHandleAtPosition(pos, selectedObj)
-          if (isRotateHandle) {
-            setIsRotating(true)
-            const centerX = selectedObj.x + selectedObj.width / 2
-            const centerY = selectedObj.y + selectedObj.height / 2
-            const angle = Math.atan2(pos.y - centerY, pos.x - centerX)
-            setRotateStart({
-              angle,
-              objRotation: selectedObj.rotation,
-              centerX,
-              centerY,
-            })
-            console.log("[v0] Started rotating object")
-            return
-          }
-
           const handle = getResizeHandleAtPosition(pos, selectedObj)
           if (handle) {
             setIsResizing(true)
@@ -750,31 +592,14 @@ export function useCanvas({
           return
         }
 
-        let objectsToSelect: string[]
-
-        // If clicked object is a group, only select the group itself
-        if (clickedObj.type === "group") {
-          objectsToSelect = [clickedObj.id]
-        }
-        // If clicked object belongs to a group, select the parent group only
-        else if (clickedObj.parent_group) {
-          objectsToSelect = [clickedObj.parent_group]
-        }
-        // Otherwise, select just the clicked object
-        else {
-          objectsToSelect = [clickedObj.id]
-        }
-
-        const primaryObjectId = clickedObj.parent_group || clickedObj.id
-
         if (e.shiftKey) {
-          if (selectedIds.includes(primaryObjectId)) {
-            setSelectedIds(selectedIds.filter((id) => !objectsToSelect.includes(id)))
+          if (selectedIds.includes(clickedObj.id)) {
+            setSelectedIds(selectedIds.filter((id) => id !== clickedObj.id))
           } else {
-            setSelectedIds([...selectedIds, ...objectsToSelect.filter((id) => !selectedIds.includes(id))])
+            setSelectedIds([...selectedIds, clickedObj.id])
           }
         } else {
-          if (selectedIds.includes(primaryObjectId)) {
+          if (selectedIds.includes(clickedObj.id)) {
             setIsDragging(true)
             const offsets = new Map<string, { x: number; y: number }>()
             selectedIds.forEach((id) => {
@@ -785,15 +610,10 @@ export function useCanvas({
             })
             setDragOffsets(offsets)
           } else {
-            setSelectedIds(objectsToSelect)
+            setSelectedIds([clickedObj.id])
             setIsDragging(true)
             const offsets = new Map<string, { x: number; y: number }>()
-            objectsToSelect.forEach((id) => {
-              const obj = objects.find((o) => o.id === id)
-              if (obj) {
-                offsets.set(id, { x: pos.x - obj.x, y: pos.y - obj.y })
-              }
-            })
+            offsets.set(clickedObj.id, { x: pos.x - clickedObj.x, y: pos.y - clickedObj.y })
             setDragOffsets(offsets)
           }
         }
@@ -815,10 +635,8 @@ export function useCanvas({
       viewport.zoom,
       selectedIds,
       getResizeHandleAtPosition,
-      getRotationHandleAtPosition,
       handleTextEdit,
       editingTextId,
-      lassoMode,
     ],
   )
 
@@ -829,12 +647,7 @@ export function useCanvas({
       let pos = screenToCanvas(e.clientX, e.clientY)
 
       if (snapEnabled && (isDragging || tool !== "select")) {
-        pos = snapPointToGrid(pos.x, pos.y, gridSize)
-      }
-
-      if (isLassoSelecting) {
-        setLassoPath((prev) => [...prev, pos])
-        return
+        pos = snapToGrid(pos.x, pos.y, gridSize)
       }
 
       if (tool === "line" && lineStart) {
@@ -865,28 +678,6 @@ export function useCanvas({
           width: pos.x - selectionBox.x,
           height: pos.y - selectionBox.y,
         })
-        return
-      }
-
-      if (isRotating && selectedIds.length === 1) {
-        const obj = objects.find((o) => o.id === selectedIds[0])
-        if (obj) {
-          const currentAngle = Math.atan2(pos.y - rotateStart.centerY, pos.x - rotateStart.centerX)
-          const angleDiff = ((currentAngle - rotateStart.angle) * 180) / Math.PI
-          let newRotation = rotateStart.objRotation + angleDiff
-
-          newRotation = ((newRotation % 360) + 360) % 360
-
-          const updatedObjects = objects.map((o) =>
-            o.id === selectedIds[0]
-              ? {
-                  ...o,
-                  rotation: newRotation,
-                }
-              : o,
-          )
-          onObjectsChange(updatedObjects)
-        }
         return
       }
 
@@ -968,19 +759,6 @@ export function useCanvas({
           if (selectedIds.includes(o.id)) {
             const offset = dragOffsets.get(o.id)
             if (offset) {
-              if (o.type === "group") {
-                const deltaX = pos.x - offset.x - o.x
-                const deltaY = pos.y - offset.y - o.y
-
-                const updatedGroup = {
-                  ...o,
-                  x: pos.x - offset.x,
-                  y: pos.y - offset.y,
-                }
-
-                return updatedGroup
-              }
-
               return {
                 ...o,
                 x: pos.x - offset.x,
@@ -988,22 +766,6 @@ export function useCanvas({
               }
             }
           }
-
-          if (o.parent_group && selectedIds.includes(o.parent_group)) {
-            const parentGroup = objects.find((obj) => obj.id === o.parent_group)
-            const parentOffset = dragOffsets.get(o.parent_group)
-            if (parentGroup && parentOffset) {
-              const deltaX = pos.x - parentOffset.x - parentGroup.x
-              const deltaY = pos.y - parentOffset.y - parentGroup.y
-
-              return {
-                ...o,
-                x: o.x + deltaX,
-                y: o.y + deltaY,
-              }
-            }
-          }
-
           return o
         })
         onObjectsChange(updatedObjects)
@@ -1014,12 +776,10 @@ export function useCanvas({
       isPanning,
       isDragging,
       isResizing,
-      isRotating,
       isSelecting,
       selectedIds,
       resizeHandle,
       resizeStart,
-      rotateStart,
       selectionBox,
       objects,
       dragStart,
@@ -1031,41 +791,25 @@ export function useCanvas({
       editingTextId,
       snapEnabled,
       gridSize,
-      isLassoSelecting,
     ],
   )
 
   const handleMouseUp = useCallback(() => {
-    if (isLassoSelecting && lassoPath.length > 2) {
-      const selectedObjects = objects.filter((obj) => isObjectInLasso(obj, lassoPath))
-      setSelectedIds(selectedObjects.map((obj) => obj.id))
-      setLassoPath([])
-      setIsLassoSelecting(false)
-      return
-    }
-
     if (isSelecting && selectionBox) {
       const selectedObjects = objects.filter((obj) => isObjectInSelectionBox(obj, selectionBox))
       setSelectedIds(selectedObjects.map((obj) => obj.id))
       setSelectionBox(null)
     }
 
-    if (isRotating) {
-      console.log("[v0] Finished rotating object")
-    }
-
     setIsDragging(false)
     setIsPanning(false)
     setIsResizing(false)
-    setIsRotating(false)
     setIsSelecting(false)
     setResizeHandle(null)
-    setIsLassoSelecting(false)
-    setLassoPath([])
-  }, [isSelecting, selectionBox, objects, isObjectInSelectionBox, isLassoSelecting, lassoPath, isRotating])
+  }, [isSelecting, selectionBox, objects, isObjectInSelectionBox])
 
-  const MIN_ZOOM = 0.1 // Changed from 0 to 0.1 to set minimum zoom to 10%
-  const MAX_ZOOM = 3
+  const MIN_ZOOM = 1 // 100% minimum - no zooming out
+  const MAX_ZOOM = 3 // Updated from 2 to 3 (300% maximum - allows zooming in up to 3x)
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault()
@@ -1080,7 +824,6 @@ export function useCanvas({
     canvasRef,
     viewport,
     selectedIds,
-    setSelectedIds,
     tool,
     setTool,
     handleMouseDown,

@@ -32,15 +32,10 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
   const onConnectionChangeRef = useRef(onConnectionChange)
   const lastStatusRef = useRef<string>("")
-  const objectsRef = useRef<CanvasObject[]>([])
 
   useEffect(() => {
     onConnectionChangeRef.current = onConnectionChange
   }, [onConnectionChange])
-
-  useEffect(() => {
-    objectsRef.current = objects
-  }, [objects])
 
   // Load initial objects from database
   useEffect(() => {
@@ -94,10 +89,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
               text_content: op.object.text_content,
               font_size: op.object.font_size,
               font_family: op.object.font_family,
-              visible: op.object.visible,
-              locked: op.object.locked,
-              parent_group: op.object.parent_group,
-              children_ids: op.object.children_ids,
               updated_at: new Date().toISOString(),
             })
             .eq("id", op.object.id)
@@ -219,7 +210,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
 
       const dbWriteStart = performance.now()
 
-      const existingIds = new Set(objectsRef.current.map((o) => o.id))
+      const existingIds = new Set(objects.map((o) => o.id))
       const updatedIds = new Set(updatedObjects.map((o) => o.id))
 
       const newObjects = updatedObjects.filter((o) => !existingIds.has(o.id))
@@ -246,7 +237,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
 
       const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
       for (const obj of toUpdate) {
-        const existing = objectsRef.current.find((o) => o.id === obj.id)
+        const existing = objects.find((o) => o.id === obj.id)
         if (existing && JSON.stringify(existing) !== JSON.stringify(obj)) {
           try {
             await supabase
@@ -263,10 +254,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
                 text_content: obj.text_content,
                 font_size: obj.font_size,
                 font_family: obj.font_family,
-                visible: obj.visible,
-                locked: obj.locked,
-                parent_group: obj.parent_group,
-                children_ids: obj.children_ids,
                 updated_at: new Date().toISOString(),
               })
               .eq("id", obj.id)
@@ -282,12 +269,29 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         }
       }
 
+      const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
+      if (deletedIds.length > 0) {
+        try {
+          await supabase.from("canvas_objects").delete().in("id", deletedIds)
+        } catch (error) {
+          console.error("[v0] [RECONNECT] Database delete failed, queueing operations")
+          deletedIds.forEach((id) => {
+            operationQueueRef.current.push({
+              type: "delete",
+              objectId: id,
+              timestamp: Date.now(),
+            })
+          })
+          onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
+        }
+      }
+
       const dbWriteTime = performance.now() - dbWriteStart
       console.log(
-        `[v0] [PERF] Database write completed in ${dbWriteTime.toFixed(2)}ms (${newObjects.length} new, ${toUpdate.length} updated)`,
+        `[v0] [PERF] Database write completed in ${dbWriteTime.toFixed(2)}ms (${newObjects.length} new, ${toUpdate.length} updated, ${deletedIds.length} deleted)`,
       )
     },
-    [supabase, userId, isConnected],
+    [objects, supabase, userId, isConnected],
   )
 
   const syncObjects = useCallback(
@@ -298,7 +302,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
 
       pendingObjectsRef.current = updatedObjects
 
-      const existingIds = new Set(objectsRef.current.map((o) => o.id))
+      const existingIds = new Set(objects.map((o) => o.id))
       const updatedIds = new Set(updatedObjects.map((o) => o.id))
 
       const channel = channelRef.current
@@ -316,7 +320,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
 
         const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
         toUpdate.forEach((obj) => {
-          const existing = objectsRef.current.find((o) => o.id === obj.id)
+          const existing = objects.find((o) => o.id === obj.id)
           if (existing && JSON.stringify(existing) !== JSON.stringify(obj)) {
             operationQueueRef.current.push({
               type: "update",
@@ -324,6 +328,15 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
               timestamp: Date.now(),
             })
           }
+        })
+
+        const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
+        deletedIds.forEach((id) => {
+          operationQueueRef.current.push({
+            type: "delete",
+            objectId: id,
+            timestamp: Date.now(),
+          })
         })
 
         onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
@@ -343,7 +356,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
 
       const toUpdate = updatedObjects.filter((o) => existingIds.has(o.id))
       for (const obj of toUpdate) {
-        const existing = objectsRef.current.find((o) => o.id === obj.id)
+        const existing = objects.find((o) => o.id === obj.id)
         if (existing && JSON.stringify(existing) !== JSON.stringify(obj)) {
           channel.send({
             type: "broadcast",
@@ -353,9 +366,18 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         }
       }
 
+      const deletedIds = Array.from(existingIds).filter((id) => !updatedIds.has(id))
+      for (const id of deletedIds) {
+        channel.send({
+          type: "broadcast",
+          event: "object_deleted",
+          payload: { id, _timestamp: timestamp },
+        })
+      }
+
       const broadcastTime = performance.now() - broadcastStart
       console.log(
-        `[v0] [PERF] Broadcast completed in ${broadcastTime.toFixed(2)}ms (${newObjects.length + toUpdate.length} operations)`,
+        `[v0] [PERF] Broadcast completed in ${broadcastTime.toFixed(2)}ms (${newObjects.length + toUpdate.length + deletedIds.length} operations)`,
       )
 
       if (syncTimeoutRef.current) {
@@ -366,7 +388,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         debouncedDatabaseSync(pendingObjectsRef.current)
       }, 300)
     },
-    [debouncedDatabaseSync, isConnected],
+    [objects, debouncedDatabaseSync, isConnected],
   )
 
   return {

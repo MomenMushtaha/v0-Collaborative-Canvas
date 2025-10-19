@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Check, Trash2, X, ChevronDown, ChevronLeft, MessageSquare } from "lucide-react"
+import { Check, Trash2, X } from "lucide-react"
 import {
   resolveComment,
   deleteComment,
@@ -12,7 +12,6 @@ import {
   type Comment,
 } from "@/lib/comments-utils"
 import { formatDistanceToNow } from "date-fns"
-import type { SupabaseClient } from "@supabase/supabase-js"
 
 interface CommentsPanelProps {
   canvasId: string
@@ -20,46 +19,22 @@ interface CommentsPanelProps {
   onCommentClick?: (x: number, y: number) => void
   comments: Comment[]
   onCommentsChange: () => void
-  supabase: SupabaseClient
 }
 
-export function CommentsPanel({
-  canvasId,
-  userId,
-  onCommentClick,
-  comments,
-  onCommentsChange,
-  supabase,
-}: CommentsPanelProps) {
+export function CommentsPanel({ canvasId, userId, onCommentClick, comments, onCommentsChange }: CommentsPanelProps) {
   const [showResolved, setShowResolved] = useState(false)
-  const [isCollapsed, setIsCollapsed] = useState(false)
 
-  console.log(
-    "[v0] All comments:",
-    comments.map((c) => ({ id: c.id, content: c.content, resolved: c.resolved })),
-  )
-
-  const filteredComments = showResolved
-    ? comments.filter((c) => c.resolved) // Only show resolved comments when showResolved is true
-    : comments.filter((c) => !c.resolved)
-
-  console.log(
-    "[v0] Filtered comments (showResolved=" + showResolved + "):",
-    filteredComments.map((c) => ({ id: c.id, content: c.content, resolved: c.resolved })),
-  )
+  const filteredComments = showResolved ? comments : comments.filter((c) => !c.resolved)
 
   const handleResolve = async (commentId: string) => {
-    console.log("[v0] Resolve button clicked for comment:", commentId)
-    console.log("[v0] Current userId:", userId)
-    const success = await resolveComment(supabase, commentId, userId)
-    console.log("[v0] Resolve result:", success)
+    const success = await resolveComment(commentId, userId)
     if (success) {
       onCommentsChange()
     }
   }
 
   const handleDelete = async (commentId: string) => {
-    const success = await deleteComment(supabase, commentId)
+    const success = await deleteComment(commentId)
     if (success) {
       onCommentsChange()
     }
@@ -70,17 +45,13 @@ export function CommentsPanel({
       return
     }
 
-    const success = await clearAllComments(supabase, canvasId)
+    const success = await clearAllComments(canvasId)
     if (success) {
       onCommentsChange()
     }
   }
 
   const handleClearResolved = async () => {
-    console.log("[v0] Clear Resolved button clicked")
-    console.log("[v0] Canvas ID:", canvasId)
-    console.log("[v0] Resolved comments count:", comments.filter((c) => c.resolved).length)
-
     const resolvedCount = comments.filter((c) => c.resolved).length
     if (resolvedCount === 0) {
       alert("No resolved comments to clear.")
@@ -90,54 +61,20 @@ export function CommentsPanel({
     if (
       !confirm(`Are you sure you want to delete ${resolvedCount} resolved comment(s)? This action cannot be undone.`)
     ) {
-      console.log("[v0] User cancelled clear resolved operation")
       return
     }
 
-    console.log("[v0] Calling clearResolvedComments...")
-    const success = await clearResolvedComments(supabase, canvasId)
-    console.log("[v0] clearResolvedComments result:", success)
-
+    const success = await clearResolvedComments(canvasId)
     if (success) {
       onCommentsChange()
     }
-  }
-
-  if (isCollapsed) {
-    return (
-      <div className="fixed left-4 bottom-4 z-40">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsCollapsed(false)}
-          className="bg-background/95 backdrop-blur-md shadow-lg hover:shadow-xl transition-all hover:scale-105 border border-border/50 gap-2"
-        >
-          <MessageSquare className="h-4 w-4" />
-          <span className="text-xs font-medium">
-            {comments.filter((c) => !c.resolved).length} Comment
-            {comments.filter((c) => !c.resolved).length !== 1 ? "s" : ""}
-          </span>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-      </div>
-    )
   }
 
   return (
     <div className="fixed left-4 bottom-4 z-40 rounded-xl border border-border/50 bg-background/95 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-200 hover:shadow-2xl flex flex-col w-4/12">
       {/* Header */}
       <div className="p-4 flex-shrink-0 bg-gradient-to-b from-muted/30 to-transparent">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold tracking-tight flex-1 text-center">Comments</h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsCollapsed(true)}
-            className="h-7 w-7 p-0 hover:bg-background/80 transition-colors"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </Button>
-        </div>
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-center">Comments</h3>
         {comments.length > 0 && (
           <div className="flex items-center justify-center gap-2">
             <Button
@@ -171,7 +108,8 @@ export function CommentsPanel({
               filteredComments.map((comment) => (
                 <div
                   key={comment.id}
-                  className="rounded-lg border border-border/50 bg-card/50 p-3 hover:bg-card/80 transition-colors space-y-2"
+                  className="rounded-lg border border-border/50 bg-card/50 p-3 hover:bg-card/80 transition-colors cursor-pointer space-y-2"
+                  onClick={() => onCommentClick?.(comment.x, comment.y)}
                 >
                   <div className="flex items-start justify-between gap-2 mx-2.5 my-1">
                     <div className="flex-1 min-w-0">
@@ -188,7 +126,6 @@ export function CommentsPanel({
                           className="h-6 w-6"
                           onClick={(e) => {
                             e.stopPropagation()
-                            console.log("[v0] Check button clicked, calling handleResolve")
                             handleResolve(comment.id)
                           }}
                           title="Resolve"
@@ -212,10 +149,7 @@ export function CommentsPanel({
                       </div>
                     )}
                   </div>
-                  <p
-                    className="text-sm break-words max-h-20 overflow-y-auto bg-muted/30 p-2 py-1.5 rounded-none leading-5 px-0 mx-5 cursor-pointer hover:bg-muted/50 transition-colors"
-                    onClick={() => onCommentClick?.(comment.x, comment.y)}
-                  >
+                  <p className="text-sm break-words max-h-20 overflow-y-auto bg-muted/30 p-2 py-1.5 rounded-none leading-5 px-0 mx-5">
                     {comment.content}
                   </p>
                   {comment.resolved && (
@@ -239,11 +173,7 @@ export function CommentsPanel({
             <Button
               variant="ghost"
               size="sm"
-              onClick={(e) => {
-                e.stopPropagation()
-                console.log("[v0] Clear Resolved button onClick triggered")
-                handleClearResolved()
-              }}
+              onClick={handleClearResolved}
               className="text-xs text-muted-foreground hover:text-foreground"
               disabled={comments.filter((c) => c.resolved).length === 0}
             >

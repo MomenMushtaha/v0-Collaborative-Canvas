@@ -22,29 +22,13 @@ interface CursorUpdate {
 export function usePresence({ canvasId, userId, userName, userColor }: UsePresenceProps) {
   const [otherUsers, setOtherUsers] = useState<Map<string, UserPresence>>(new Map())
   const supabase = createClient()
-  const presenceIdRef = useRef<string | null>(null)
+  const [presenceId, setPresenceId] = useState<string | null>(null)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // Initialize presence
   useEffect(() => {
     async function initPresence() {
       console.log("[v0] Initializing presence for user:", userName, userId)
-
-      // This ensures cleanup even if previous session didn't clean up properly
-      const { error: deleteError } = await supabase
-        .from("user_presence")
-        .delete()
-        .match({ canvas_id: canvasId, user_id: userId })
-
-      if (deleteError) {
-        console.error("[v0] Error deleting old presence records:", deleteError)
-      } else {
-        console.log("[v0] Deleted all old presence records for user")
-      }
-
-      // Small delay to ensure deletion completes
-      await new Promise((resolve) => setTimeout(resolve, 100))
-
       const { data, error } = await supabase
         .from("user_presence")
         .insert({
@@ -64,35 +48,17 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
       }
 
       console.log("[v0] Presence created successfully:", data.id)
-      presenceIdRef.current = data.id
-
-      // Remove any lingering sessions for the same user name to prevent duplicates
-      const { error: duplicateCleanupError } = await supabase
-        .from("user_presence")
-        .delete()
-        .match({ canvas_id: canvasId, user_name: userName })
-        .neq("id", data.id)
-
-      if (duplicateCleanupError) {
-        console.error("[v0] Error cleaning up duplicate presence records:", duplicateCleanupError)
-      } else {
-        console.log("[v0] Cleaned up duplicate presence records for user")
-      }
+      setPresenceId(data.id)
     }
 
     initPresence()
 
     // Cleanup on unmount
     return () => {
-      const cleanup = async () => {
-        console.log("[v0] Cleaning up presence for user:", userId)
-        if (presenceIdRef.current) {
-          await supabase.from("user_presence").delete().eq("id", presenceIdRef.current)
-        }
-        await supabase.from("user_presence").delete().eq("user_id", userId)
-        console.log("[v0] Presence cleanup complete")
+      if (presenceId) {
+        console.log("[v0] Cleaning up presence:", presenceId)
+        supabase.from("user_presence").delete().eq("id", presenceId).then()
       }
-      cleanup()
     }
   }, [canvasId, userId, userName, userColor, supabase])
 
@@ -104,12 +70,11 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
       const userMap = new Map<string, UserPresence>()
 
       data?.forEach((user) => {
-        const key = user.user_id ?? `name:${user.user_name.toLowerCase()}`
-        const existing = userMap.get(key)
+        const existing = userMap.get(user.user_id)
         // Only add/update if this is a newer record or first time seeing this user
         if (!existing || new Date(user.last_seen) > new Date(existing.last_seen)) {
           console.log("[v0] Other user:", user.user_name, user.user_id)
-          userMap.set(key, user)
+          userMap.set(user.user_id, user)
         }
       })
 

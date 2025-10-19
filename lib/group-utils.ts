@@ -1,21 +1,51 @@
-import type { CanvasObject } from "./types"
+import type { CanvasObject, CanvasGroup } from "./types"
 
-export function getGroupBounds(
-  group: CanvasObject,
-  allObjects: CanvasObject[],
-): {
-  x: number
-  y: number
-  width: number
-  height: number
-} {
-  if (group.type !== "group" || !group.children_ids || group.children_ids.length === 0) {
-    return { x: group.x, y: group.y, width: group.width, height: group.height }
+export function createGroup(objects: CanvasObject[], canvasId: string): CanvasGroup {
+  const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+  return {
+    id: groupId,
+    canvas_id: canvasId,
+    object_ids: objects.map((obj) => obj.id),
+    created_at: new Date().toISOString(),
   }
+}
 
-  const children = allObjects.filter((obj) => group.children_ids!.includes(obj.id))
-  if (children.length === 0) {
-    return { x: group.x, y: group.y, width: group.width, height: group.height }
+export function groupObjects(objects: CanvasObject[], groupId: string): CanvasObject[] {
+  return objects.map((obj) => ({
+    ...obj,
+    group_id: groupId,
+  }))
+}
+
+export function ungroupObjects(objects: CanvasObject[]): CanvasObject[] {
+  return objects.map((obj) => ({
+    ...obj,
+    group_id: undefined,
+  }))
+}
+
+export function getGroupedObjects(objects: CanvasObject[], groupId: string): CanvasObject[] {
+  return objects.filter((obj) => obj.group_id === groupId)
+}
+
+export function getAllGroupIds(objects: CanvasObject[]): string[] {
+  const groupIds = new Set<string>()
+  objects.forEach((obj) => {
+    if (obj.group_id) {
+      groupIds.add(obj.group_id)
+    }
+  })
+  return Array.from(groupIds)
+}
+
+export function isObjectInGroup(obj: CanvasObject): boolean {
+  return !!obj.group_id
+}
+
+export function getGroupBounds(objects: CanvasObject[]): { x: number; y: number; width: number; height: number } {
+  if (objects.length === 0) {
+    return { x: 0, y: 0, width: 0, height: 0 }
   }
 
   let minX = Number.POSITIVE_INFINITY
@@ -23,11 +53,11 @@ export function getGroupBounds(
   let maxX = Number.NEGATIVE_INFINITY
   let maxY = Number.NEGATIVE_INFINITY
 
-  children.forEach((child) => {
-    minX = Math.min(minX, child.x)
-    minY = Math.min(minY, child.y)
-    maxX = Math.max(maxX, child.x + child.width)
-    maxY = Math.max(maxY, child.y + child.height)
+  objects.forEach((obj) => {
+    minX = Math.min(minX, obj.x)
+    minY = Math.min(minY, obj.y)
+    maxX = Math.max(maxX, obj.x + obj.width)
+    maxY = Math.max(maxY, obj.y + obj.height)
   })
 
   return {
@@ -38,73 +68,31 @@ export function getGroupBounds(
   }
 }
 
-export function getAllChildrenIds(groupId: string, allObjects: CanvasObject[]): string[] {
-  const group = allObjects.find((obj) => obj.id === groupId)
-  if (!group || group.type !== "group" || !group.children_ids) {
-    return []
-  }
-
-  const childIds: string[] = []
-
-  group.children_ids.forEach((childId) => {
-    childIds.push(childId)
-    const child = allObjects.find((obj) => obj.id === childId)
-    if (child && child.type === "group") {
-      childIds.push(...getAllChildrenIds(childId, allObjects))
-    }
-  })
-
-  return childIds
+export function moveGroup(objects: CanvasObject[], deltaX: number, deltaY: number): CanvasObject[] {
+  return objects.map((obj) => ({
+    ...obj,
+    x: obj.x + deltaX,
+    y: obj.y + deltaY,
+  }))
 }
 
-export function isObjectInGroup(objectId: string, allObjects: CanvasObject[]): boolean {
-  return allObjects.some((obj) => obj.type === "group" && obj.children_ids && obj.children_ids.includes(objectId))
-}
-
-export function updateGroupChildrenPositions(
-  groupId: string,
-  deltaX: number,
-  deltaY: number,
-  allObjects: CanvasObject[],
+export function scaleGroup(
+  objects: CanvasObject[],
+  scaleX: number,
+  scaleY: number,
+  originX: number,
+  originY: number,
 ): CanvasObject[] {
-  const group = allObjects.find((obj) => obj.id === groupId)
-  if (!group || group.type !== "group" || !group.children_ids) {
-    return allObjects
-  }
+  return objects.map((obj) => {
+    const relX = obj.x - originX
+    const relY = obj.y - originY
 
-  // Get all children recursively (including nested groups)
-  const allChildrenIds = getAllChildrenIds(groupId, allObjects)
-
-  // Update positions of all children
-  return allObjects.map((obj) => {
-    if (allChildrenIds.includes(obj.id)) {
-      return {
-        ...obj,
-        x: obj.x + deltaX,
-        y: obj.y + deltaY,
-      }
+    return {
+      ...obj,
+      x: originX + relX * scaleX,
+      y: originY + relY * scaleY,
+      width: obj.width * scaleX,
+      height: obj.height * scaleY,
     }
-    return obj
   })
-}
-
-export function getObjectsToMove(objectId: string, allObjects: CanvasObject[]): string[] {
-  const obj = allObjects.find((o) => o.id === objectId)
-  if (!obj) return [objectId]
-
-  // If it's a group, return the group and all its children
-  if (obj.type === "group" && obj.children_ids) {
-    return [objectId, ...getAllChildrenIds(objectId, allObjects)]
-  }
-
-  // If it's a child of a group, return the parent group and all its children
-  if (obj.parent_group) {
-    const parentGroup = allObjects.find((o) => o.id === obj.parent_group)
-    if (parentGroup && parentGroup.type === "group") {
-      return [obj.parent_group, ...getAllChildrenIds(obj.parent_group, allObjects)]
-    }
-  }
-
-  // Otherwise, just return the object itself
-  return [objectId]
 }

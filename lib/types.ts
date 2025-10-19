@@ -1,7 +1,7 @@
 export interface CanvasObject {
   id: string
   canvas_id: string
-  type: "rectangle" | "circle" | "triangle" | "line" | "text" | "group" // Added "group" type
+  type: "rectangle" | "circle" | "triangle" | "line" | "text"
   x: number
   y: number
   width: number
@@ -21,8 +21,7 @@ export interface CanvasObject {
   locked?: boolean // lock to prevent editing
   shape?: "rectangle" | "circle" | "triangle" | "line" // shape type for non-text objects
   content?: string // text content for text objects
-  children?: string[] // IDs of child objects in a group
-  parent_group?: string // ID of parent group if this object is in a group
+  group_id?: string // group identifier for grouped objects
 }
 
 export interface UserPresence {
@@ -44,9 +43,17 @@ export interface CanvasState {
 }
 
 export interface HistoryCommand {
-  type: "create" | "update" | "delete" | "restore"
+  type: "create" | "update" | "delete"
   objectIds: string[]
   beforeState?: CanvasObject[]
   afterState?: CanvasObject[]
   timestamp: number
+}
+
+export interface CanvasGroup {
+  id: string
+  canvas_id: string
+  name?: string
+  created_at?: string
+  object_ids: string[]
 }

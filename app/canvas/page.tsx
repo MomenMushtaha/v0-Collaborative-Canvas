@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { CollaborativeCanvas } from "@/components/collaborative-canvas"
@@ -14,7 +14,6 @@ import { exportCanvas } from "@/lib/export-utils"
 import { saveHistorySnapshot } from "@/lib/history-utils"
 import { loadComments, createComment, subscribeToComments, type Comment } from "@/lib/comments-utils"
 import { useToast } from "@/hooks/use-toast"
-import { deleteSession } from "@/lib/session-utils"
 
 export default function CanvasPage() {
   const [user, setUser] = useState<{ id: string; name: string } | null>(null)
@@ -28,119 +27,47 @@ export default function CanvasPage() {
   const [onRedo, setOnRedo] = useState<(() => void) | undefined>()
   const [onAlign, setOnAlign] = useState<((type: AlignmentType) => void) | undefined>()
   const [onDistribute, setOnDistribute] = useState<((type: DistributeType) => void) | undefined>()
-  const [onBringToFront, setOnBringToFront] = useState<(() => void) | undefined>()
-  const [onSendToBack, setOnSendToBack] = useState<(() => void) | undefined>()
-  const [onBringForward, setOnBringForward] = useState<(() => void) | undefined>()
-  const [onSendBackward, setOnSendBackward] = useState<(() => void) | undefined>()
+  const [onGroup, setOnGroup] = useState<(() => void) | undefined>()
+  const [onUngroup, setOnUngroup] = useState<(() => void) | undefined>()
+  const [hasGroupedSelection, setHasGroupedSelection] = useState(false)
   const [gridEnabled, setGridEnabled] = useState(false)
   const [snapEnabled, setSnapEnabled] = useState(false)
   const [gridSize, setGridSize] = useState(20)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [showHistory, setShowHistory] = useState(false)
-  const [pendingHistoryRestore, setPendingHistoryRestore] = useState<CanvasObject[] | null>(null)
   const [lastSnapshotTime, setLastSnapshotTime] = useState(Date.now())
   const [commentMode, setCommentMode] = useState(false)
   const [comments, setComments] = useState<Comment[]>([])
-  const [lassoMode, setLassoMode] = useState(false)
-  const [onSelectAllOfType, setOnSelectAllOfType] = useState<(() => void) | undefined>()
-
-  const [presencePanelCollapsed, setPresencePanelCollapsed] = useState(false)
-  const [layersPanelCollapsed, setLayersPanelCollapsed] = useState(false)
-  const [stylePanelCollapsed, setStylePanelCollapsed] = useState(false)
-
-  const PANEL_SPACING = 16 // Gap between panels
-  const COLLAPSED_HEIGHT = 48 // Height of collapsed panel button
-  const PRESENCE_EXPANDED_HEIGHT = 260
-  const LAYERS_EXPANDED_HEIGHT = 280
-
-  const presenceTop = 80 // Below toolbar
-  const layersTop = presenceTop + (presencePanelCollapsed ? COLLAPSED_HEIGHT : PRESENCE_EXPANDED_HEIGHT) + PANEL_SPACING
-  const styleTop = layersTop + (layersPanelCollapsed ? COLLAPSED_HEIGHT : LAYERS_EXPANDED_HEIGHT) + PANEL_SPACING
-
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()
 
   useEffect(() => {
     // Check authentication
-    supabase.auth
-      .getUser()
-      .then(({ data: { user: authUser }, error }) => {
-        if (error || !authUser) {
-          console.warn("[v0] Auth error or no user:", error)
-          router.push("/")
-        } else {
-          setUser({
-            id: authUser.id,
-            name: authUser.user_metadata?.name || authUser.email?.split("@")[0] || "Anonymous",
-          })
-          setIsLoading(false)
-        }
-      })
-      .catch((error) => {
-        console.error("[v0] Error checking auth:", error)
+    supabase.auth.getUser().then(({ data: { user: authUser } }) => {
+      if (!authUser) {
         router.push("/")
-      })
+      } else {
+        setUser({
+          id: authUser.id,
+          name: authUser.user_metadata?.name || authUser.email?.split("@")[0] || "Anonymous",
+        })
+        setIsLoading(false)
+      }
+    })
   }, [router, supabase])
 
   useEffect(() => {
     if (!user) return
 
-    const handleBeforeUnload = () => {
-      console.log("[v0] Window closing, logging out user:", user.id)
-
-      // Use sendBeacon for reliable logout during page unload
-      // This ensures the request completes even as the page is closing
-      const logoutData = JSON.stringify({ userId: user.id })
-      const blob = new Blob([logoutData], { type: "application/json" })
-
-      // Try to send logout request via beacon (most reliable)
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon("/api/logout", blob)
-      }
-
-      // Clear Supabase auth locally to ensure session removal even if the network call fails
-      void supabase.auth.signOut({ scope: "local" }).catch((error) => {
-        console.error("[v0] Local sign out failed during unload:", error)
-      })
-
-      try {
-        const storageKey = (supabase.auth as unknown as { storageKey?: string }).storageKey
-
-        if (storageKey && typeof window !== "undefined") {
-          window.localStorage.removeItem(storageKey)
-          window.sessionStorage.removeItem(storageKey)
-        }
-      } catch (storageError) {
-        console.error("[v0] Failed to clear Supabase storage key:", storageError)
-      }
-
-      // Also delete session synchronously as backup
-      void deleteSession(supabase, user.id)
-    }
-
-    // Listen for multiple unload events to catch all cases
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    window.addEventListener("pagehide", handleBeforeUnload)
-
-    // Cleanup listeners on component unmount
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload)
-      window.removeEventListener("pagehide", handleBeforeUnload)
-    }
-  }, [user, supabase])
-
-  useEffect(() => {
-    if (!user) return
-
     const loadInitialComments = async () => {
-      const loadedComments = await loadComments(supabase, "default")
+      const loadedComments = await loadComments("default")
       setComments(loadedComments)
     }
 
     loadInitialComments()
 
-    const unsubscribe = subscribeToComments(supabase, "default", (newComment) => {
+    const unsubscribe = subscribeToComments("default", (newComment) => {
       setComments((prev) => [newComment, ...prev])
     })
 
@@ -163,26 +90,8 @@ export default function CanvasPage() {
   }, [currentObjects, user, lastSnapshotTime])
 
   const handleSignOut = async () => {
-    console.log("[v0] Sign out initiated for user:", user?.id)
-
-    if (user) {
-      const sessionDeleted = await deleteSession(supabase, user.id)
-      console.log("[v0] Session deletion result:", sessionDeleted)
-    }
-
     await supabase.auth.signOut()
-    console.log("[v0] Supabase auth sign out complete")
     router.push("/")
-  }
-
-  const handleCopy = () => {
-    if (selectedObjectIds.length === 0) return
-    const selectedObjs = currentObjects.filter((obj) => selectedObjectIds.includes(obj.id))
-    console.log("[v0] Copy triggered from toolbar for", selectedObjectIds.length, "objects")
-  }
-
-  const handlePaste = () => {
-    console.log("[v0] Paste triggered from toolbar")
   }
 
   const handleOperations = (operations: any[], queueItemId: string) => {
@@ -238,35 +147,13 @@ export default function CanvasPage() {
 
   const handleRestoreHistory = (objects: CanvasObject[]) => {
     setCurrentObjects(objects)
-    setPendingHistoryRestore(objects)
-    setLastSnapshotTime(Date.now())
-    console.log("[v0] Restoring history snapshot with", objects.length, "objects")
+    console.log("[v0] Restored history snapshot with", objects.length, "objects")
   }
-
-  const handleHistoryRestoreComplete = useCallback(
-    (result: "success" | "error") => {
-      setPendingHistoryRestore(null)
-
-      if (result === "success") {
-        toast({
-          title: "Version restored",
-          description: "The canvas has been updated to the selected snapshot.",
-        })
-      } else {
-        toast({
-          title: "Restore failed",
-          description: "We couldn't apply that snapshot. Please try again.",
-          variant: "destructive",
-        })
-      }
-    },
-    [toast],
-  )
 
   const handleCommentCreate = async (x: number, y: number, content: string) => {
     if (!user) return
 
-    const comment = await createComment(supabase, "default", x, y, content, user.id, user.name)
+    const comment = await createComment("default", x, y, content, user.id, user.name)
     if (comment) {
       setComments((prev) => [comment, ...prev])
       toast({
@@ -288,20 +175,8 @@ export default function CanvasPage() {
   }
 
   const handleCommentsChange = async () => {
-    const loadedComments = await loadComments(supabase, "default")
+    const loadedComments = await loadComments("default")
     setComments(loadedComments)
-  }
-
-  const handleCommentModeChange = useCallback((enabled: boolean) => {
-    setCommentMode(enabled)
-    console.log("[v0] Comment mode changed to:", enabled)
-  }, [])
-
-  const usableCanvasDimensions = {
-    leftOffset: 300,
-    rightOffset: 400,
-    topOffset: 80,
-    bottomOffset: 200,
   }
 
   if (isLoading || !user) {
@@ -331,19 +206,12 @@ export default function CanvasPage() {
           snapEnabled={snapEnabled}
           gridSize={gridSize}
           onGridChange={handleGridChange}
-          onShowHistory={() => setShowHistory(!showHistory)}
-          isHistoryOpen={showHistory}
+          onShowHistory={() => setShowHistory(true)}
           commentMode={commentMode}
           onToggleCommentMode={() => setCommentMode(!commentMode)}
-          onCopy={handleCopy}
-          onPaste={handlePaste}
-          onBringToFront={onBringToFront}
-          onSendToBack={onSendToBack}
-          onBringForward={onBringForward}
-          onSendBackward={onSendBackward}
-          lassoMode={lassoMode}
-          onToggleLassoMode={() => setLassoMode(!lassoMode)}
-          onSelectAllOfType={onSelectAllOfType}
+          onGroup={onGroup}
+          onUngroup={onUngroup}
+          hasGroupedSelection={hasGroupedSelection}
         />
       </div>
       <div className="h-full w-full">
@@ -363,6 +231,9 @@ export default function CanvasPage() {
           canRedo={setCanRedo}
           onAlign={setOnAlign}
           onDistribute={setOnDistribute}
+          onGroup={setOnGroup}
+          onUngroup={setOnUngroup}
+          hasGroupedSelection={setHasGroupedSelection}
           gridEnabled={gridEnabled}
           snapEnabled={snapEnabled}
           gridSize={gridSize}
@@ -370,15 +241,6 @@ export default function CanvasPage() {
           commentMode={commentMode}
           onCommentCreate={handleCommentCreate}
           comments={comments}
-          onBringToFront={setOnBringToFront}
-          onSendToBack={setOnSendToBack}
-          onBringForward={setOnBringForward}
-          onSendBackward={setOnSendBackward}
-          lassoMode={lassoMode}
-          onSelectAllOfType={setOnSelectAllOfType}
-          historyRestore={pendingHistoryRestore}
-          onHistoryRestoreComplete={handleHistoryRestoreComplete}
-          onCommentModeChange={handleCommentModeChange}
         />
       </div>
       <AiChat
@@ -388,18 +250,9 @@ export default function CanvasPage() {
         userId={user.id}
         userName={user.name}
         canvasId="default"
-        viewport={viewport}
-        usableCanvasDimensions={usableCanvasDimensions}
       />
       {showHistory && (
-        <HistoryPanel
-          canvasId="default"
-          currentObjects={currentObjects}
-          userId={user.id}
-          userName={user.name}
-          onRestore={handleRestoreHistory}
-          onClose={() => setShowHistory(false)}
-        />
+        <HistoryPanel canvasId="default" onRestore={handleRestoreHistory} onClose={() => setShowHistory(false)} />
       )}
       <CommentsPanel
         canvasId="default"
@@ -407,7 +260,6 @@ export default function CanvasPage() {
         onCommentClick={handleCommentClick}
         comments={comments}
         onCommentsChange={handleCommentsChange}
-        supabase={supabase}
       />
     </div>
   )

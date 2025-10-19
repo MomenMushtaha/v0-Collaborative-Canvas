@@ -31,7 +31,10 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
       console.log("[v0] Initializing presence for user:", userName, userId)
 
       // This ensures cleanup even if previous session didn't clean up properly
-      const { error: deleteError } = await supabase.from("user_presence").delete().eq("user_id", userId)
+      const { error: deleteError } = await supabase
+        .from("user_presence")
+        .delete()
+        .match({ canvas_id: canvasId, user_id: userId })
 
       if (deleteError) {
         console.error("[v0] Error deleting old presence records:", deleteError)
@@ -62,6 +65,19 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
 
       console.log("[v0] Presence created successfully:", data.id)
       presenceIdRef.current = data.id
+
+      // Remove any lingering sessions for the same user name to prevent duplicates
+      const { error: duplicateCleanupError } = await supabase
+        .from("user_presence")
+        .delete()
+        .match({ canvas_id: canvasId, user_name: userName })
+        .neq("id", data.id)
+
+      if (duplicateCleanupError) {
+        console.error("[v0] Error cleaning up duplicate presence records:", duplicateCleanupError)
+      } else {
+        console.log("[v0] Cleaned up duplicate presence records for user")
+      }
     }
 
     initPresence()
@@ -88,11 +104,12 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
       const userMap = new Map<string, UserPresence>()
 
       data?.forEach((user) => {
-        const existing = userMap.get(user.user_id)
+        const key = user.user_id ?? `name:${user.user_name.toLowerCase()}`
+        const existing = userMap.get(key)
         // Only add/update if this is a newer record or first time seeing this user
         if (!existing || new Date(user.last_seen) > new Date(existing.last_seen)) {
           console.log("[v0] Other user:", user.user_name, user.user_id)
-          userMap.set(user.user_id, user)
+          userMap.set(key, user)
         }
       })
 

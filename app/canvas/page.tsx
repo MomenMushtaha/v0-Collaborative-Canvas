@@ -92,8 +92,24 @@ export default function CanvasPage() {
         navigator.sendBeacon("/api/logout", blob)
       }
 
+      // Clear Supabase auth locally to ensure session removal even if the network call fails
+      void supabase.auth.signOut({ scope: "local" }).catch((error) => {
+        console.error("[v0] Local sign out failed during unload:", error)
+      })
+
+      try {
+        const storageKey = (supabase.auth as unknown as { storageKey?: string }).storageKey
+
+        if (storageKey && typeof window !== "undefined") {
+          window.localStorage.removeItem(storageKey)
+          window.sessionStorage.removeItem(storageKey)
+        }
+      } catch (storageError) {
+        console.error("[v0] Failed to clear Supabase storage key:", storageError)
+      }
+
       // Also delete session synchronously as backup
-      deleteSession(supabase, user.id)
+      void deleteSession(supabase, user.id)
     }
 
     // Listen for multiple unload events to catch all cases

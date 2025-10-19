@@ -7,9 +7,19 @@ import { checkExistingSession, createSession } from "@/lib/session-utils"
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get("code")
+  const error = requestUrl.searchParams.get("error")
+  const errorDescription = requestUrl.searchParams.get("error_description")
   const origin = requestUrl.origin
 
-  console.log("[v0] Auth callback triggered with code:", code ? "present" : "missing")
+  console.log("[v0] Auth callback triggered")
+  console.log("[v0] Code present:", !!code)
+  console.log("[v0] Error:", error)
+  console.log("[v0] Error description:", errorDescription)
+
+  if (error) {
+    console.error("[v0] OAuth provider error:", error, errorDescription)
+    return NextResponse.redirect(`${origin}/?error=${encodeURIComponent(errorDescription || error)}`)
+  }
 
   if (code) {
     const cookieStore = await cookies()
@@ -24,10 +34,8 @@ export async function GET(request: NextRequest) {
           setAll(cookiesToSet) {
             try {
               cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-            } catch {
-              // The `setAll` method was called from a Server Component.
-              // This can be ignored if you have middleware refreshing
-              // user sessions.
+            } catch (error) {
+              console.error("[v0] Error setting cookies in callback:", error)
             }
           },
         },
@@ -35,27 +43,26 @@ export async function GET(request: NextRequest) {
     )
 
     console.log("[v0] Exchanging code for session...")
-    // Exchange the code for a session
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+    const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
 
-    if (error) {
-      console.error("[v0] Error exchanging code for session:", error)
-      return NextResponse.redirect(`${origin}/?error=auth_failed`)
+    if (exchangeError) {
+      console.error("[v0] Error exchanging code for session:", exchangeError)
+      return NextResponse.redirect(`${origin}/?error=${encodeURIComponent(exchangeError.message)}`)
     }
 
     if (data.user && data.session) {
       console.log("[v0] Session obtained for user:", data.user.id)
+      console.log("[v0] User email:", data.user.email)
+      console.log("[v0] Auth provider:", data.user.app_metadata.provider)
 
       const existingSession = await checkExistingSession(supabase, data.user.id)
 
       if (existingSession) {
         console.log("[v0] User already has active session, blocking login")
-        // User is already logged in on another device
         await supabase.auth.signOut()
         return NextResponse.redirect(`${origin}/?error=already_logged_in`)
       }
 
-      // Create new session record
       console.log("[v0] Creating new session record...")
       const sessionCreated = await createSession(supabase, data.user.id, data.session.access_token)
 
@@ -65,11 +72,11 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(`${origin}/?error=session_creation_failed`)
       }
 
-      console.log("[v0] Session created, redirecting to email_confirmed")
-      return NextResponse.redirect(`${origin}/email_confirmed`)
+      console.log("[v0] OAuth session created successfully, redirecting to canvas")
+      return NextResponse.redirect(`${origin}/canvas`)
     }
   }
 
-  console.log("[v0] No code or session data, redirecting to email_confirmed")
-  return NextResponse.redirect(`${origin}/email_confirmed${requestUrl.search}`)
+  console.log("[v0] No code or session data, redirecting to home")
+  return NextResponse.redirect(`${origin}/?error=no_code`)
 }

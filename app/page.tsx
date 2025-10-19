@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { signInWithGoogle, signInWithGitHub } from "@/app/actions/auth"
 
 export default function HomePage() {
   const [email, setEmail] = useState("")
@@ -118,17 +119,19 @@ export default function HomePage() {
     setIsLoading(true)
     setError("")
 
-    const redirectUrl = `${window.location.origin}/auth/callback`
+    console.log("[v0] Initiating Google sign in...")
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: redirectUrl,
-      },
-    })
-
-    if (error) {
-      setError(error.message)
+    try {
+      const result = await signInWithGoogle()
+      if (result?.error) {
+        console.error("[v0] Google sign in error:", result.error)
+        setError(result.error)
+        setIsLoading(false)
+      }
+      // If successful, the server action will redirect to Google
+    } catch (error) {
+      console.error("[v0] Google sign in exception:", error)
+      setError("Failed to initiate Google sign in")
       setIsLoading(false)
     }
   }
@@ -137,17 +140,19 @@ export default function HomePage() {
     setIsLoading(true)
     setError("")
 
-    const redirectUrl = `${window.location.origin}/auth/callback`
+    console.log("[v0] Initiating GitHub sign in...")
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "github",
-      options: {
-        redirectTo: redirectUrl,
-      },
-    })
-
-    if (error) {
-      setError(error.message)
+    try {
+      const result = await signInWithGitHub()
+      if (result?.error) {
+        console.error("[v0] GitHub sign in error:", result.error)
+        setError(result.error)
+        setIsLoading(false)
+      }
+      // If successful, the server action will redirect to GitHub
+    } catch (error) {
+      console.error("[v0] GitHub sign in exception:", error)
+      setError("Failed to initiate GitHub sign in")
       setIsLoading(false)
     }
   }

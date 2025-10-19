@@ -63,17 +63,24 @@ export default function CanvasPage() {
 
   useEffect(() => {
     // Check authentication
-    supabase.auth.getUser().then(({ data: { user: authUser } }) => {
-      if (!authUser) {
+    supabase.auth
+      .getUser()
+      .then(({ data: { user: authUser }, error }) => {
+        if (error || !authUser) {
+          console.warn("[v0] Auth error or no user:", error)
+          router.push("/")
+        } else {
+          setUser({
+            id: authUser.id,
+            name: authUser.user_metadata?.name || authUser.email?.split("@")[0] || "Anonymous",
+          })
+          setIsLoading(false)
+        }
+      })
+      .catch((error) => {
+        console.error("[v0] Error checking auth:", error)
         router.push("/")
-      } else {
-        setUser({
-          id: authUser.id,
-          name: authUser.user_metadata?.name || authUser.email?.split("@")[0] || "Anonymous",
-        })
-        setIsLoading(false)
-      }
-    })
+      })
   }, [router, supabase])
 
   useEffect(() => {

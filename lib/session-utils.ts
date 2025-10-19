@@ -41,7 +41,7 @@ export async function checkExistingSession(supabase: SupabaseClient, userId: str
   }
 
   if (data) {
-    const isValid = await isSessionStillValid(data.session_id)
+    const isValid = await isSessionStillValid(supabase, data.session_id)
     if (!isValid) {
       console.log("[v0] Found stale session, deleting it")
       // Session is stale (JWT expired or invalid), delete it
@@ -55,33 +55,35 @@ export async function checkExistingSession(supabase: SupabaseClient, userId: str
 }
 
 /**
- * Check if a JWT session token is still valid
+ * Check if a JWT session token is still valid by verifying with Supabase
  */
-async function isSessionStillValid(sessionId: string): Promise<boolean> {
+async function isSessionStillValid(supabase: SupabaseClient, sessionId: string): Promise<boolean> {
   try {
-    // Decode the JWT to check expiration
-    const parts = sessionId.split(".")
-    if (parts.length !== 3) {
-      console.log("[v0] Invalid JWT format")
+    // This ensures the session actually exists in Supabase's auth system
+    const { data, error } = await supabase.auth.getSession()
+
+    if (error) {
+      console.log("[v0] Error verifying session with Supabase:", error.message)
       return false
     }
 
-    const payload = JSON.parse(atob(parts[1]))
-    const expirationTime = payload.exp * 1000 // Convert to milliseconds
-
-    // Check if token is expired (with 5 minute buffer)
-    const now = Date.now()
-    const isExpired = now >= expirationTime - 5 * 60 * 1000
-
-    if (isExpired) {
-      console.log("[v0] Session JWT is expired")
+    // Check if the session exists and matches the stored session ID
+    if (!data.session || data.session.access_token !== sessionId) {
+      console.log("[v0] Session not found in Supabase auth or token mismatch")
       return false
     }
 
-    console.log("[v0] Session JWT is still valid")
+    // Additional check: verify the session hasn't expired
+    const expiresAt = data.session.expires_at
+    if (expiresAt && Date.now() / 1000 >= expiresAt) {
+      console.log("[v0] Session has expired")
+      return false
+    }
+
+    console.log("[v0] Session is valid in Supabase auth")
     return true
   } catch (error) {
-    console.error("[v0] Error validating session JWT:", error)
+    console.error("[v0] Error validating session with Supabase:", error)
     return false
   }
 }

@@ -44,11 +44,22 @@ export default function HomePage() {
     }
 
     // Check if user is already logged in
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        router.push("/canvas")
-      }
-    })
+    supabase.auth
+      .getUser()
+      .then(({ data: { user }, error }) => {
+        if (error) {
+          console.warn("[v0] Auth error on home page:", error)
+          // User is not logged in, stay on login page
+          return
+        }
+        if (user) {
+          router.push("/canvas")
+        }
+      })
+      .catch((error) => {
+        console.error("[v0] Error checking auth on home page:", error)
+        // Stay on login page
+      })
   }, [router, supabase])
 
   const handleSignIn = async (e: React.FormEvent) => {

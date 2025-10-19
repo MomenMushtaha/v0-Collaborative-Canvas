@@ -42,15 +42,8 @@ export function PresencePanel({ currentUser, otherUsers, topPosition = 80, onCol
         userMap.set(key, user)
       }
     })
-
-    return Array.from(userMap.values()).filter((user) => {
-      if (user.user_id) {
-        return user.user_id !== currentUser.userId
-      }
-
-      return user.user_name.toLowerCase() !== currentUser.userName.toLowerCase()
-    })
-  }, [currentUser.userId, currentUser.userName, otherUsers])
+    return Array.from(userMap.values()).filter((user) => user.user_id !== currentUser.userId)
+  }, [currentUser.userId, otherUsers])
 
   const onlineUsers = uniqueUsers.filter((user) => isUserOnline(user.last_seen))
   const offlineUsers = uniqueUsers.filter((user) => !isUserOnline(user.last_seen))

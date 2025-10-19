@@ -27,6 +27,7 @@ interface AiChatProps {
 interface Message {
   role: "user" | "assistant"
   content: string
+  operations?: any[]
 }
 
 interface OperationProgress {
@@ -74,6 +75,8 @@ export function AiChat({
 
     try {
       console.log("[v0] Sending AI request:", userMessage)
+      console.log("[v0] Conversation history length:", messages.length)
+
       const sanitizedObjects = currentObjects.map((obj) => ({
         id: obj.id,
         type: obj.type,
@@ -94,11 +97,37 @@ export function AiChat({
 
       const selectedObjects = sanitizedObjects.filter((obj) => selectedObjectIds.includes(obj.id))
 
+      const conversationHistory = messages.map((msg) => {
+        if (msg.role === "assistant" && msg.operations && msg.operations.length > 0) {
+          // Include what operations the AI performed in the conversation context
+          const operationSummary = msg.operations
+            .map((op: any) => {
+              if (op.type === "create") {
+                return `Created ${op.object.type} at (${op.object.x}, ${op.object.y})`
+              } else if (op.type === "createText") {
+                return `Created text "${op.text}" at (${op.x}, ${op.y})`
+              }
+              return `Performed ${op.type} operation`
+            })
+            .join(", ")
+
+          return {
+            role: msg.role,
+            content: `${msg.content}\n\n[Operations performed: ${operationSummary}]`,
+          }
+        }
+        return {
+          role: msg.role,
+          content: msg.content,
+        }
+      })
+
       const response = await fetch("/api/ai-canvas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMessage,
+          messages: conversationHistory, // Send enriched conversation history
           canvasId,
           userId,
           userName,
@@ -123,6 +152,7 @@ export function AiChat({
 
       const data = await response.json()
       console.log("[v0] AI response data:", data)
+      console.log("[v0] Operations returned:", data.operations?.length || 0)
 
       if (data.operations && data.operations.length > 0) {
         console.log(`[v0] [PERF] AI generated ${data.operations.length} operations in ${aiResponseTime.toFixed(0)}ms`)
@@ -134,7 +164,14 @@ export function AiChat({
         assistantMessage += `\n\nNote: ${data.validationErrors.join(", ")}`
       }
 
-      setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage }])
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: assistantMessage,
+          operations: data.operations || [],
+        },
+      ])
 
       if (data.operations && data.operations.length > 0) {
         console.log("[v0] AI operations:", data.operations)

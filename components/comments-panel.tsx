@@ -34,10 +34,25 @@ export function CommentsPanel({
   const [showResolved, setShowResolved] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
 
-  const filteredComments = showResolved ? comments : comments.filter((c) => !c.resolved)
+  console.log(
+    "[v0] All comments:",
+    comments.map((c) => ({ id: c.id, content: c.content, resolved: c.resolved })),
+  )
+
+  const filteredComments = showResolved
+    ? comments.filter((c) => c.resolved) // Only show resolved comments when showResolved is true
+    : comments.filter((c) => !c.resolved)
+
+  console.log(
+    "[v0] Filtered comments (showResolved=" + showResolved + "):",
+    filteredComments.map((c) => ({ id: c.id, content: c.content, resolved: c.resolved })),
+  )
 
   const handleResolve = async (commentId: string) => {
+    console.log("[v0] Resolve button clicked for comment:", commentId)
+    console.log("[v0] Current userId:", userId)
     const success = await resolveComment(supabase, commentId, userId)
+    console.log("[v0] Resolve result:", success)
     if (success) {
       onCommentsChange()
     }
@@ -62,6 +77,10 @@ export function CommentsPanel({
   }
 
   const handleClearResolved = async () => {
+    console.log("[v0] Clear Resolved button clicked")
+    console.log("[v0] Canvas ID:", canvasId)
+    console.log("[v0] Resolved comments count:", comments.filter((c) => c.resolved).length)
+
     const resolvedCount = comments.filter((c) => c.resolved).length
     if (resolvedCount === 0) {
       alert("No resolved comments to clear.")
@@ -71,10 +90,14 @@ export function CommentsPanel({
     if (
       !confirm(`Are you sure you want to delete ${resolvedCount} resolved comment(s)? This action cannot be undone.`)
     ) {
+      console.log("[v0] User cancelled clear resolved operation")
       return
     }
 
+    console.log("[v0] Calling clearResolvedComments...")
     const success = await clearResolvedComments(supabase, canvasId)
+    console.log("[v0] clearResolvedComments result:", success)
+
     if (success) {
       onCommentsChange()
     }
@@ -148,8 +171,7 @@ export function CommentsPanel({
               filteredComments.map((comment) => (
                 <div
                   key={comment.id}
-                  className="rounded-lg border border-border/50 bg-card/50 p-3 hover:bg-card/80 transition-colors cursor-pointer space-y-2"
-                  onClick={() => onCommentClick?.(comment.x, comment.y)}
+                  className="rounded-lg border border-border/50 bg-card/50 p-3 hover:bg-card/80 transition-colors space-y-2"
                 >
                   <div className="flex items-start justify-between gap-2 mx-2.5 my-1">
                     <div className="flex-1 min-w-0">
@@ -166,6 +188,7 @@ export function CommentsPanel({
                           className="h-6 w-6"
                           onClick={(e) => {
                             e.stopPropagation()
+                            console.log("[v0] Check button clicked, calling handleResolve")
                             handleResolve(comment.id)
                           }}
                           title="Resolve"
@@ -189,7 +212,10 @@ export function CommentsPanel({
                       </div>
                     )}
                   </div>
-                  <p className="text-sm break-words max-h-20 overflow-y-auto bg-muted/30 p-2 py-1.5 rounded-none leading-5 px-0 mx-5">
+                  <p
+                    className="text-sm break-words max-h-20 overflow-y-auto bg-muted/30 p-2 py-1.5 rounded-none leading-5 px-0 mx-5 cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => onCommentClick?.(comment.x, comment.y)}
+                  >
                     {comment.content}
                   </p>
                   {comment.resolved && (
@@ -213,7 +239,11 @@ export function CommentsPanel({
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleClearResolved}
+              onClick={(e) => {
+                e.stopPropagation()
+                console.log("[v0] Clear Resolved button onClick triggered")
+                handleClearResolved()
+              }}
               className="text-xs text-muted-foreground hover:text-foreground"
               disabled={comments.filter((c) => c.resolved).length === 0}
             >

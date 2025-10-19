@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
-import { generateText, tool } from "ai"
+import { streamText, tool } from "ai"
 import { z } from "zod"
 
 export const maxDuration = 30
@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const {
       message,
+      messages: conversationHistory,
       currentObjects,
       selectedObjectIds,
       selectedObjects: selectedObjectsPayload,
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
     } = body
 
     console.log("[v0] Message:", message)
+    console.log("[v0] Conversation history:", conversationHistory?.length || 0, "messages")
     const safeCurrentObjects = Array.isArray(currentObjects) ? currentObjects : []
     const safeSelectedIds = Array.isArray(selectedObjectIds) ? selectedObjectIds : []
     const safeSelectedObjects = Array.isArray(selectedObjectsPayload) ? selectedObjectsPayload : []
@@ -361,122 +363,376 @@ export async function POST(request: Request) {
         },
       }),
       moveShape: tool({
-        description: "Move an existing shape to a new position",
+        description: "Move one or more existing shapes to a new position",
         inputSchema: z.object({
-          shapeIndex: shapeIndexSchema.describe(
-            "Index of the shape to move (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
-          ),
+          shapeIdentifier: z
+            .union([
+              z.number(),
+              z.literal("selected"),
+              z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+            ])
+            .describe(
+              "Identifier for the shape(s) to move. Can be an index (0-based, -1 for last), 'selected', or an object specifying shape type and optional color (e.g., { type: 'circle', color: '#ff0000' }).",
+            ),
           x: z.number().optional().describe("New X coordinate (absolute position)"),
           y: z.number().optional().describe("New Y coordinate (absolute position)"),
           deltaX: z.number().optional().describe("Relative X movement (alternative to absolute x)"),
           deltaY: z.number().optional().describe("Relative Y movement (alternative to absolute y)"),
+          applyToAll: z
+            .boolean()
+            .optional()
+            .describe(
+              "If true and shapeIdentifier is a type, apply to ALL shapes of that type. Use this when user says 'all the triangles', 'all circles', etc.",
+            ),
         }),
-        execute: async ({ shapeIndex, x, y, deltaX, deltaY }) => {
-          const validation = validateMoveShape(
-            { shapeIndex, x, y, deltaX, deltaY },
-            safeCurrentObjects,
-            selectedIndices,
-          )
-          if (!validation.valid) {
-            validationErrors.push(`moveShape: ${validation.error}`)
-            return { error: validation.error }
+        execute: async ({ shapeIdentifier, x, y, deltaX, deltaY, applyToAll }) => {
+          let resolvedShapeIndices: number[] = []
+
+          if (typeof shapeIdentifier === "number" || shapeIdentifier === "selected") {
+            const indexResult = resolveShapeIndex(shapeIdentifier, selectedIndices, safeCurrentObjects.length)
+            if (!indexResult.valid) {
+              validationErrors.push(`moveShape: ${indexResult.error}`)
+              return { error: indexResult.error }
+            }
+            resolvedShapeIndices = [indexResult.shapeIndex]
+          } else if (typeof shapeIdentifier === "object" && shapeIdentifier.type) {
+            const matchingShapes = canvasContext.filter(
+              (obj) =>
+                obj.type === shapeIdentifier.type &&
+                (!shapeIdentifier.color || obj.color === normalizeColorInput(shapeIdentifier.color, "")),
+            )
+
+            if (matchingShapes.length === 0) {
+              validationErrors.push(
+                `moveShape: No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`,
+              )
+              return {
+                error: `No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`,
+              }
+            } else if (matchingShapes.length > 1 && !applyToAll) {
+              const clarification = `Which ${shapeIdentifier.type}? I see ${matchingShapes.map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`).join(", ")}. Or did you mean all of them?`
+              validationErrors.push(`moveShape: Ambiguous request. ${clarification}`)
+              return { error: clarification }
+            } else {
+              resolvedShapeIndices = matchingShapes.map((s) => s.index)
+            }
+          } else {
+            validationErrors.push("moveShape: Invalid shapeIdentifier provided.")
+            return { error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type." }
           }
 
-          operations.push({
-            type: "move",
-            shapeIndex: validation.shapeIndex,
+          if (resolvedShapeIndices.length === 0) {
+            validationErrors.push("moveShape: Could not resolve shape index.")
+            return { error: "Could not resolve shape index." }
+          }
+
+          for (const shapeIndex of resolvedShapeIndices) {
+            const validation = validateMoveShape(
+              { shapeIndex, x, y, deltaX, deltaY },
+              safeCurrentObjects,
+              selectedIndices,
+            )
+            if (!validation.valid) {
+              validationErrors.push(`moveShape: ${validation.error}`)
+              return { error: validation.error }
+            }
+
+            operations.push({
+              type: "move",
+              shapeIndex: validation.shapeIndex,
+              x,
+              y,
+              deltaX,
+              deltaY,
+            })
+          }
+
+          return {
+            success: true,
+            shapeIndices: resolvedShapeIndices,
             x,
             y,
             deltaX,
             deltaY,
-          })
-
-          return { success: true, shapeIndex: validation.shapeIndex, x, y, deltaX, deltaY }
+            count: resolvedShapeIndices.length,
+            message: `Moved ${resolvedShapeIndices.length} shape${resolvedShapeIndices.length > 1 ? "s" : ""}`,
+          }
         },
       }),
       resizeShape: tool({
-        description: "Resize an existing shape",
+        description: "Resize one or more existing shapes",
         inputSchema: z.object({
-          shapeIndex: shapeIndexSchema.describe(
-            "Index of the shape to resize (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
-          ),
+          shapeIdentifier: z
+            .union([
+              z.number(),
+              z.literal("selected"),
+              z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+            ])
+            .describe(
+              "Identifier for the shape(s) to resize. Can be an index (0-based, -1 for last), 'selected', or an object specifying shape type and optional color (e.g., { type: 'circle', color: '#ff0000' }).",
+            ),
           width: z.number().optional().describe("New width in pixels (absolute size)"),
           height: z.number().optional().describe("New height in pixels (absolute size)"),
           scale: z.number().optional().describe("Scale factor (e.g., 2 for twice as big, 0.5 for half size)"),
+          applyToAll: z
+            .boolean()
+            .optional()
+            .describe(
+              "If true and shapeIdentifier is a type, apply to ALL shapes of that type. Use this when user says 'all the triangles', 'all circles', etc.",
+            ),
         }),
-        execute: async ({ shapeIndex, width, height, scale }) => {
-          const validation = validateResizeShape(
-            { shapeIndex, width, height, scale },
-            safeCurrentObjects,
-            selectedIndices,
-          )
-          if (!validation.valid) {
-            validationErrors.push(`resizeShape: ${validation.error}`)
-            return { error: validation.error }
+        execute: async ({ shapeIdentifier, width, height, scale, applyToAll }) => {
+          let resolvedShapeIndices: number[] = []
+
+          if (typeof shapeIdentifier === "number" || shapeIdentifier === "selected") {
+            const indexResult = resolveShapeIndex(shapeIdentifier, selectedIndices, safeCurrentObjects.length)
+            if (!indexResult.valid) {
+              validationErrors.push(`resizeShape: ${indexResult.error}`)
+              return { error: indexResult.error }
+            }
+            resolvedShapeIndices = [indexResult.shapeIndex]
+          } else if (typeof shapeIdentifier === "object" && shapeIdentifier.type) {
+            const matchingShapes = canvasContext.filter(
+              (obj) =>
+                obj.type === shapeIdentifier.type &&
+                (!shapeIdentifier.color || obj.color === normalizeColorInput(shapeIdentifier.color, "")),
+            )
+
+            if (matchingShapes.length === 0) {
+              validationErrors.push(
+                `resizeShape: No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`,
+              )
+              return {
+                error: `No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`,
+              }
+            } else if (matchingShapes.length > 1 && !applyToAll) {
+              const clarification = `Which ${shapeIdentifier.type}? I see ${matchingShapes.map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`).join(", ")}. Or did you mean all of them?`
+              validationErrors.push(`resizeShape: Ambiguous request. ${clarification}`)
+              return { error: clarification }
+            } else {
+              resolvedShapeIndices = matchingShapes.map((s) => s.index)
+            }
+          } else {
+            validationErrors.push("resizeShape: Invalid shapeIdentifier provided.")
+            return { error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type." }
           }
 
-          operations.push({
-            type: "resize",
-            shapeIndex: validation.shapeIndex,
+          if (resolvedShapeIndices.length === 0) {
+            validationErrors.push("resizeShape: Could not resolve shape index.")
+            return { error: "Could not resolve shape index." }
+          }
+
+          for (const shapeIndex of resolvedShapeIndices) {
+            const validation = validateResizeShape(
+              { shapeIndex, width, height, scale },
+              safeCurrentObjects,
+              selectedIndices,
+            )
+            if (!validation.valid) {
+              validationErrors.push(`resizeShape: ${validation.error}`)
+              return { error: validation.error }
+            }
+
+            operations.push({
+              type: "resize",
+              shapeIndex: validation.shapeIndex,
+              width,
+              height,
+              scale,
+            })
+          }
+
+          return {
+            success: true,
+            shapeIndices: resolvedShapeIndices,
             width,
             height,
             scale,
-          })
-
-          return { success: true, shapeIndex: validation.shapeIndex, width, height, scale }
+            count: resolvedShapeIndices.length,
+            message: `Resized ${resolvedShapeIndices.length} shape${resolvedShapeIndices.length > 1 ? "s" : ""}`,
+          }
         },
       }),
       rotateShape: tool({
-        description: "Rotate an existing shape",
+        description: "Rotate one or more existing shapes",
         inputSchema: z.object({
-          shapeIndex: shapeIndexSchema.describe(
-            "Index of the shape to rotate (0-based, use -1 for last shape, or 'selected' for currently selected shape)",
-          ),
+          shapeIdentifier: z
+            .union([
+              z.number(),
+              z.literal("selected"),
+              z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+            ])
+            .describe(
+              "Identifier for the shape(s) to rotate. Can be an index (0-based, -1 for last), 'selected', or an object specifying shape type and optional color (e.g., { type: 'circle', color: '#ff0000' }).",
+            ),
           degrees: z.number().describe("Rotation amount in degrees"),
           absolute: z
             .boolean()
             .optional()
             .describe("If true, set absolute rotation; if false, rotate relative to current rotation"),
+          applyToAll: z
+            .boolean()
+            .optional()
+            .describe(
+              "If true and shapeIdentifier is a type, apply to ALL shapes of that type. Use this when user says 'all the triangles', 'all circles', etc.",
+            ),
         }),
-        execute: async ({ shapeIndex, degrees, absolute }) => {
-          const validation = validateRotateShape({ shapeIndex, degrees, absolute }, safeCurrentObjects, selectedIndices)
-          if (!validation.valid) {
-            validationErrors.push(`rotateShape: ${validation.error}`)
-            return { error: validation.error }
+        execute: async ({ shapeIdentifier, degrees, absolute, applyToAll }) => {
+          let resolvedShapeIndices: number[] = []
+
+          if (typeof shapeIdentifier === "number" || shapeIdentifier === "selected") {
+            const indexResult = resolveShapeIndex(shapeIdentifier, selectedIndices, safeCurrentObjects.length)
+            if (!indexResult.valid) {
+              validationErrors.push(`rotateShape: ${indexResult.error}`)
+              return { error: indexResult.error }
+            }
+            resolvedShapeIndices = [indexResult.shapeIndex]
+          } else if (typeof shapeIdentifier === "object" && shapeIdentifier.type) {
+            const matchingShapes = canvasContext.filter(
+              (obj) =>
+                obj.type === shapeIdentifier.type &&
+                (!shapeIdentifier.color || obj.color === normalizeColorInput(shapeIdentifier.color, "")),
+            )
+
+            if (matchingShapes.length === 0) {
+              validationErrors.push(
+                `rotateShape: No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`,
+              )
+              return {
+                error: `No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`,
+              }
+            } else if (matchingShapes.length > 1 && !applyToAll) {
+              const clarification = `Which ${shapeIdentifier.type}? I see ${matchingShapes.map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`).join(", ")}. Or did you mean all of them?`
+              validationErrors.push(`rotateShape: Ambiguous request. ${clarification}`)
+              return { error: clarification }
+            } else {
+              resolvedShapeIndices = matchingShapes.map((s) => s.index)
+            }
+          } else {
+            validationErrors.push("rotateShape: Invalid shapeIdentifier provided.")
+            return { error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type." }
           }
 
-          operations.push({
-            type: "rotate",
-            shapeIndex: validation.shapeIndex,
-            degrees: degrees ?? 0,
-            absolute: absolute ?? false,
-          })
+          if (resolvedShapeIndices.length === 0) {
+            validationErrors.push("rotateShape: Could not resolve shape index.")
+            return { error: "Could not resolve shape index." }
+          }
 
-          return { success: true, shapeIndex: validation.shapeIndex, degrees, absolute }
+          for (const shapeIndex of resolvedShapeIndices) {
+            const validation = validateRotateShape(
+              { shapeIndex, degrees, absolute },
+              safeCurrentObjects,
+              selectedIndices,
+            )
+            if (!validation.valid) {
+              validationErrors.push(`rotateShape: ${validation.error}`)
+              return { error: validation.error }
+            }
+
+            operations.push({
+              type: "rotate",
+              shapeIndex: validation.shapeIndex,
+              degrees: degrees ?? 0,
+              absolute: absolute ?? false,
+            })
+          }
+
+          return {
+            success: true,
+            shapeIndices: resolvedShapeIndices,
+            degrees,
+            absolute,
+            count: resolvedShapeIndices.length,
+            message: `Rotated ${resolvedShapeIndices.length} shape${resolvedShapeIndices.length > 1 ? "s" : ""}`,
+          }
         },
       }),
       deleteShape: tool({
         description: "Delete one or more shapes from the canvas",
         inputSchema: z.object({
-          shapeIndex: shapeIndexSchema
+          shapeIdentifier: z
+            .union([
+              z.number(),
+              z.literal("selected"),
+              z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+            ])
             .optional()
-            .describe("Index of the shape to delete (0-based, or 'selected' for currently selected shape)"),
+            .describe(
+              "Identifier for the shape(s) to delete. Can be an index (0-based, -1 for last), 'selected', or an object specifying shape type and optional color. If omitted and 'all' is false, deletes the selected shape.",
+            ),
           all: z.boolean().optional().describe("If true, delete all shapes from the canvas"),
         }),
-        execute: async ({ shapeIndex, all }) => {
-          const validation = validateDeleteShape({ shapeIndex, all }, safeCurrentObjects, selectedIndices)
-          if (!validation.valid) {
-            validationErrors.push(`deleteShape: ${validation.error}`)
-            return { error: validation.error }
+        execute: async ({ shapeIdentifier, all }) => {
+          if (all) {
+            operations.push({
+              type: "delete",
+              all: true,
+            })
+            return { success: true, all: true }
+          }
+
+          let resolvedShapeIndex: number | undefined
+          let shapeToDelete: string | undefined
+
+          if (shapeIdentifier === undefined || shapeIdentifier === "selected") {
+            if (selectedIndices.length === 0) {
+              validationErrors.push(
+                "deleteShape: No shape selected and no identifier provided. Please select a shape or provide an identifier.",
+              )
+              return {
+                error: "No shape selected and no identifier provided. Please select a shape or provide an identifier.",
+              }
+            }
+            resolvedShapeIndex = selectedIndices[0]
+            shapeToDelete = "selected shape"
+          } else if (typeof shapeIdentifier === "number" || shapeIdentifier === "selected") {
+            // This case is already covered by the above, but keeping for clarity if logic evolves
+            const indexResult = resolveShapeIndex(shapeIdentifier, selectedIndices, safeCurrentObjects.length)
+            if (!indexResult.valid) {
+              validationErrors.push(`deleteShape: ${indexResult.error}`)
+              return { error: indexResult.error }
+            }
+            resolvedShapeIndex = indexResult.shapeIndex
+            shapeToDelete = `shape at index ${resolvedShapeIndex}`
+          } else if (typeof shapeIdentifier === "object" && shapeIdentifier.type) {
+            const matchingShapes = canvasContext.filter(
+              (obj) =>
+                obj.type === shapeIdentifier.type &&
+                (!shapeIdentifier.color || obj.color === normalizeColorInput(shapeIdentifier.color, "")),
+            )
+
+            if (matchingShapes.length === 0) {
+              validationErrors.push(
+                `deleteShape: No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`,
+              )
+              return {
+                error: `No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`,
+              }
+            } else if (matchingShapes.length > 1) {
+              const clarification = `Which ${shapeIdentifier.type}? I see ${matchingShapes.map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`).join(", ")}.`
+              validationErrors.push(`deleteShape: Ambiguous request. ${clarification}`)
+              return { error: clarification }
+            } else {
+              resolvedShapeIndex = matchingShapes[0].index
+              shapeToDelete = `the ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type}`
+            }
+          } else {
+            validationErrors.push("deleteShape: Invalid shapeIdentifier provided.")
+            return { error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type." }
+          }
+
+          if (resolvedShapeIndex === undefined) {
+            validationErrors.push(`deleteShape: Could not resolve shape identifier for "${shapeToDelete}".`)
+            return { error: `Could not resolve shape identifier for "${shapeToDelete}".` }
           }
 
           operations.push({
             type: "delete",
-            shapeIndex: validation.shapeIndex,
-            all: all ?? false,
+            shapeIndex: resolvedShapeIndex,
+            all: false,
           })
 
-          return { success: true, shapeIndex: validation.shapeIndex, all }
+          return { success: true, shapeIndex: resolvedShapeIndex, all: false, message: `Deleted ${shapeToDelete}.` }
         },
       }),
       deleteShapesByType: tool({
@@ -556,15 +812,76 @@ export async function POST(request: Request) {
         description: "Arrange multiple shapes in a pattern (grid, row, column, circle)",
         inputSchema: z.object({
           pattern: z.enum(["grid", "row", "column", "circle"]).describe("The arrangement pattern"),
-          shapeIndices: z
-            .array(z.number())
+          shapeIdentifiers: z
+            .array(
+              z.union([
+                z.number(),
+                z.literal("selected"),
+                z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+              ]),
+            )
             .optional()
-            .describe("Indices of shapes to arrange (empty array means all shapes)"),
+            .describe(
+              "Identifiers of shapes to arrange (empty array means all shapes). Each identifier can be an index, 'selected', or an object specifying shape type and optional color.",
+            ),
           spacing: z.number().optional().describe("Spacing between shapes in pixels"),
           columns: z.number().optional().describe("Number of columns (for grid pattern)"),
         }),
-        execute: async ({ pattern, shapeIndices, spacing, columns }) => {
-          const validation = validateArrangeShapes({ pattern, shapeIndices, spacing, columns }, safeCurrentObjects)
+        execute: async ({ pattern, shapeIdentifiers, spacing, columns }) => {
+          let resolvedShapeIndices: number[] = []
+
+          if (!shapeIdentifiers || shapeIdentifiers.length === 0) {
+            resolvedShapeIndices = canvasContext.map((obj) => obj.index)
+          } else {
+            for (const identifier of shapeIdentifiers) {
+              let resolvedIndex: number | undefined
+              if (typeof identifier === "number" || identifier === "selected") {
+                const indexResult = resolveShapeIndex(identifier, selectedIndices, safeCurrentObjects.length)
+                if (!indexResult.valid) {
+                  validationErrors.push(`arrangeShapes: ${indexResult.error}`)
+                  return { error: indexResult.error }
+                }
+                resolvedIndex = indexResult.shapeIndex
+              } else if (typeof identifier === "object" && identifier.type) {
+                const matchingShapes = canvasContext.filter(
+                  (obj) =>
+                    obj.type === identifier.type &&
+                    (!identifier.color || obj.color === normalizeColorInput(identifier.color, "")),
+                )
+                if (matchingShapes.length === 0) {
+                  validationErrors.push(
+                    `arrangeShapes: No ${identifier.color ? `${identifier.color} ` : ""}${identifier.type} found.`,
+                  )
+                  return { error: `No ${identifier.color ? `${identifier.color} ` : ""}${identifier.type} found.` }
+                } else if (matchingShapes.length > 1) {
+                  const clarification = `Which ${identifier.type}? I see ${matchingShapes.map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`).join(", ")}.`
+                  validationErrors.push(`arrangeShapes: Ambiguous request for ${identifier.type}. ${clarification}`)
+                  return { error: clarification }
+                } else {
+                  resolvedIndex = matchingShapes[0].index
+                }
+              } else {
+                validationErrors.push("arrangeShapes: Invalid shapeIdentifier provided.")
+                return {
+                  error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type.",
+                }
+              }
+              if (resolvedIndex !== undefined) {
+                resolvedShapeIndices.push(resolvedIndex)
+              }
+            }
+            // Remove duplicates if any
+            resolvedShapeIndices = Array.from(new Set(resolvedShapeIndices))
+          }
+
+          if (resolvedShapeIndices.length === 0) {
+            return { valid: false, error: "No shapes found to arrange." }
+          }
+
+          const validation = validateArrangeShapes(
+            { pattern, shapeIndices: resolvedShapeIndices, spacing, columns },
+            safeCurrentObjects,
+          )
           if (!validation.valid) {
             validationErrors.push(`arrangeShapes: ${validation.error}`)
             return { error: validation.error }
@@ -573,12 +890,12 @@ export async function POST(request: Request) {
           operations.push({
             type: "arrange",
             pattern,
-            shapeIndices: shapeIndices || [],
+            shapeIndices: resolvedShapeIndices,
             spacing: spacing || 50,
             columns,
           })
 
-          return { success: true, pattern, shapeIndices, spacing, columns }
+          return { success: true, pattern, shapeIndices: resolvedShapeIndices, spacing, columns }
         },
       }),
       createLoginForm: tool({
@@ -705,7 +1022,129 @@ export async function POST(request: Request) {
       }),
     }
 
+    //
+    const spatialReasoningPrompt = `⭐⭐⭐ SPATIAL REASONING & RELATIVE POSITIONING ⭐⭐⭐
+
+**UNDERSTANDING SPATIAL REFERENCES:**
+When the user mentions spatial relationships (e.g., "above the squares", "below the circles", "to the right of the triangles"):
+1. **Identify the reference object type** - What object type is being used as the spatial anchor?
+2. **Find ALL objects of that reference type** - Get their positions to calculate the reference point
+3. **Calculate the reference position** - Use the average or appropriate position of the reference objects
+4. **Apply the spatial offset** - Calculate the new position relative to the reference
+
+**SPATIAL REFERENCE PRIORITY:**
+When user says "create X above Y":
+1. **Y is the reference object** - Find all objects of type Y on the canvas
+2. **Calculate Y's bounding box** - Find the topmost Y position (min Y value)
+3. **Position X above Y** - Place X at (Y's center X, Y's top Y - offset)
+4. **NEVER confuse reference objects** - If user says "above the squares", use squares as reference, NOT circles or triangles
+
+**TRACKING SPATIAL RELATIONSHIPS:**
+Maintain awareness of the spatial layout:
+- **Most recently created objects** - Track what was just created and where
+- **Object type positions** - Know where each type of object is located (top, middle, bottom, left, right)
+- **Spatial hierarchy** - Understand the vertical/horizontal arrangement of different object types
+
+**RESOLVING AMBIGUOUS SPATIAL REFERENCES:**
+When user says "above them" or "below those":
+1. **Check the previous message** - What object type was mentioned last?
+2. **Use that type as the reference** - "them" = the objects from the previous message
+3. **If still ambiguous**, ask for clarification: "Above which objects? The circles or the squares?"
+
+**CONCRETE SPATIAL EXAMPLES:**
+
+Example 1: Sequential creation with spatial references
+- User: "create 10 adjacent circles"
+  → AI: Creates 10 circles at Y=500 (for example)
+  → Spatial memory: circles at Y=500
+- User: "create 10 adjacent squares above them"
+  → AI: "them" = circles from previous message
+  → Reference: circles at Y=500
+  → Calculate: squares at Y = 500 - 113.4 (3cm) - square_height/2 = ~387
+  → Creates squares at Y=387
+  → Spatial memory: circles at Y=500, squares at Y=387
+- User: "create 5 adjacent triangles 3 cm above them"
+  → AI: "them" = squares from previous message (most recent "them" reference)
+  → Reference: squares at Y=387
+  → Calculate: triangles at Y = 387 - 113.4 - triangle_height/2 = ~274
+  → Creates triangles at Y=274
+  → Spatial memory: circles at Y=500, squares at Y=387, triangles at Y=274
+
+Example 2: Explicit spatial reference overriding "them"
+- User: "create 10 adjacent circles"
+  → Creates circles at Y=500
+- User: "create 10 adjacent squares above them"
+  → Creates squares at Y=387 (above circles)
+- User: "create 5 adjacent triangles 3 cm above them"
+  → Creates triangles at Y=274 (above squares)
+- User: "above the squares"
+  → AI: User is clarifying - they want triangles above SQUARES, not above the previous "them"
+  → Reference: squares at Y=387 (explicitly mentioned)
+  → Recalculate: triangles at Y = 387 - 113.4 - triangle_height/2 = ~274
+  → This is correct positioning
+- User: "no delete all the triangles you created, and instead I want you to create 5 adjacent triangles 3 cm above the adjacent squares created"
+  → AI: User is being very explicit - reference is "the adjacent squares"
+  → Reference: squares at Y=387
+  → Delete existing triangles
+  → Create new triangles at Y = 387 - 113.4 - triangle_height/2 = ~274
+
+Example 3: Correcting spatial confusion
+- User: "no this is 3 cm above the circles, not the squares"
+  → AI: User is correcting a mistake - triangles are currently above circles, but should be above squares
+  → Current: triangles at Y=387 (above circles at Y=500)
+  → Desired: triangles above squares at Y=387
+  → Correct calculation: triangles at Y = 387 - 113.4 - triangle_height/2 = ~274
+  → Delete wrong triangles, create correct ones
+
+**CRITICAL SPATIAL RULES:**
+1. **Always identify the reference object explicitly** - Don't assume
+2. **When user says "above X"**, X is the reference, calculate from X's position
+3. **When user says "above them"**, "them" refers to the previous message's objects
+4. **Track the spatial layout** - Know where each object type is positioned
+5. **When corrected, acknowledge and recalculate** - "You're right, let me position them above the squares at Y=..."
+6. **Show your spatial reasoning** - Explain which objects you're using as reference and why
+
+**SPATIAL CALCULATION FORMULAS:**
+- **Above**: new_y = reference_top_y - offset - new_object_height/2
+- **Below**: new_y = reference_bottom_y + offset + new_object_height/2
+- **Left of**: new_x = reference_left_x - offset - new_object_width/2
+- **Right of**: new_x = reference_right_x + offset + new_object_width/2
+- **3 cm offset**: ~113.4 pixels (37.8 pixels per cm)
+
+**WHEN TO ASK FOR CLARIFICATION:**
+Only ask when truly ambiguous:
+- ❌ DON'T ask when user explicitly names the reference: "above the squares" is clear
+- ❌ DON'T ask when "them" is clear from context
+- ✅ DO ask when multiple interpretations exist: "above them" when both circles and squares were mentioned
+- ✅ DO ask when spatial relationship is unclear: "near the shapes" without specific direction
+`
+    // </CHANGE>
+
     const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
+
+⭐⭐⭐ CONVERSATION CONTEXT & REFERENCE RESOLUTION ⭐⭐⭐
+
+**MAINTAINING CONVERSATION CONTEXT:**
+You have access to the full conversation history. Use it to understand:
+1. **What objects were mentioned in previous messages** - Track which shapes the user has been working with
+2. **Pronoun resolution** - "them", "those", "the same ones" refer to objects from the previous message
+3. **Implicit references** - "reduce them to half their size" after "double all triangles" means reduce the triangles
+4. **Sequential operations** - Build on previous operations to understand the user's workflow
+
+**REFERENCE RESOLUTION RULES:**
+1. **"them" / "those" / "these"** → Refers to the objects mentioned in the immediately previous user message
+2. **"the same ones"** → Refers to the exact same objects from the previous operation
+3. **"again"** → Repeat the previous operation type on the same objects
+4. **"also" / "too"** → Apply the same operation to additional objects
+
+**TRACKING WORKING SET:**
+Maintain a mental model of which objects the user is currently working with:
+- When user says "double all triangles" → Working set = all triangles
+- When user says "now double the circles" → Working set = all circles
+- When user says "reduce them to half" → Apply to current working set (circles from previous message)
+- When user says "make them red" → Apply to current working set
+
+${spatialReasoningPrompt}
 
 CANVAS DIMENSIONS: 2000x2000 pixels
 CANVAS CENTER: (1000, 1000)
@@ -769,14 +1208,69 @@ ${
 ⭐ CURRENTLY SELECTED SHAPES (${selectedContext.length}):
 ${JSON.stringify(selectedContext, null, 2)}
 Selected indices: ${JSON.stringify(selectedIndices)}
-
-IMPORTANT: When the user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
 `
     : "No shapes are currently selected.\n"
 }
 
 OBJECTS ON CANVAS (${safeCurrentObjects.length} total):
 ${JSON.stringify(canvasContext, null, 2)}
+
+⭐⭐⭐ CRITICAL SHAPE IDENTIFICATION RULES ⭐⭐⭐
+
+**RULE 1: USER EXPLICITLY MENTIONS OBJECT TYPE**
+When the user mentions a specific object type in their request (e.g., "the circle", "the rectangle", "the triangle"):
+1. **IGNORE the current selection** - the user is explicitly targeting a different object
+2. **Search the canvas for objects matching that type**
+3. **If exactly ONE object of that type exists, automatically target it by index**
+4. **If multiple objects of that type exist, ask for clarification (e.g., "by color", "by position")**
+5. **NEVER ask if they meant the selected object when they explicitly mentioned a different type**
+
+**RULE 1.5: USER SAYS "ALL" OR USES PLURAL FORMS**
+When the user says "all the triangles", "all circles", "the triangles" (plural), or similar:
+1. **Set applyToAll: true in the tool call**
+2. **Target ALL objects of that type automatically**
+3. **Do NOT ask for clarification when user explicitly says "all"**
+4. **Plural forms ("triangles", "circles", "rectangles") indicate bulk operations**
+
+Examples:
+- "double the size of all the triangles" → resizeShape({ type: 'triangle' }, scale: 2, applyToAll: true)
+- "move all circles to the right" → moveShape({ type: 'circle' }, deltaX: 100, applyToAll: true)
+- "rotate the rectangles 45 degrees" → rotateShape({ type: 'rectangle' }, degrees: 45, applyToAll: true)
+- "make all the blue shapes bigger" → resizeShape({ type: 'rectangle', color: '#3b82f6' }, scale: 1.5, applyToAll: true) for each type
+
+Examples:
+- User says "double the size of the circle" → Find all circles on canvas
+  - If 1 circle exists at index 3 → Use index 3, don't ask about selection
+  - If 2+ circles exist → Ask "Which circle? There's a blue one and a green one"
+- User says "move the rectangle left" → Find all rectangles
+  - If 1 rectangle exists → Use that rectangle's index automatically
+  - If 2+ rectangles exist → Ask for clarification
+- User says "delete the triangle" → Find all triangles
+  - If 1 triangle exists → Delete it by index
+  - If 0 triangles exist → Say "There are no triangles on the canvas"
+
+**RULE 2: USER USES PRONOUNS OR REFERS TO SELECTION**
+When the user says "it", "this", "the selected shape", "the selection":
+1. **Use the currently selected object(s)**: ${JSON.stringify(selectedIndices)}
+2. **If nothing is selected, ask them to select an object or be more specific**
+
+**RULE 3: USER MENTIONS COLOR + TYPE**
+When the user mentions both color and type (e.g., "the blue circle", "the red rectangle"):
+1. **Search for objects matching BOTH type AND color**
+2. **If exactly ONE match, use it automatically**
+3. **If multiple matches, ask for position-based clarification**
+4. **If no matches, tell them clearly what doesn't exist**
+
+**RULE 4: AMBIGUOUS REQUESTS**
+When the request is ambiguous (e.g., "make it bigger" with no selection and multiple shapes):
+1. **Ask for clarification with specific options from the canvas**
+2. **List what's available: "Which shape? I see a blue rectangle, a green circle, an orange triangle, a red line, and a yellow text"**
+
+**RULE 5: VERIFY OBJECT EXISTENCE**
+Before operating on any object:
+1. **Check the canvas context to confirm the object exists**
+2. **Never hallucinate objects that aren't in the canvas context**
+3. **If an object doesn't exist, clearly state what IS on the canvas**
 
 AVAILABLE FUNCTIONS:
 1. getCanvasState - Query canvas information (use for questions like "how many shapes?")
@@ -792,14 +1286,6 @@ AVAILABLE FUNCTIONS:
 11. createLoginForm - Build a multi-element login form layout with labels and button
 12. createNavigationBar - Create a navigation bar with menu items
 13. createCardLayout - Create a card with media area, text, and button
-
-SHAPE IDENTIFICATION RULES:
-- **SELECTED SHAPES**: When user says "the selected shape", "it", "this", "the selection", use the selected indices: ${JSON.stringify(selectedIndices)}
-- Use index numbers: 0 = first shape, 1 = second, -1 = last shape
-- When user says "the blue rectangle", find the shape by matching type AND color
-- When user says "the circle", find the first shape of that type
-- When user says "the last shape" or "the latest", use index -1
-- If multiple shapes match, operate on the first match or ask for clarification
 
 TEXT LAYER RULES:
 - Use createText to add text layers
@@ -854,38 +1340,104 @@ DEFAULT VALUES:
 - **DEFAULT position: (${usableArea.centerX}, ${usableArea.centerY}) - Center of usable area**
 
 BEST PRACTICES:
-1. For questions about the canvas, use getCanvasState first
-2. For complex operations, call multiple functions in sequence
-3. When moving/resizing shapes, verify the shape exists first
-4. Be conversational and explain what you're doing
-5. If a request is ambiguous, make a reasonable assumption and explain it
-6. **ALWAYS check if there's a selected shape before assuming which shape to operate on**
-7. **Position objects in the usable area (${usableArea.centerX}, ${usableArea.centerY}) so they're visible to the user**
-8. **When user requests relative positioning, calculate from existing objects but ensure result is within usable bounds**
-9. **When deleting by type or color, use deleteShapesByType or deleteShapesByColor**
-10. **The usable area excludes UI panels - objects created there will be visible and accessible**
+1. **ALWAYS check the canvas context before making assumptions about what exists**
+2. **When user mentions an object type, search for it in the canvas context first**
+3. **If only one object of the mentioned type exists, use it automatically - don't ask about selection**
+4. **NEVER hallucinate objects - only work with what's in the canvas context**
+5. **When user says "all" or uses plural forms, set applyToAll: true to operate on all matching shapes**
+6. For questions about the canvas, use getCanvasState first
+7. For complex operations, call multiple functions in sequence
+8. Be conversational and explain what you're doing
+9. If a request is truly ambiguous (multiple matches AND no "all" keyword), ask for clarification with specific options
+10. **Position objects in the usable area so they're visible to the user**
+11. **When deleting by type or color, use deleteShapesByType or deleteShapesByColor**
 
-Examples:
-- "Create a blue square" → createShape(rectangle, x: ${usableArea.centerX}, y: ${usableArea.centerY}, 100x100, blue)
-- "Add text 5cm below the header" → Find header Y position, add ~189 pixels (5cm), createText at that position (ensure within usable area)
-- "Move the circle left" → moveShape(find circle index, deltaX: -100)
-- "Make it bigger" (with selection) → resizeShape(selected index, scale: 2)
-- "How many shapes?" → getCanvasState(query: "count")
-- "Delete all rectangles" → deleteShapesByType(shapeType: "rectangle")
-- "Create a login form" → createLoginForm at usable area center (${usableArea.centerX}, ${usableArea.centerY})`
+CONCRETE EXAMPLES:
 
-    const result = await generateText({
+Example 1: User says "double the size of the circle" (rectangle is selected)
+- Canvas has: 1 rectangle (selected), 1 circle, 3 triangles
+- ✅ CORRECT: Find the circle at index 1, call resizeShape({ type: 'circle' }, scale: 2)
+- ❌ WRONG: Ask "Did you mean the selected rectangle?"
+- ❌ WRONG: Say "There's no square on the canvas" (hallucinating)
+
+Example 1.5: User says "double the size of all the triangles"
+- Canvas has: 1 rectangle, 1 circle, 3 triangles
+- ✅ CORRECT: Call resizeShape({ type: 'triangle' }, scale: 2, applyToAll: true) → resizes all 3 triangles
+- ❌ WRONG: Ask "Which triangle?"
+- ❌ WRONG: Only resize one triangle
+
+Example 2: User says "move the triangle up" (nothing selected)
+- Canvas has: 2 circles, 3 triangles
+- ✅ CORRECT: Ask "Which triangle? I see 3 triangles - an orange one at the top, a blue one in the middle, and a green one at the bottom. Or did you mean all of them?"
+- ❌ WRONG: Say "Please select a triangle first"
+
+Example 2.5: User says "move the triangles up" or "move all triangles up"
+- Canvas has: 2 circles, 3 triangles
+- ✅ CORRECT: Call moveShape({ type: 'triangle' }, deltaY: -50, applyToAll: true) → moves all 3 triangles
+- ❌ WRONG: Ask "Which triangle?"
+
+Example 3: User says "delete the blue rectangle" (circle is selected)
+- Canvas has: 1 blue rectangle, 1 red rectangle, 1 green circle (selected)
+- ✅ CORRECT: Find the blue rectangle, call deleteShape with its index
+- ❌ WRONG: Ask "Did you mean the selected circle?"
+
+Example 4: User says "make it bigger" (nothing selected)
+- Canvas has: 5 shapes
+- ✅ CORRECT: Ask "Which shape would you like to make bigger? I see a blue rectangle, green circle, orange triangle, red line, and yellow text"
+- ❌ WRONG: Assume they mean the last created shape
+
+Example 5: User says "change the color of the selected shape to red" (rectangle is selected)
+- Canvas has: 1 rectangle (selected), 2 circles
+- ✅ CORRECT: Use the selected rectangle's index
+- ❌ WRONG: Ask which shape they mean
+
+Example 6: User says "rotate all the blue shapes 90 degrees"
+- Canvas has: 2 blue rectangles, 1 blue circle, 1 red triangle
+- ✅ CORRECT: Call rotateShape for each blue shape type with applyToAll: true
+- ❌ WRONG: Ask "Which blue shape?"
+- ❌ WRONG: Only rotate one blue shape
+
+Example 7: User says "create 10 circles" then "create 10 squares above them" then "create 5 triangles 3cm above them"
+- First: Creates 10 circles at Y=500
+- Second: "them" = circles, creates squares at Y=387 (above circles)
+- Third: "them" = squares (most recent), creates triangles at Y=274 (above squares)
+- ✅ CORRECT: Track spatial relationships, use correct reference for each "them"
+- ❌ WRONG: Create triangles above circles instead of squares
+- ❌ WRONG: Ask "above which objects?" when "them" is clear from context
+`
+
+    const messages = []
+
+    // Add conversation history if provided
+    if (conversationHistory && Array.isArray(conversationHistory)) {
+      messages.push(...conversationHistory)
+    }
+
+    // Add current user message
+    messages.push({
+      role: "user",
+      content: message,
+    })
+
+    console.log("[v0] Calling AI SDK with conversation context...")
+
+    const result = await streamText({
       model: "openai/gpt-4o-mini",
       system: systemPrompt,
-      prompt: message,
+      messages,
       tools,
       maxSteps: 5,
     })
 
+    let fullText = ""
+    for await (const chunk of result.textStream) {
+      fullText += chunk
+    }
+
     console.log("[v0] AI SDK response received")
     console.log("[v0] Operations collected:", operations.length)
 
-    let aiMessage = result.text || "I've processed your request!"
+    let aiMessage = fullText || "I've processed your request!"
 
     if (validationErrors.length > 0) {
       aiMessage += `\n\nNote: Some operations couldn't be completed:\n${validationErrors.map((e) => `• ${e}`).join("\n")}`
@@ -1006,9 +1558,9 @@ function validateMoveShape(
   currentObjects: any[],
   selectedIndices: number[],
 ): ValidationResult<{ shapeIndex: number }> {
-  const indexResult = resolveShapeIndex(args.shapeIndex, selectedIndices, currentObjects.length)
-  if (!indexResult.valid) {
-    return indexResult
+  // The shapeIndex in args is already resolved by the tool execution logic
+  if (args.shapeIndex === undefined) {
+    return { valid: false, error: "Internal error: shapeIndex not resolved." }
   }
 
   if (args.x !== undefined && (typeof args.x !== "number" || args.x < 0 || args.x > 2000)) {
@@ -1034,7 +1586,7 @@ function validateMoveShape(
     }
   }
 
-  return { valid: true, shapeIndex: indexResult.shapeIndex }
+  return { valid: true, shapeIndex: args.shapeIndex }
 }
 
 function validateResizeShape(
@@ -1042,9 +1594,9 @@ function validateResizeShape(
   currentObjects: any[],
   selectedIndices: number[],
 ): ValidationResult<{ shapeIndex: number }> {
-  const indexResult = resolveShapeIndex(args.shapeIndex, selectedIndices, currentObjects.length)
-  if (!indexResult.valid) {
-    return indexResult
+  // The shapeIndex in args is already resolved by the tool execution logic
+  if (args.shapeIndex === undefined) {
+    return { valid: false, error: "Internal error: shapeIndex not resolved." }
   }
 
   if (args.width !== undefined && (typeof args.width !== "number" || args.width <= 0 || args.width > 2000)) {
@@ -1063,7 +1615,7 @@ function validateResizeShape(
     return { valid: false, error: "Must provide either dimensions (width, height) or scale factor." }
   }
 
-  return { valid: true, shapeIndex: indexResult.shapeIndex }
+  return { valid: true, shapeIndex: args.shapeIndex }
 }
 
 function validateRotateShape(
@@ -1071,9 +1623,9 @@ function validateRotateShape(
   currentObjects: any[],
   selectedIndices: number[],
 ): ValidationResult<{ shapeIndex: number }> {
-  const indexResult = resolveShapeIndex(args.shapeIndex, selectedIndices, currentObjects.length)
-  if (!indexResult.valid) {
-    return indexResult
+  // The shapeIndex in args is already resolved by the tool execution logic
+  if (args.shapeIndex === undefined) {
+    return { valid: false, error: "Internal error: shapeIndex not resolved." }
   }
 
   if (args.degrees === undefined) {
@@ -1084,7 +1636,7 @@ function validateRotateShape(
     return { valid: false, error: "Rotation degrees must be a number." }
   }
 
-  return { valid: true, shapeIndex: indexResult.shapeIndex }
+  return { valid: true, shapeIndex: args.shapeIndex }
 }
 
 function validateDeleteShape(
@@ -1092,16 +1644,16 @@ function validateDeleteShape(
   currentObjects: any[],
   selectedIndices: number[],
 ): ValidationResult<{ shapeIndex?: number }> {
+  // The shapeIndex in args is already resolved by the tool execution logic
   if (args.all === true) {
     return { valid: true }
   }
 
-  const indexResult = resolveShapeIndex(args.shapeIndex, selectedIndices, currentObjects.length)
-  if (!indexResult.valid) {
-    return indexResult
+  if (args.shapeIndex === undefined) {
+    return { valid: false, error: "Internal error: shapeIndex not resolved or not applicable." }
   }
 
-  return { valid: true, shapeIndex: indexResult.shapeIndex }
+  return { valid: true, shapeIndex: args.shapeIndex }
 }
 
 function validateArrangeShapes(args: any, currentObjects: any[]): { valid: boolean; error?: string } {

@@ -48,6 +48,7 @@ export async function createComment(
       content,
       created_by: userId,
       created_by_name: userName,
+      resolved: false, // Explicitly set to false for new comments
     })
     .select()
     .single()
@@ -57,6 +58,7 @@ export async function createComment(
     return null
   }
 
+  console.log("[v0] Created comment:", data)
   return data
 }
 
@@ -75,6 +77,8 @@ export async function updateComment(supabase: SupabaseClient, commentId: string,
 }
 
 export async function resolveComment(supabase: SupabaseClient, commentId: string, userId: string): Promise<boolean> {
+  console.log("[v0] resolveComment called with:", { commentId, userId })
+
   const { error } = await supabase
     .from("canvas_comments")
     .update({
@@ -89,6 +93,7 @@ export async function resolveComment(supabase: SupabaseClient, commentId: string
     return false
   }
 
+  console.log("[v0] Comment resolved successfully")
   return true
 }
 
@@ -115,6 +120,8 @@ export async function clearAllComments(supabase: SupabaseClient, canvasId: strin
 }
 
 export async function clearResolvedComments(supabase: SupabaseClient, canvasId: string): Promise<boolean> {
+  console.log("[v0] clearResolvedComments called with canvasId:", canvasId)
+
   const { error } = await supabase.from("canvas_comments").delete().eq("canvas_id", canvasId).eq("resolved", true)
 
   if (error) {
@@ -122,6 +129,7 @@ export async function clearResolvedComments(supabase: SupabaseClient, canvasId: 
     return false
   }
 
+  console.log("[v0] Resolved comments cleared successfully")
   return true
 }
 

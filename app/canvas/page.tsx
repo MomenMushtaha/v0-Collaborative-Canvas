@@ -14,6 +14,7 @@ import { exportCanvas } from "@/lib/export-utils"
 import { saveHistorySnapshot } from "@/lib/history-utils"
 import { loadComments, createComment, subscribeToComments, type Comment } from "@/lib/comments-utils"
 import { useToast } from "@/hooks/use-toast"
+import { deleteSession } from "@/lib/session-utils"
 
 export default function CanvasPage() {
   const [user, setUser] = useState<{ id: string; name: string } | null>(null)
@@ -61,10 +62,6 @@ export default function CanvasPage() {
   const { toast } = useToast()
 
   useEffect(() => {
-    console.log("[v0] [PAGE] onSelectAllOfType state updated:", onSelectAllOfType)
-  }, [onSelectAllOfType])
-
-  useEffect(() => {
     // Check authentication
     supabase.auth.getUser().then(({ data: { user: authUser } }) => {
       if (!authUser) {
@@ -78,6 +75,37 @@ export default function CanvasPage() {
       }
     })
   }, [router, supabase])
+
+  useEffect(() => {
+    if (!user) return
+
+    const handleBeforeUnload = () => {
+      console.log("[v0] Window closing, logging out user:", user.id)
+
+      // Use sendBeacon for reliable logout during page unload
+      // This ensures the request completes even as the page is closing
+      const logoutData = JSON.stringify({ userId: user.id })
+      const blob = new Blob([logoutData], { type: "application/json" })
+
+      // Try to send logout request via beacon (most reliable)
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon("/api/logout", blob)
+      }
+
+      // Also delete session synchronously as backup
+      deleteSession(supabase, user.id)
+    }
+
+    // Listen for multiple unload events to catch all cases
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    window.addEventListener("pagehide", handleBeforeUnload)
+
+    // Cleanup listeners on component unmount
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+      window.removeEventListener("pagehide", handleBeforeUnload)
+    }
+  }, [user, supabase])
 
   useEffect(() => {
     if (!user) return
@@ -112,6 +140,10 @@ export default function CanvasPage() {
   }, [currentObjects, user, lastSnapshotTime])
 
   const handleSignOut = async () => {
+    if (user) {
+      await deleteSession(supabase, user.id)
+    }
+
     await supabase.auth.signOut()
     router.push("/")
   }
@@ -119,7 +151,6 @@ export default function CanvasPage() {
   const handleCopy = () => {
     if (selectedObjectIds.length === 0) return
     const selectedObjs = currentObjects.filter((obj) => selectedObjectIds.includes(obj.id))
-    // Store in a state that can be accessed by the collaborative canvas
     console.log("[v0] Copy triggered from toolbar for", selectedObjectIds.length, "objects")
   }
 
@@ -234,14 +265,15 @@ export default function CanvasPage() {
     setComments(loadedComments)
   }
 
+  const handleCommentModeChange = useCallback((enabled: boolean) => {
+    setCommentMode(enabled)
+    console.log("[v0] Comment mode changed to:", enabled)
+  }, [])
+
   const usableCanvasDimensions = {
-    // Left side: toolbar takes ~300px
     leftOffset: 300,
-    // Right side: panels take ~400px when expanded
     rightOffset: 400,
-    // Top: toolbar takes ~80px
     topOffset: 80,
-    // Bottom: comments panel takes ~200px when expanded
     bottomOffset: 200,
   }
 
@@ -272,7 +304,8 @@ export default function CanvasPage() {
           snapEnabled={snapEnabled}
           gridSize={gridSize}
           onGridChange={handleGridChange}
-          onShowHistory={() => setShowHistory(true)}
+          onShowHistory={() => setShowHistory(!showHistory)}
+          isHistoryOpen={showHistory}
           commentMode={commentMode}
           onToggleCommentMode={() => setCommentMode(!commentMode)}
           onCopy={handleCopy}
@@ -318,6 +351,7 @@ export default function CanvasPage() {
           onSelectAllOfType={setOnSelectAllOfType}
           historyRestore={pendingHistoryRestore}
           onHistoryRestoreComplete={handleHistoryRestoreComplete}
+          onCommentModeChange={handleCommentModeChange}
         />
       </div>
       <AiChat

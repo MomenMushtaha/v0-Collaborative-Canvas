@@ -29,6 +29,7 @@ interface CanvasProps {
   onCommentCreate?: (x: number, y: number, content: string) => void
   selectedIds?: string[]
   lassoMode?: boolean
+  onCommentModeChange?: (enabled: boolean) => void
 }
 
 export function Canvas({
@@ -47,6 +48,7 @@ export function Canvas({
   onCommentCreate,
   selectedIds: externalSelectedIds,
   lassoMode = false,
+  onCommentModeChange,
 }: CanvasProps) {
   const syncingExternalSelection = useRef(false)
   const {
@@ -260,12 +262,18 @@ export function Canvas({
     if (commentDraft && commentDraft.content.trim() && onCommentCreate) {
       onCommentCreate(commentDraft.x, commentDraft.y, commentDraft.content.trim())
       setCommentDraft(null)
+      if (onCommentModeChange) {
+        onCommentModeChange(false)
+      }
     }
-  }, [commentDraft, onCommentCreate])
+  }, [commentDraft, onCommentCreate, onCommentModeChange])
 
   const handleCommentCancel = useCallback(() => {
     setCommentDraft(null)
-  }, [])
+    if (onCommentModeChange) {
+      onCommentModeChange(false)
+    }
+  }, [onCommentModeChange])
 
   const commentInputStyle: CSSProperties | undefined = useMemo(() => {
     if (!commentDraft) return undefined

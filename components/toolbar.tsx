@@ -35,6 +35,7 @@ interface ToolbarProps {
   gridSize?: number
   onGridChange?: (enabled: boolean, snap: boolean, size: number) => void
   onShowHistory?: () => void
+  isHistoryOpen?: boolean
   commentMode?: boolean
   onToggleCommentMode?: () => void
   onCopy?: () => void
@@ -67,6 +68,7 @@ export function Toolbar({
   gridSize = 20,
   onGridChange,
   onShowHistory,
+  isHistoryOpen = false,
   commentMode = false,
   onToggleCommentMode,
   onCopy,
@@ -95,7 +97,12 @@ export function Toolbar({
             <Redo className="h-4 w-4" />
           </Button>
           {onShowHistory && (
-            <Button variant="ghost" size="icon" onClick={onShowHistory} title="Version History">
+            <Button
+              variant={isHistoryOpen ? "default" : "ghost"}
+              size="icon"
+              onClick={onShowHistory}
+              title="Version History"
+            >
               <History className="h-4 w-4" />
             </Button>
           )}

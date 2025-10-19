@@ -64,6 +64,7 @@ interface CollaborativeCanvasProps {
   onSelectAllOfType?: Dispatch<SetStateAction<(() => void) | undefined>> // Added onSelectAllOfType prop type
   historyRestore?: CanvasObject[] | null
   onHistoryRestoreComplete?: (result: "success" | "error") => void
+  onCommentModeChange?: (enabled: boolean) => void
 }
 
 export function CollaborativeCanvas({
@@ -97,6 +98,7 @@ export function CollaborativeCanvas({
   onSelectAllOfType,
   historyRestore = null,
   onHistoryRestoreComplete,
+  onCommentModeChange,
 }: CollaborativeCanvasProps) {
   const userColor = useMemo(() => generateUserColor(), [])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -878,6 +880,7 @@ export function CollaborativeCanvas({
         onBringForward={handleBringForward}
         onSendBackward={handleSendBackward}
         lassoMode={lassoMode} // Pass lassoMode to Canvas
+        onCommentModeChange={onCommentModeChange} // Added onCommentModeChange prop
       >
         <MultiplayerCursors users={otherUsers} />
         {comments.map((comment) => (

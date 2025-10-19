@@ -22,13 +22,16 @@ interface CursorUpdate {
 export function usePresence({ canvasId, userId, userName, userColor }: UsePresenceProps) {
   const [otherUsers, setOtherUsers] = useState<Map<string, UserPresence>>(new Map())
   const supabase = createClient()
-  const [presenceId, setPresenceId] = useState<string | null>(null)
+  const presenceIdRef = useRef<string | null>(null)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // Initialize presence
   useEffect(() => {
     async function initPresence() {
       console.log("[v0] Initializing presence for user:", userName, userId)
+
+      await supabase.from("user_presence").delete().eq("canvas_id", canvasId).eq("user_id", userId)
+
       const { data, error } = await supabase
         .from("user_presence")
         .insert({
@@ -48,17 +51,22 @@ export function usePresence({ canvasId, userId, userName, userColor }: UsePresen
       }
 
       console.log("[v0] Presence created successfully:", data.id)
-      setPresenceId(data.id)
+      presenceIdRef.current = data.id
     }
 
     initPresence()
 
     // Cleanup on unmount
     return () => {
-      if (presenceId) {
-        console.log("[v0] Cleaning up presence:", presenceId)
-        supabase.from("user_presence").delete().eq("id", presenceId).then()
+      const cleanup = async () => {
+        console.log("[v0] Cleaning up presence for user:", userId)
+        if (presenceIdRef.current) {
+          await supabase.from("user_presence").delete().eq("id", presenceIdRef.current)
+        }
+        // Fallback: also delete by user_id and canvas_id to ensure cleanup
+        await supabase.from("user_presence").delete().eq("canvas_id", canvasId).eq("user_id", userId)
       }
+      cleanup()
     }
   }, [canvasId, userId, userName, userColor, supabase])
 

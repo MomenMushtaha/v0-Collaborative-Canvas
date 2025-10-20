@@ -84,7 +84,20 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
           const { data: inserted, error: insertError } = await supabase
             .from("canvas_objects")
             .insert({
-              ...op.object,
+              id: op.object.id,
+              canvas_id: op.object.canvas_id,
+              type: op.object.type,
+              x: op.object.x,
+              y: op.object.y,
+              width: op.object.width,
+              height: op.object.height,
+              rotation: op.object.rotation ?? 0,
+              fill_color: op.object.fill_color,
+              stroke_color: op.object.stroke_color,
+              stroke_width: op.object.stroke_width ?? 1,
+              text_content: op.object.text_content,
+              font_size: op.object.font_size,
+              font_family: op.object.font_family,
               created_by: userId,
             })
             .select()
@@ -114,13 +127,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
             text_content: op.object.text_content,
             font_size: op.object.font_size,
             font_family: op.object.font_family,
-            visible: op.object.visible,
-            locked: op.object.locked,
-            parent_group: op.object.parent_group,
-            children_ids: op.object.children_ids,
-            z: op.object.z,
-            shape: op.object.shape,
-            content: op.object.content,
             updated_at: new Date().toISOString(),
           }
 
@@ -344,20 +350,13 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
                 text_content: object.text_content,
                 font_size: object.font_size,
                 font_family: object.font_family,
-                visible: object.visible ?? true,
-                locked: object.locked ?? false,
-                parent_group: object.parent_group,
-                children_ids: object.children_ids ?? [],
-                z: object.z ?? 0,
-                shape: object.shape,
-                content: object.content,
                 created_by: userId,
               })),
             )
             .select()
 
           if (error) {
-            console.error("[v0] [DB] Insert error:", error)
+            console.error("[v0] [DB] Insert error:", error.message)
             throw error
           }
 
@@ -381,7 +380,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
             })
           })
           onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
-          return // Return early to prevent processing updates/deletes if inserts failed
+          return
         }
       }
 
@@ -390,8 +389,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
         if (!persisted) return false
 
         const fieldsToCompare: (keyof CanvasObject)[] = [
-          "canvas_id",
-          "type",
           "x",
           "y",
           "width",
@@ -403,26 +400,15 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
           "text_content",
           "font_size",
           "font_family",
-          "visible",
-          "locked",
-          "parent_group",
-          "children_ids",
-          "z",
-          "shape",
-          "content",
         ]
 
         return fieldsToCompare.some((field) => {
           const persistedValue = persisted[field]
           const updatedValue = object[field]
-
-          if (Array.isArray(persistedValue) || Array.isArray(updatedValue)) {
-            return JSON.stringify(persistedValue ?? []) !== JSON.stringify(updatedValue ?? [])
-          }
-
           return persistedValue !== updatedValue
         })
       })
+
       for (const obj of toUpdate) {
         try {
           const updates = {
@@ -437,13 +423,6 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
             text_content: obj.text_content,
             font_size: obj.font_size,
             font_family: obj.font_family,
-            visible: obj.visible,
-            locked: obj.locked,
-            parent_group: obj.parent_group,
-            children_ids: obj.children_ids,
-            z: obj.z,
-            shape: obj.shape,
-            content: obj.content,
             updated_at: new Date().toISOString(),
           }
 

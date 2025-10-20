@@ -580,12 +580,12 @@ export function CollaborativeCanvas({
           console.log(`[v0] Processing operation ${i + 1}/${aiOperations.length}:`, operation.type)
 
           try {
-            const result = applyOperation(updatedObjects, operation)
+            const result = applyOperation(updatedObjects, operation, canvasId)
             if (result.error) {
               failedOperations.push(`${operation.type}: ${result.error}`)
               console.warn(`[v0] Operation failed:`, result.error)
             } else {
-              updatedObjects = result.objects
+              updatedObjects = ensureCanvasId(result.objects, canvasId)
               // Sync after each successful operation for visual feedback
               syncObjects(updatedObjects)
             }
@@ -891,7 +891,15 @@ export function CollaborativeCanvas({
   )
 }
 
-function applyOperation(objects: CanvasObject[], operation: any): { objects: CanvasObject[]; error?: string } {
+function ensureCanvasId(objects: CanvasObject[], canvasId: string): CanvasObject[] {
+  return objects.map((object) => (object.canvas_id ? object : { ...object, canvas_id: canvasId }))
+}
+
+function applyOperation(
+  objects: CanvasObject[],
+  operation: any,
+  canvasId: string,
+): { objects: CanvasObject[]; error?: string } {
   let updatedObjects = [...objects]
 
   try {
@@ -899,6 +907,8 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       case "create":
         updatedObjects.push({
           ...operation.object,
+          id: operation.object.id || crypto.randomUUID(),
+          canvas_id: operation.object.canvas_id || operation.canvasId || canvasId,
           fill_color: operation.object.fill_color || operation.object.color || "#3b82f6",
           stroke_color: operation.object.stroke_color || operation.object.color || "#1e40af",
           stroke_width: operation.object.stroke_width || 2,
@@ -908,6 +918,7 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
       case "createText": {
         const newTextObject: CanvasObject = {
           id: crypto.randomUUID(),
+          canvas_id: operation.canvasId || canvasId,
           type: "text",
           x: operation.x,
           y: operation.y,
@@ -1118,7 +1129,7 @@ function applyOperation(objects: CanvasObject[], operation: any): { objects: Can
         const childrenIds = operation.childrenIds || []
         const groupObject: CanvasObject = {
           id: groupId,
-          canvas_id: operation.canvasId,
+          canvas_id: operation.canvasId || canvasId,
           type: "group",
           x: operation.x,
           y: operation.y,

@@ -15,6 +15,11 @@ export interface Comment {
   resolved_at?: string
 }
 
+export type CommentChange =
+  | { event: "INSERT"; new: Comment }
+  | { event: "UPDATE"; new: Comment }
+  | { event: "DELETE"; old: Comment }
+
 export async function loadComments(supabase: SupabaseClient, canvasId: string): Promise<Comment[]> {
   const { data, error } = await supabase
     .from("canvas_comments")
@@ -133,7 +138,11 @@ export async function clearResolvedComments(supabase: SupabaseClient, canvasId: 
   return true
 }
 
-export function subscribeToComments(supabase: SupabaseClient, canvasId: string, callback: (comment: Comment) => void) {
+export function subscribeToComments(
+  supabase: SupabaseClient,
+  canvasId: string,
+  callback: (change: CommentChange) => void,
+) {
   const channel = supabase
     .channel(`comments:${canvasId}`)
     .on(
@@ -145,7 +154,31 @@ export function subscribeToComments(supabase: SupabaseClient, canvasId: string, 
         filter: `canvas_id=eq.${canvasId}`,
       },
       (payload) => {
-        callback(payload.new as Comment)
+        callback({ event: "INSERT", new: payload.new as Comment })
+      },
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "canvas_comments",
+        filter: `canvas_id=eq.${canvasId}`,
+      },
+      (payload) => {
+        callback({ event: "UPDATE", new: payload.new as Comment })
+      },
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "DELETE",
+        schema: "public",
+        table: "canvas_comments",
+        filter: `canvas_id=eq.${canvasId}`,
+      },
+      (payload) => {
+        callback({ event: "DELETE", old: payload.old as Comment })
       },
     )
     .subscribe()

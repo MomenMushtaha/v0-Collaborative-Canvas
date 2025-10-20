@@ -1575,7 +1575,78 @@ export async function POST(request: Request) {
               "If true and shapeIdentifier is a type, apply to ALL shapes of that type. Use this when user says 'all the triangles', 'all circles', etc.",
             ),
         }),
-        execute: async ({ shapeIdentifier, newColor, applyToAll }) => {},
+        execute: async ({ shapeIdentifier, newColor, applyToAll }) => {
+          // Normalize and validate target color
+          const normalizedNewColor = normalizeColorInput(newColor, "")
+          if (!/^#[0-9A-Fa-f]{6}$/.test(normalizedNewColor)) {
+            const err =
+              "Invalid color provided. Use a 6-digit hex code like #ff0000 or a supported color name (e.g., red, blue)."
+            validationErrors.push(`changeColor: ${err}`)
+            return { error: err }
+          }
+
+          let resolvedShapeIndices: number[] = []
+
+          if (typeof shapeIdentifier === "number" || shapeIdentifier === "selected") {
+            const indexResult = resolveShapeIndex(shapeIdentifier, selectedIndices, safeCurrentObjects.length)
+            if (!indexResult.valid) {
+              validationErrors.push(`changeColor: ${indexResult.error}`)
+              return { error: indexResult.error }
+            }
+            resolvedShapeIndices = [indexResult.shapeIndex]
+          } else if (typeof shapeIdentifier === "object" && shapeIdentifier.type) {
+            const filterColor = shapeIdentifier.color ? normalizeColorInput(shapeIdentifier.color, "") : undefined
+
+            const matchingShapes = canvasContext.filter((obj) => {
+              const typeMatches = obj.type === shapeIdentifier.type
+              if (!typeMatches) return false
+              if (!filterColor) return true
+              return obj.color === filterColor || obj.strokeColor === filterColor
+            })
+
+            if (matchingShapes.length === 0) {
+              const err = `No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`
+              validationErrors.push(`changeColor: ${err}`)
+              return { error: err }
+            }
+
+            if (matchingShapes.length > 1 && !applyToAll) {
+              const clarification = `Which ${shapeIdentifier.type}? I see ${matchingShapes
+                .map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`)
+                .join(", ")}. Or did you mean all of them?`
+              validationErrors.push(`changeColor: Ambiguous request. ${clarification}`)
+              return { error: clarification }
+            }
+
+            resolvedShapeIndices = matchingShapes.map((s) => s.index)
+          } else {
+            validationErrors.push("changeColor: Invalid shapeIdentifier provided.")
+            return { error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type." }
+          }
+
+          // Apply color change operations
+          for (const shapeIndex of resolvedShapeIndices) {
+            if (shapeIndex < 0 || shapeIndex >= safeCurrentObjects.length) {
+              const err = `Invalid shape index ${shapeIndex}. Canvas has ${safeCurrentObjects.length} shapes.`
+              validationErrors.push(`changeColor: ${err}`)
+              return { error: err }
+            }
+
+            operations.push({
+              type: "changeColor",
+              shapeIndex,
+              color: normalizedNewColor,
+            })
+          }
+
+          return {
+            success: true,
+            shapeIndices: resolvedShapeIndices,
+            newColor: normalizedNewColor,
+            count: resolvedShapeIndices.length,
+            message: `Changed color of ${resolvedShapeIndices.length} shape${resolvedShapeIndices.length > 1 ? "s" : ""}`,
+          }
+        },
       }),
     }
 

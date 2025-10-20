@@ -994,6 +994,25 @@ function applyOperation(
         break
       }
 
+      case "changeColor": {
+        const colorIndex = operation.shapeIndex === -1 ? updatedObjects.length - 1 : operation.shapeIndex
+        if (colorIndex < 0 || colorIndex >= updatedObjects.length) {
+          return {
+            objects,
+            error: `Cannot recolor shape at index ${operation.shapeIndex}. Only ${updatedObjects.length} shapes exist.`,
+          }
+        }
+        const obj = updatedObjects[colorIndex]
+        const newColor: string = operation.color
+        updatedObjects[colorIndex] = {
+          ...obj,
+          fill_color: newColor,
+          stroke_color: newColor,
+        }
+        console.log("[v0] Changed color for shape", colorIndex, "to", newColor)
+        break
+      }
+
       case "delete": {
         if (operation.all) {
           console.log("[v0] Deleting all shapes")

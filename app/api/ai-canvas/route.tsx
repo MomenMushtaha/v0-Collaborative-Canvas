@@ -258,7 +258,7 @@ export async function POST(request: Request) {
       return NAMED_COLORS[normalized] || fallback
     }
 
-    const operations: any[] = []
+    let operations: any[] = []
     const validationErrors: string[] = []
     const shapeIndexSchema = z.union([z.number(), z.literal("selected")])
 
@@ -2025,6 +2025,27 @@ Example 7: User says "create 10 circles" then "create 10 squares above them" the
     for await (const chunk of result.textStream) {
       fullText += chunk
     }
+
+    operations = operations.map((operation) => {
+      if (operation?.type === "create") {
+        return {
+          ...operation,
+          object: {
+            ...operation.object,
+            id: operation.object?.id ?? crypto.randomUUID(),
+          },
+        }
+      }
+
+      if (operation?.type === "createText") {
+        return {
+          ...operation,
+          id: operation.id ?? crypto.randomUUID(),
+        }
+      }
+
+      return operation
+    })
 
     console.log("[v0] AI SDK response received")
     console.log("[v0] Operations collected:", operations.length)

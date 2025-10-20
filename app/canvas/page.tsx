@@ -15,11 +15,13 @@ import { saveHistorySnapshot } from "@/lib/history-utils"
 import { loadComments, createComment, subscribeToComments, type Comment } from "@/lib/comments-utils"
 import { useToast } from "@/hooks/use-toast"
 import { deleteSession } from "@/lib/session-utils"
+import { useAIQueue, type AIQueueItem } from "@/hooks/use-ai-queue"
 
 export default function CanvasPage() {
   const [user, setUser] = useState<{ id: string; name: string } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [aiOperations, setAiOperations] = useState<any[]>([])
+  const [lastQueueItemId, setLastQueueItemId] = useState<string | null>(null)
   const [currentObjects, setCurrentObjects] = useState<CanvasObject[]>([])
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
   const [canUndo, setCanUndo] = useState(false)
@@ -185,10 +187,39 @@ export default function CanvasPage() {
     console.log("[v0] Paste triggered from toolbar")
   }
 
-  const handleOperations = (operations: any[], queueItemId: string) => {
-    console.log("[v0] AI operations received:", operations, "Queue ID:", queueItemId)
-    setAiOperations(operations)
-  }
+  const handleQueueOperations = useCallback(
+    (operations: any[], queueItem: AIQueueItem) => {
+      console.log(
+        "[v0] Remote AI operations received:",
+        operations.length,
+        "from queue item",
+        queueItem.id,
+        "by",
+        queueItem.user_name,
+      )
+      setLastQueueItemId(queueItem.id)
+      setAiOperations(operations)
+    },
+    [],
+  )
+
+  const { markOperationsProcessed } = useAIQueue({
+    canvasId: "default",
+    userId: user?.id ?? "",
+    onOperations: handleQueueOperations,
+  })
+
+  const handleOperations = useCallback(
+    (operations: any[], queueItemId: string) => {
+      console.log("[v0] AI operations received:", operations, "Queue ID:", queueItemId)
+      setAiOperations(operations)
+      if (queueItemId) {
+        setLastQueueItemId(queueItemId)
+        markOperationsProcessed(queueItemId)
+      }
+    },
+    [markOperationsProcessed],
+  )
 
   const handleExportPNG = () => {
     const objectsToExport =
@@ -352,7 +383,13 @@ export default function CanvasPage() {
           userId={user.id}
           userName={user.name}
           aiOperations={aiOperations}
-          onAiOperationsProcessed={() => setAiOperations([])}
+          onAiOperationsProcessed={() => {
+            if (lastQueueItemId) {
+              markOperationsProcessed(lastQueueItemId)
+              setLastQueueItemId(null)
+            }
+            setAiOperations([])
+          }}
           onObjectsChange={setCurrentObjects}
           onSelectionChange={setSelectedObjectIds}
           viewport={viewport}

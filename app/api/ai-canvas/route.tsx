@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       userName,
       viewport,
       usableCanvasDimensions,
+      queueItemId: providedQueueItemId,
     } = body
 
     console.log("[v0] Message:", message)
@@ -47,28 +48,40 @@ export async function POST(request: Request) {
       )
     }
 
-    let queueItemId: string | null = null
+    let queueItemId: string | null = providedQueueItemId || null
     if (canvasId && userId && userName) {
       try {
         const supabase = createServiceRoleClient()
-        const { data: queueItem, error: queueError } = await supabase
-          .from("ai_operations_queue")
-          .insert({
-            canvas_id: canvasId,
-            user_id: userId,
-            user_name: userName,
-            status: "processing",
-            prompt: message,
-            started_at: new Date().toISOString(),
-          })
-          .select()
-          .single()
-
-        if (queueError) {
-          console.warn("[v0] Queue management unavailable (table may not exist):", queueError.message)
+        if (queueItemId) {
+          const { error: updateErr } = await supabase
+            .from("ai_operations_queue")
+            .update({ status: "processing", started_at: new Date().toISOString() })
+            .eq("id", queueItemId)
+          if (updateErr) {
+            console.warn("[v0] Failed to set existing queue item to processing:", updateErr.message)
+          } else {
+            console.log("[v0] Using existing queued item:", queueItemId)
+          }
         } else {
-          queueItemId = queueItem.id
-          console.log("[v0] Added to queue with ID:", queueItemId)
+          const { data: queueItem, error: queueError } = await supabase
+            .from("ai_operations_queue")
+            .insert({
+              canvas_id: canvasId,
+              user_id: userId,
+              user_name: userName,
+              status: "processing",
+              prompt: message,
+              started_at: new Date().toISOString(),
+            })
+            .select()
+            .single()
+
+          if (queueError) {
+            console.warn("[v0] Queue management unavailable (table may not exist):", queueError.message)
+          } else {
+            queueItemId = queueItem.id
+            console.log("[v0] Added to queue with ID:", queueItemId)
+          }
         }
       } catch (queueErr) {
         console.warn("[v0] Queue management error (continuing without queue):", queueErr)
@@ -1006,6 +1019,150 @@ export async function POST(request: Request) {
           return { success: true, pattern, shapeIndices: resolvedShapeIndices, spacing, columns }
         },
       }),
+
+      alignShapes: tool({
+        description: "Align multiple shapes by left, right, top, bottom, center, or middle",
+        inputSchema: z.object({
+          alignment: z
+            .enum(["left", "right", "top", "bottom", "center", "middle"])
+            .describe("Alignment to apply to the shapes"),
+          shapeIdentifiers: z
+            .array(
+              z.union([
+                z.number(),
+                z.literal("selected"),
+                z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+              ]),
+            )
+            .optional()
+            .describe(
+              "Identifiers of shapes to align (empty means all shapes). Each identifier can be an index, 'selected', or an object specifying shape type and optional color.",
+            ),
+        }),
+        execute: async ({ alignment, shapeIdentifiers }) => {
+          let resolvedShapeIndices: number[] = []
+
+          if (!shapeIdentifiers || shapeIdentifiers.length === 0) {
+            resolvedShapeIndices = canvasContext.map((obj) => obj.index)
+          } else {
+            for (const identifier of shapeIdentifiers) {
+              let resolvedIndex: number | undefined
+              if (typeof identifier === "number" || identifier === "selected") {
+                const indexResult = resolveShapeIndex(identifier, selectedIndices, safeCurrentObjects.length)
+                if (!indexResult.valid) {
+                  validationErrors.push(`alignShapes: ${indexResult.error}`)
+                  return { error: indexResult.error }
+                }
+                resolvedIndex = indexResult.shapeIndex
+              } else if (typeof identifier === "object" && identifier.type) {
+                const matchingShapes = canvasContext.filter(
+                  (obj) =>
+                    obj.type === identifier.type && (!identifier.color || obj.color === normalizeColorInput(identifier.color, "")),
+                )
+                if (matchingShapes.length === 0) {
+                  const err = `No ${identifier.color ? `${identifier.color} ` : ""}${identifier.type} found.`
+                  validationErrors.push(`alignShapes: ${err}`)
+                  return { error: err }
+                } else if (matchingShapes.length > 1) {
+                  const clarification = `Which ${identifier.type}? I see ${matchingShapes
+                    .map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`)
+                    .join(", ")}.`
+                  validationErrors.push(`alignShapes: Ambiguous request for ${identifier.type}. ${clarification}`)
+                  return { error: clarification }
+                } else {
+                  resolvedIndex = matchingShapes[0].index
+                }
+              } else {
+                validationErrors.push("alignShapes: Invalid shapeIdentifier provided.")
+                return { error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type." }
+              }
+              if (resolvedIndex !== undefined) {
+                resolvedShapeIndices.push(resolvedIndex)
+              }
+            }
+            // Remove duplicates if any
+            resolvedShapeIndices = Array.from(new Set(resolvedShapeIndices))
+          }
+
+          if (resolvedShapeIndices.length < 2) {
+            return { error: "Need at least 2 shapes to align." }
+          }
+
+          operations.push({ type: "align", alignment, shapeIndices: resolvedShapeIndices })
+          return { success: true, alignment, shapeIndices: resolvedShapeIndices, count: resolvedShapeIndices.length }
+        },
+      }),
+
+      distributeShapes: tool({
+        description: "Distribute multiple shapes evenly horizontally or vertically",
+        inputSchema: z.object({
+          direction: z.enum(["horizontal", "vertical"]).describe("Distribution direction"),
+          shapeIdentifiers: z
+            .array(
+              z.union([
+                z.number(),
+                z.literal("selected"),
+                z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+              ]),
+            )
+            .optional()
+            .describe(
+              "Identifiers of shapes to distribute (empty means all shapes). Each identifier can be an index, 'selected', or an object specifying shape type and optional color.",
+            ),
+        }),
+        execute: async ({ direction, shapeIdentifiers }) => {
+          let resolvedShapeIndices: number[] = []
+
+          if (!shapeIdentifiers || shapeIdentifiers.length === 0) {
+            resolvedShapeIndices = canvasContext.map((obj) => obj.index)
+          } else {
+            for (const identifier of shapeIdentifiers) {
+              let resolvedIndex: number | undefined
+              if (typeof identifier === "number" || identifier === "selected") {
+                const indexResult = resolveShapeIndex(identifier, selectedIndices, safeCurrentObjects.length)
+                if (!indexResult.valid) {
+                  validationErrors.push(`distributeShapes: ${indexResult.error}`)
+                  return { error: indexResult.error }
+                }
+                resolvedIndex = indexResult.shapeIndex
+              } else if (typeof identifier === "object" && identifier.type) {
+                const matchingShapes = canvasContext.filter(
+                  (obj) =>
+                    obj.type === identifier.type && (!identifier.color || obj.color === normalizeColorInput(identifier.color, "")),
+                )
+                if (matchingShapes.length === 0) {
+                  const err = `No ${identifier.color ? `${identifier.color} ` : ""}${identifier.type} found.`
+                  validationErrors.push(`distributeShapes: ${err}`)
+                  return { error: err }
+                } else if (matchingShapes.length > 1) {
+                  const clarification = `Which ${identifier.type}? I see ${matchingShapes
+                    .map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`)
+                    .join(", ")}.`
+                  validationErrors.push(`distributeShapes: Ambiguous request for ${identifier.type}. ${clarification}`)
+                  return { error: clarification }
+                } else {
+                  resolvedIndex = matchingShapes[0].index
+                }
+              } else {
+                validationErrors.push("distributeShapes: Invalid shapeIdentifier provided.")
+                return { error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type." }
+              }
+              if (resolvedIndex !== undefined) {
+                resolvedShapeIndices.push(resolvedIndex)
+              }
+            }
+            // Remove duplicates if any
+            resolvedShapeIndices = Array.from(new Set(resolvedShapeIndices))
+          }
+
+          if (resolvedShapeIndices.length < 2) {
+            return { error: "Need at least 2 shapes to distribute." }
+          }
+
+          operations.push({ type: "distribute", direction, shapeIndices: resolvedShapeIndices })
+          return { success: true, direction, shapeIndices: resolvedShapeIndices, count: resolvedShapeIndices.length }
+        },
+      }),
       createLoginForm: tool({
         description:
           "Create a polished login form with title, username/password fields, and a primary action button arranged vertically.",
@@ -1575,7 +1732,78 @@ export async function POST(request: Request) {
               "If true and shapeIdentifier is a type, apply to ALL shapes of that type. Use this when user says 'all the triangles', 'all circles', etc.",
             ),
         }),
-        execute: async ({ shapeIdentifier, newColor, applyToAll }) => {},
+        execute: async ({ shapeIdentifier, newColor, applyToAll }) => {
+          // Normalize and validate target color
+          const normalizedNewColor = normalizeColorInput(newColor, "")
+          if (!/^#[0-9A-Fa-f]{6}$/.test(normalizedNewColor)) {
+            const err =
+              "Invalid color provided. Use a 6-digit hex code like #ff0000 or a supported color name (e.g., red, blue)."
+            validationErrors.push(`changeColor: ${err}`)
+            return { error: err }
+          }
+
+          let resolvedShapeIndices: number[] = []
+
+          if (typeof shapeIdentifier === "number" || shapeIdentifier === "selected") {
+            const indexResult = resolveShapeIndex(shapeIdentifier, selectedIndices, safeCurrentObjects.length)
+            if (!indexResult.valid) {
+              validationErrors.push(`changeColor: ${indexResult.error}`)
+              return { error: indexResult.error }
+            }
+            resolvedShapeIndices = [indexResult.shapeIndex]
+          } else if (typeof shapeIdentifier === "object" && shapeIdentifier.type) {
+            const filterColor = shapeIdentifier.color ? normalizeColorInput(shapeIdentifier.color, "") : undefined
+
+            const matchingShapes = canvasContext.filter((obj) => {
+              const typeMatches = obj.type === shapeIdentifier.type
+              if (!typeMatches) return false
+              if (!filterColor) return true
+              return obj.color === filterColor || obj.strokeColor === filterColor
+            })
+
+            if (matchingShapes.length === 0) {
+              const err = `No ${shapeIdentifier.color ? `${shapeIdentifier.color} ` : ""}${shapeIdentifier.type} found on the canvas.`
+              validationErrors.push(`changeColor: ${err}`)
+              return { error: err }
+            }
+
+            if (matchingShapes.length > 1 && !applyToAll) {
+              const clarification = `Which ${shapeIdentifier.type}? I see ${matchingShapes
+                .map((s, i) => `${i === 0 ? "an" : "a"} ${s.color} ${s.type}`)
+                .join(", ")}. Or did you mean all of them?`
+              validationErrors.push(`changeColor: Ambiguous request. ${clarification}`)
+              return { error: clarification }
+            }
+
+            resolvedShapeIndices = matchingShapes.map((s) => s.index)
+          } else {
+            validationErrors.push("changeColor: Invalid shapeIdentifier provided.")
+            return { error: "Invalid shapeIdentifier provided. Must be an index, 'selected', or an object with type." }
+          }
+
+          // Apply color change operations
+          for (const shapeIndex of resolvedShapeIndices) {
+            if (shapeIndex < 0 || shapeIndex >= safeCurrentObjects.length) {
+              const err = `Invalid shape index ${shapeIndex}. Canvas has ${safeCurrentObjects.length} shapes.`
+              validationErrors.push(`changeColor: ${err}`)
+              return { error: err }
+            }
+
+            operations.push({
+              type: "changeColor",
+              shapeIndex,
+              color: normalizedNewColor,
+            })
+          }
+
+          return {
+            success: true,
+            shapeIndices: resolvedShapeIndices,
+            newColor: normalizedNewColor,
+            count: resolvedShapeIndices.length,
+            message: `Changed color of ${resolvedShapeIndices.length} shape${resolvedShapeIndices.length > 1 ? "s" : ""}`,
+          }
+        },
       }),
     }
 
@@ -2084,6 +2312,22 @@ Example 7: User says "create 10 circles" then "create 10 squares above them" the
     console.error("[v0] Error type:", error?.constructor?.name)
     console.error("[v0] Error message:", error instanceof Error ? error.message : String(error))
     console.error("[v0] Error stack:", error instanceof Error ? error.stack : "No stack trace")
+
+    // Attempt to mark queue item as failed
+    try {
+      const supabase = createServiceRoleClient()
+      // We don't have direct access to the queueItemId here unless we captured it above
+      // TypeScript scope retains it; if set, update the row
+      // @ts-ignore - runtime guard below
+      if (typeof queueItemId === "string" && queueItemId.length > 0) {
+        await supabase
+          .from("ai_operations_queue")
+          .update({ status: "failed", error_message: error instanceof Error ? error.message : String(error), completed_at: new Date().toISOString() })
+          .eq("id", queueItemId)
+      }
+    } catch (queueUpdateErr) {
+      console.warn("[v0] Failed to mark queue item as failed:", queueUpdateErr)
+    }
 
     return NextResponse.json(
       {

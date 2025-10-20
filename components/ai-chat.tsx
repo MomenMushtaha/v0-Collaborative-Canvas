@@ -130,6 +130,31 @@ export function AiChat({
   viewport,
   usableCanvasDimensions,
 }: AiChatProps) {
+  // Lazy import to avoid SSR issues and to keep hook isolation
+  const [queueApi, setQueueApi] = useState<{
+    addToQueue: (prompt: string, userName: string) => Promise<{ id: string }>
+  } | null>(null)
+
+  useEffect(() => {
+    // Dynamically import to avoid circular deps at module init time
+    import("@/hooks/use-ai-queue").then((mod) => {
+      // Create a minimal facade for addToQueue without subscribing in this component
+      setQueueApi({
+        addToQueue: async (prompt: string, user: string) => {
+          // Create a temporary client instance here to avoid duplicating hook logic
+          const { createBrowserClient } = await import("@/lib/supabase/client")
+          const supabase = createBrowserClient()
+          const { data, error } = await supabase
+            .from("ai_operations_queue")
+            .insert({ canvas_id: canvasId, user_id: userId, user_name: user, status: "pending", prompt })
+            .select()
+            .single()
+          if (error) throw error
+          return { id: data!.id as string }
+        },
+      })
+    })
+  }, [canvasId, userId])
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -206,6 +231,18 @@ export function AiChat({
         }
       })
 
+      // Stage in queue (optional; fallback if not available)
+      let stagedQueueId: string | null = null
+      try {
+        if (queueApi) {
+          const staged = await queueApi.addToQueue(userMessage, userName)
+          stagedQueueId = staged.id
+          console.log("[v0] Staged AI request in queue:", stagedQueueId)
+        }
+      } catch (stageErr) {
+        console.warn("[v0] Failed to stage in queue (continuing):", stageErr)
+      }
+
       const response = await fetch("/api/ai-canvas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -220,6 +257,7 @@ export function AiChat({
           currentObjects: sanitizedObjects,
           selectedObjectIds,
           selectedObjects,
+          queueItemId: stagedQueueId,
         }),
       })
 

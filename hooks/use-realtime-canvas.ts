@@ -18,6 +18,12 @@ interface QueuedOperation {
   timestamp: number
 }
 
+interface SyncOptions {
+  broadcast?: boolean
+  persist?: boolean
+  queueOffline?: boolean
+}
+
 export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseRealtimeCanvasProps) {
   const [objects, setObjects] = useState<CanvasObject[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -481,7 +487,8 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
   )
 
   const syncObjects = useCallback(
-    async (updatedObjects: CanvasObject[]) => {
+    async (updatedObjects: CanvasObject[], options: SyncOptions = {}) => {
+      const { broadcast = true, persist = true, queueOffline = true } = options
       const broadcastStart = performance.now()
 
       const previousObjects = objectsRef.current
@@ -496,6 +503,11 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
       const channel = channelRef.current
       if (!channel || !isConnected) {
         console.log("[v0] [RECONNECT] Offline - queueing operations")
+
+        if (!queueOffline) {
+          onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
+          return
+        }
 
         const newObjects = updatedObjects.filter((object) => !previousIds.has(object.id))
         newObjects.forEach((obj) => {
@@ -534,50 +546,70 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
       const timestamp = Date.now()
 
       const newObjects = updatedObjects.filter((object) => !previousIds.has(object.id))
-      for (const obj of newObjects) {
-        lastUpdateTimestampRef.current.set(obj.id, timestamp)
-        channel.send({
-          type: "broadcast",
-          event: "object_created",
-          payload: { ...obj, _timestamp: timestamp, _source: userId },
-        })
-      }
-
       const toUpdate = updatedObjects.filter((object) => previousIds.has(object.id))
-      for (const obj of toUpdate) {
-        const existing = previousObjects.find((o) => o.id === obj.id)
-        if (existing && JSON.stringify(existing) !== JSON.stringify(obj)) {
+      const deletedIds = Array.from(previousIds).filter((id) => !updatedIds.has(id))
+
+      if (broadcast) {
+        for (const obj of newObjects) {
           lastUpdateTimestampRef.current.set(obj.id, timestamp)
           channel.send({
             type: "broadcast",
-            event: "object_updated",
+            event: "object_created",
             payload: { ...obj, _timestamp: timestamp, _source: userId },
           })
         }
+
+        for (const obj of toUpdate) {
+          const existing = previousObjects.find((o) => o.id === obj.id)
+          if (existing && JSON.stringify(existing) !== JSON.stringify(obj)) {
+            lastUpdateTimestampRef.current.set(obj.id, timestamp)
+            channel.send({
+              type: "broadcast",
+              event: "object_updated",
+              payload: { ...obj, _timestamp: timestamp, _source: userId },
+            })
+          }
+        }
+
+        for (const id of deletedIds) {
+          lastUpdateTimestampRef.current.set(id, timestamp)
+          channel.send({
+            type: "broadcast",
+            event: "object_deleted",
+            payload: { id, _timestamp: timestamp, _source: userId },
+          })
+        }
+
+        const broadcastTime = performance.now() - broadcastStart
+        console.log(
+          `[v0] [PERF] Broadcast completed in ${broadcastTime.toFixed(2)}ms (${newObjects.length + toUpdate.length + deletedIds.length} operations)`,
+        )
+      } else {
+        for (const obj of newObjects) {
+          lastUpdateTimestampRef.current.set(obj.id, timestamp)
+          persistedObjectsRef.current.set(obj.id, obj)
+        }
+
+        for (const obj of toUpdate) {
+          lastUpdateTimestampRef.current.set(obj.id, timestamp)
+          persistedObjectsRef.current.set(obj.id, obj)
+        }
+
+        for (const id of deletedIds) {
+          lastUpdateTimestampRef.current.set(id, timestamp)
+          persistedObjectsRef.current.delete(id)
+        }
       }
 
-      const deletedIds = Array.from(previousIds).filter((id) => !updatedIds.has(id))
-      for (const id of deletedIds) {
-        lastUpdateTimestampRef.current.set(id, timestamp)
-        channel.send({
-          type: "broadcast",
-          event: "object_deleted",
-          payload: { id, _timestamp: timestamp, _source: userId },
-        })
+      if (persist) {
+        if (syncTimeoutRef.current) {
+          clearTimeout(syncTimeoutRef.current)
+        }
+
+        syncTimeoutRef.current = setTimeout(() => {
+          debouncedDatabaseSync(pendingObjectsRef.current)
+        }, 300)
       }
-
-      const broadcastTime = performance.now() - broadcastStart
-      console.log(
-        `[v0] [PERF] Broadcast completed in ${broadcastTime.toFixed(2)}ms (${newObjects.length + toUpdate.length + deletedIds.length} operations)`,
-      )
-
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current)
-      }
-
-      syncTimeoutRef.current = setTimeout(() => {
-        debouncedDatabaseSync(pendingObjectsRef.current)
-      }, 300)
     },
     [debouncedDatabaseSync, isConnected, userId],
   )

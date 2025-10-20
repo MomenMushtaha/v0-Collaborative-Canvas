@@ -284,7 +284,7 @@ export function AiChat({
         className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-xl border border-border/50 bg-gradient-to-r from-blue-600 to-cyan-600 px-6 py-3 text-white shadow-xl backdrop-blur-md transition-all duration-200 hover:shadow-2xl hover:scale-105 hover:from-blue-700 hover:to-cyan-700"
       >
         <Sparkles className="h-5 w-5" />
-        <span className="font-medium">AI Assistant</span>
+        <span className="font-medium">AI Agent</span>
       </button>
     )
   }

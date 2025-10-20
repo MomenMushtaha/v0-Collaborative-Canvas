@@ -1,279 +1,336 @@
-# CollabCanvas - Real-Time Collaborative Canvas with AI Agent
+# CollabCanvas – real-time collaborative canvas with AI design partner
 
 [![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-mvp)
 [![Built with v0](https://img.shields.io/badge/Built%20with-v0.app-black?style=for-the-badge)](https://v0.app/chat/projects/NUaCCUvSMZL)
 
-A real-time collaborative canvas application with AI-powered design assistance, built with Next.js, Supabase, and the Vercel AI SDK.
+CollabCanvas is a multiplayer whiteboard experience that pairs low-latency
+collaboration with an AI assistant capable of drawing, arranging, and editing
+objects on behalf of the team. The application is built on the Next.js 15 App
+Router, streams real-time state through Supabase, and orchestrates AI-driven
+changes with the Vercel AI SDK.
 
-## Features
+> **Live deployment**: https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-mvp
 
-### Core Collaborative Features
-- **Real-time synchronization** - Sub-100ms object sync across multiple users
-- **Live cursor tracking** - See where other users are working in real-time
-- **Persistent state** - All changes automatically saved to database
-- **Connection resilience** - Automatic reconnection with operation queuing during network drops
-- **Conflict resolution** - Last-write-wins strategy with real-time broadcast
+## Quick links
 
-### Canvas Functionality
-- **Drawing tools** - Rectangle, Circle, Triangle, Line, and Text layers
-- **Transform operations** - Move, resize, and rotate objects
-- **Multi-select** - Shift-click or drag-select multiple objects
-- **Pan & Zoom** - Smooth viewport navigation with constraints
-- **Color customization** - Fill and stroke color picker with presets
-- **Layer management** - Visual layers panel with visibility, lock, and z-index control
-- **Alignment tools** - Align and distribute objects (left, right, top, bottom, center, distribute)
+- [Architecture deep dive](./docs/architecture.md)
+- [AI agent contract and tooling](./docs/ai-agent.md)
+- [Database schema and migrations](./docs/database.md)
+- [Development workflow](./docs/development.md)
+- [Performance testing notes](./PERFORMANCE_TESTING.md)
 
-### Advanced Features
-- **Undo/Redo** - Full history tracking with Ctrl+Z / Ctrl+Y support
-- **Keyboard shortcuts** - Delete, Select All, Undo, Redo
-- **Style panel** - Context-sensitive styling for selected objects
-- **Performance monitoring** - Real-time FPS tracking and sync latency logging
+## Table of contents
 
-### AI Canvas Agent
-- **Natural language commands** - Create and manipulate objects using chat
-- **8 AI commands** - getCanvasState, createShape, createText, moveShape, resizeShape, rotateShape, deleteShape, arrangeShapes
-- **Complex operations** - Multi-step layouts (grid, row, column, circle patterns)
-- **Viewport-aware positioning** - AI places objects in visible canvas area
-- **Shared AI state** - All users see AI-generated objects in real-time
+1. [Overview](#overview)
+2. [Feature highlights](#feature-highlights)
+3. [System architecture](#system-architecture)
+4. [Directory layout](#directory-layout)
+5. [Getting started](#getting-started)
+6. [Using the canvas](#using-the-canvas)
+7. [Operational notes](#operational-notes)
+8. [Deployment](#deployment)
+9. [Troubleshooting](#troubleshooting)
+10. [Contributing](#contributing)
+11. [License](#license)
 
-## Technology Stack
+## Overview
 
-- **Frontend**: Next.js 15 (App Router), React 19, TypeScript
-- **Styling**: Tailwind CSS v4, shadcn/ui components
-- **Real-time**: Supabase Realtime (WebSocket-based)
-- **Database**: Supabase PostgreSQL with Row Level Security
-- **Authentication**: Supabase Auth (email/password)
-- **AI**: Vercel AI SDK with GPT-4o-mini
-- **Deployment**: Vercel
+CollabCanvas enables remote teams to ideate together on a shared, persistent
+canvas. Pointer movements, shape edits, and AI-generated changes propagate to
+other collaborators through Supabase Realtime channels. The AI agent adds a
+natural-language interface for arranging shapes, generating layouts, and
+summarising the canvas state.
 
-## Architecture
+Key technology pillars:
 
-### Component Structure
-\`\`\`
-app/
-├── canvas/page.tsx          # Main canvas page
-├── api/ai-canvas/route.ts   # AI agent API endpoint
-components/
-├── collaborative-canvas.tsx # Main canvas orchestrator
-├── toolbar.tsx              # Drawing tools and actions
-├── layers-panel.tsx         # Layer management UI
-├── style-panel.tsx          # Color and style controls
-├── alignment-toolbar.tsx    # Alignment tools
-├── ai-chat.tsx              # AI chat interface
-├── connection-status.tsx    # Network status indicator
-hooks/
-├── use-canvas.ts            # Canvas rendering and interactions
-├── use-realtime-canvas.ts   # Real-time sync and reconnection
-├── use-history.ts           # Undo/redo command history
-├── use-keyboard-shortcuts.ts # Keyboard event handling
-lib/
-├── types.ts                 # TypeScript type definitions
-├── alignment-utils.ts       # Alignment calculation utilities
-\`\`\`
+- **Frontend** – Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4
+  and shadcn/ui primitives for the interface.
+- **Realtime data** – Supabase Realtime channels for objects, cursors, AI queue,
+  comments, and history snapshots.
+- **Persistence** – Supabase PostgreSQL with Row Level Security (RLS) enforced
+  on all tables used by the application.
+- **Authentication** – Supabase email/password and optional Google/GitHub OAuth
+  sign in flows.
+- **AI orchestration** – Vercel AI SDK streaming tool invocations to manage
+  canvas operations and recordable AI queues.
 
-### Real-Time Architecture
-1. **Broadcast-based sync** - Changes broadcast to all connected users via Supabase channels
-2. **Debounced persistence** - Local updates immediate, database writes debounced (300ms)
-3. **Separate channels** - Objects, cursors, and AI operations use dedicated channels
-4. **Operation queuing** - Operations queued during disconnect and replayed on reconnection
+## Feature highlights
 
-### AI Agent Architecture
-1. **Tool-based execution** - AI uses 8 defined tools to manipulate canvas
-2. **Viewport context** - Client sends viewport state for intelligent positioning
-3. **Shared operations queue** - AI operations broadcast to all users via `ai_operations_queue` table
-4. **Natural language processing** - GPT-4o-mini interprets user intent and generates tool calls
+### Collaboration & presence
 
-## Setup Instructions
+- Real-time object sync managed by the `useRealtimeCanvas` hook, which queues
+  mutations while offline and flushes them after reconnecting to Supabase.
+- Live cursor broadcasting and presence cleanup handled through the
+  `usePresence` hook, including duplicate session pruning and colour-coding of
+  other collaborators.
+- Supabase sessions are cleared on tab close via `/api/logout` and
+  `lib/session-utils.ts` so presence rows do not linger.
+
+### Canvas authoring
+
+- Drawing primitives for rectangles, circles, triangles, lines, freeform
+  text, and logical groups with transformation handles.
+- Grid + snap controls, pan/zoom gestures, and keyboard shortcuts (undo/redo,
+  duplicate, grouping, copy/paste) wired through dedicated hooks.
+- Alignment and distribution helpers for multi-selection, layer visibility and
+  lock toggles, and z-index ordering from the layers panel.
+- Export to PNG or SVG of either the entire drawing or the current viewport
+  selection.
+
+### AI-assisted creation
+
+- Natural-language chat powered by GPT-4o-mini through the Vercel AI SDK.
+- Tool interface exposes validated operations for manipulating shapes
+  (`getCanvasState`, `createShape`, `moveShape`, `resizeShape`, `rotateShape`,
+  `deleteShape`, `deleteShapesByType`, `deleteShapesByColor`, `arrangeShapes`)
+  alongside higher-level generators (`createText`, `createLoginForm`,
+  `createNavigationBar`, `createCardLayout`, `createDashboard`,
+  `fetchAndAnalyzeWebsite`) with strict validation, viewport awareness, and
+  shared execution context defined in
+  [`app/api/ai-canvas/route.tsx`](./app/api/ai-canvas/route.tsx).
+- The server inserts an entry into `ai_operations_queue` for observability and
+  updates it once operations are returned; the client applies the streamed
+  operations sequentially so every collaborator sees the same mutations.
+
+### Feedback & review
+
+- Inline comment pins and a dedicated comments panel for discussing areas of
+  the canvas. Comment resolution, deletion, and filtering flows are all
+  synchronised in real time.
+- Snapshot history viewer allowing collaborators to persist labelled checkpoints
+  (`canvas_history` table) and restore previous states when necessary.
+- Connection status indicator and toasts provide feedback on background work and
+  reconnection attempts.
+
+## System architecture
+
+CollabCanvas follows a client-forward architecture with thin Next.js route
+handlers and most orchestration completed in the browser. A high-level outline
+is available in [docs/architecture.md](./docs/architecture.md); notable points
+include:
+
+- **Realtime synchronisation** – Canvas objects are loaded from `canvas_objects`
+  and then synchronised via Supabase broadcast channels. Mutations are queued
+  locally when offline and flushed after reconnection.
+- **Presence** – Cursor updates are broadcast on `canvas:{id}:cursors` while a
+  `user_presence` table records the latest known state and ownership.
+- **AI agent** – AI requests are handled in `app/api/ai-canvas/route.tsx`, which
+  validates tool calls, writes queue items with a service-role Supabase client,
+  and streams back structured operations to the UI.
+- **Comments & history** – Dedicated tables (`canvas_comments`, `canvas_history`)
+  capture annotations and manual snapshots, with helper utilities for loading,
+  broadcasting, and restoring records.
+
+## Directory layout
+
+```
+app/                    # Next.js App Router routes and layouts
+├── actions/            # Server actions for authentication flows
+├── api/                # Route handlers (AI endpoint, logout)
+├── canvas/             # Authenticated canvas experience
+├── auth/               # Auth/sign-in routes
+components/             # UI components (canvas, panels, chat, shadcn/ui wrappers)
+hooks/                  # React hooks for realtime sync, presence, AI queue, history
+lib/                    # Shared utilities (Supabase clients, alignment, comments, export)
+public/                 # Static assets
+scripts/                # Supabase SQL migrations and maintenance scripts
+styles/                 # Tailwind base styles
+```
+
+## Getting started
 
 ### Prerequisites
-- Node.js 18+ and npm/yarn/pnpm
-- Supabase account
-- Vercel account (for deployment)
-- OpenAI API key (for AI features)
 
-### Local Development
+- Node.js 18+
+- pnpm 9.x (preferred) or npm/yarn
+- Supabase project with Postgres and Realtime enabled
+- Vercel account (for deployment) and OpenAI-compatible API key for the agent
 
-1. **Clone the repository**
-   \`\`\`bash
-   git clone https://github.com/your-username/v0-collaborative-canvas-mvp.git
-   cd v0-collaborative-canvas-mvp
-   \`\`\`
+### Installation
 
-2. **Install dependencies**
-   \`\`\`bash
-   npm install
-   \`\`\`
+```bash
+# Clone
+git clone https://github.com/your-username/v0-collaborative-canvas-mvp.git
+cd v0-collaborative-canvas-mvp
 
-3. **Set up Supabase**
-   - Create a new Supabase project at [supabase.com](https://supabase.com)
-   - Run the database migrations in `scripts/` folder:
-     - `001_initial_schema.sql` - Creates canvas_objects table
-     - `002_add_ai_operations_queue.sql` - Creates AI operations table
-     - `003_add_text_columns.sql` - Adds text layer support
-   - Enable Row Level Security (RLS) on all tables
+# Install dependencies
+pnpm install    # or npm install / yarn install
+```
 
-4. **Configure environment variables**
-   
-   Create a `.env.local` file with:
-   \`\`\`env
-   # Supabase
-   NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-   
-   # Development redirect URL for auth
-   NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL=http://localhost:3000
-   
-   # OpenAI (for AI agent)
-   OPENAI_API_KEY=your_openai_api_key
-   \`\`\`
+### Environment variables
 
-5. **Run the development server**
-   \`\`\`bash
-   npm run dev
-   \`\`\`
+Create `.env.local` for local development and configure the following secrets:
 
-6. **Open the app**
-   Navigate to [http://localhost:3000](http://localhost:3000)
+| Variable | Description |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key for client access |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key used by server-side queue management |
+| `NEXT_PUBLIC_SITE_URL` | (Optional) Fully qualified site URL used in OAuth callbacks |
+| `OPENAI_API_KEY` | API key for GPT-4o-mini via the Vercel AI SDK |
 
-### Database Schema
+### Database setup
 
-**canvas_objects table:**
-- `id` (uuid, primary key)
-- `canvas_id` (text) - Canvas identifier
-- `type` (text) - Object type (rectangle, circle, triangle, line, text)
-- `x`, `y` (numeric) - Position
-- `width`, `height` (numeric) - Dimensions
-- `rotation` (numeric) - Rotation angle
-- `fill_color`, `stroke_color` (text) - Colors
-- `z_index` (integer) - Layer order
-- `visible` (boolean) - Visibility state
-- `locked` (boolean) - Lock state
-- `text_content`, `font_size`, `font_family` (text) - Text properties
-- `created_at`, `updated_at` (timestamp)
+Supabase migrations live in [`scripts/`](./scripts). Run them in numerical order
+with the SQL editor or the Supabase CLI:
 
-**ai_operations_queue table:**
-- `id` (uuid, primary key)
-- `canvas_id` (text)
-- `operation_type` (text)
-- `operation_data` (jsonb)
-- `created_at` (timestamp)
+1. `01-create-tables.sql` – `canvas_objects` and `user_presence`
+2. `create_canvas_comments_table.sql` – collaborative annotations
+3. `create_canvas_history_table.sql` – snapshot history tracking
+4. `04-create-ai-queue-table.sql` – AI queue and cleanup helper
+5. `05-add-text-columns.sql` – extended text support for objects
+6. `04-enable-realtime.sql` – real-time replication configuration
+7. `create_user_sessions_table.sql` and `clear_all_sessions*.sql` – optional
+   helpers for session cleanup scripts
 
-### OAuth Setup (Optional)
+Apply policy fix-up scripts (`fix_canvas_comments_rls_*.sql`) if you run into RLS
+errors while resolving comments.
 
-To enable Google and GitHub OAuth authentication:
+### Running locally
 
-1. **Configure OAuth providers in Supabase**
-   - Go to your Supabase project dashboard
-   - Navigate to Authentication > Providers
-   - Enable Google OAuth:
-     - Add your Google Client ID and Secret
-     - Get credentials from [Google Cloud Console](https://console.cloud.google.com/)
-   - Enable GitHub OAuth:
-     - Add your GitHub Client ID and Secret
-     - Get credentials from [GitHub Developer Settings](https://github.com/settings/developers)
+```bash
+pnpm dev
+```
 
-2. **Add redirect URLs**
-   - In each OAuth provider settings, add:
-     - Development: `http://localhost:3000/auth/callback`
-     - Production: `https://your-app.vercel.app/auth/callback`
+Visit http://localhost:3000 and sign in with a Supabase user. For OAuth (Google
+or GitHub), configure provider credentials in the Supabase dashboard and ensure
+redirect URLs include `/auth/callback`.
 
-3. **Test OAuth flow**
-   - Users can now sign in with Google or GitHub buttons
-   - OAuth users are automatically created in the database
-   - User metadata (name, avatar) is pulled from OAuth provider
+### Available scripts
 
-## Usage Guide
+| Command | Description |
+| --- | --- |
+| `pnpm dev` | Run the Next.js development server |
+| `pnpm build` | Create a production build |
+| `pnpm start` | Serve the production build |
+| `pnpm lint` | Run Next.js lint checks |
 
-### Creating Objects
-1. Select a tool from the toolbar (Rectangle, Circle, Triangle, Line, Text)
-2. Click and drag on the canvas to create the object
-3. For text: Click to place, type content, click outside to finish
+## Using the canvas
 
-### Selecting and Editing
-- **Single select**: Click an object
-- **Multi-select**: Shift+click objects or drag-select with mouse
-- **Select all**: Ctrl+A (Cmd+A on Mac)
-- **Move**: Drag selected objects
-- **Resize**: Drag corner handles
-- **Rotate**: Drag rotation handle
-- **Delete**: Press Delete or Backspace
+### Creating and editing content
 
-### Styling Objects
-1. Select one or more objects
-2. Use the Style Panel (appears on right) to change colors
-3. Choose from preset colors or enter custom hex values
+1. Pick a tool from the toolbar (rectangle, circle, triangle, line, text).
+2. Drag on the canvas to create the object. Text layers prompt for content after
+   placement.
+3. Use handles to resize or rotate; drag anywhere on the selection to move.
+4. Duplicate (`Ctrl/Cmd+D`), copy/paste, or delete with keyboard shortcuts.
 
-### Layer Management
-1. Open the Layers Panel (right side)
-2. Click layers to select objects
-3. Use eye icon to toggle visibility
-4. Use lock icon to prevent editing
-5. Drag layers to reorder (z-index)
+The style panel exposes fill/stroke colours, stroke width, opacity, font
+settings, and a recent colour history sourced from `useRecentColors`.
 
-### Alignment Tools
-1. Select 2+ objects
-2. Use alignment buttons in toolbar:
-   - Align: Left, Right, Top, Bottom, Center H, Center V
-   - Distribute: Horizontal, Vertical (requires 3+ objects)
+### Layout and alignment
 
-### Undo/Redo
-- **Undo**: Ctrl+Z (Cmd+Z on Mac) or toolbar button
-- **Redo**: Ctrl+Y or Ctrl+Shift+Z (Cmd+Shift+Z on Mac) or toolbar button
+- Shift+click or marquee-select to multi-select objects.
+- Alignment buttons snap edges/centres; distribution buttons evenly space three
+  or more objects horizontally or vertically.
+- Grouping combines objects for joint transforms; groups can be nested and are
+  represented via the `children`/`parent_group` fields in `CanvasObject`.
 
-### AI Agent
-1. Click the AI button (bottom right)
-2. Type natural language commands:
-   - "Create a blue rectangle"
-   - "Add three circles in a row"
-   - "Arrange the selected objects in a grid"
-   - "Move the triangle to the center"
-3. AI generates objects in the visible canvas area
+### Grid and viewport controls
 
-## Performance Metrics
+- Toggle grid visibility, snap strength, and grid size through the grid controls
+  component. Viewport pan/zoom state is shared with the AI so generated objects
+  land inside the visible area.
 
-- **Real-time sync**: <100ms object propagation
-- **Cursor sync**: <50ms latency
-- **AI response**: 2-4s average
-- **Render performance**: 60 FPS with 100+ objects
-- **Concurrent users**: Tested with 5+ simultaneous users
-- **Network resilience**: Handles 30s+ disconnections with operation queuing
+### Collaboration workflows
+
+- Live cursors display collaborator initials and colours. Presence data is
+  periodically cleaned to avoid ghost cursors.
+- Comment mode drops pins on the canvas, with the comments panel providing
+  resolve/delete actions, filtering between active/resolved, and batch cleanup.
+- Connection status toasts alert when the realtime channel disconnects and show
+  queued operations count until reconnection succeeds.
+
+### AI agent
+
+- Launch the AI assistant from the bottom-right chat bubble.
+- Prompts can request new layouts (e.g. “arrange the selected shapes in a grid”)
+  or manipulations (“rotate the triangle 45 degrees”).
+- Each AI response lists the operations executed and updates the shared queue so
+  remote collaborators receive the same changes. Validation problems are echoed
+  back in the chat transcript for quick follow-up.
+
+Detailed contract, queue behaviour, and extension tips live in
+[docs/ai-agent.md](./docs/ai-agent.md).
+
+### History and exports
+
+- Open the History panel to capture manual checkpoints. Snapshots include a
+  description, author metadata, and the entire object array.
+- Restore snapshots to revert the canvas for all users; the pending state is
+  confirmed via `saveHistorySnapshot` utilities.
+- Export the current viewport or entire canvas to PNG/SVG with configurable
+  background colour and scale.
+
+## Operational notes
+
+### Real-time behaviour
+
+- Object mutations are debounced before persisting to the database, while local
+  state updates immediately for snappy feedback.
+- During network interruptions, operations are queued (create/update/delete) and
+  replayed with exponential backoff reconnection attempts.
+- Supabase channel naming conventions:
+  - `canvas:{id}:objects` – broadcast for object CRUD events
+  - `canvas:{id}:cursors` – live cursor updates
+  - `canvas:{id}:comments` – comment broadcasts
+  - `ai-queue:{id}` – AI queue changes via `postgres_changes`
+
+### Authentication & security
+
+- Authenticated Supabase users are required for the canvas route; unauthenticated
+  visitors are redirected to the landing page.
+- Service-role access is restricted to server-side routes (AI queue) to avoid
+  bypassing RLS from the browser.
+- Session teardown clears local storage keys, Supabase sessions, and the
+  `user_presence` record on browser unload.
+
+### Performance instrumentation
+
+- Console tracing prefixes (`[v0]`) annotate key flows (comments, history,
+  realtime, AI) to make browser debugging easier.
+- FPS and latency metrics are logged from canvas hooks so you can measure
+  rendering performance during load testing.
 
 ## Deployment
 
 ### Deploy to Vercel
 
-1. **Push to GitHub**
-   \`\`\`bash
-   git push origin main
-   \`\`\`
+1. Push the repository to GitHub (or another supported Git provider).
+2. Import the project into Vercel and supply environment variables matching
+   `.env.local`.
+3. Configure Supabase redirect URLs to include your production domain with the
+   `/auth/callback` suffix.
 
-2. **Import to Vercel**
-   - Go to [vercel.com](https://vercel.com)
-   - Import your GitHub repository
-   - Add environment variables (same as `.env.local`)
-   - Deploy
+### Supabase configuration checklist
 
-3. **Configure Supabase redirect URL**
-   - In Supabase dashboard, add your Vercel URL to allowed redirect URLs
-   - Format: `https://your-app.vercel.app/auth/callback`
+- Enable Realtime on the relevant tables (`canvas_objects`, `canvas_comments`,
+  `ai_operations_queue`, `canvas_history`).
+- Confirm Row Level Security policies exist as defined in `scripts/`.
+- Set up OAuth provider credentials (Google/GitHub) in Supabase if you plan to
+  offer social login.
+- Schedule the optional `cleanup_old_ai_operations` function via a Supabase
+  cron job to prune historical AI queue entries.
 
-### Live Demo
+## Troubleshooting
 
-**Production URL**: [https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-mvp](https://vercel.com/momenmushtahas-projects/v0-collaborative-canvas-mvp)
-
-## Development
-
-### Continue building on v0.app
-
-**Project URL**: [https://v0.app/chat/projects/NUaCCUvSMZL](https://v0.app/chat/projects/NUaCCUvSMZL)
-
-This repository automatically syncs with your v0.app deployments. Any changes made in v0 will be pushed to this repository.
+- **Missing shapes or stale data** – Ensure the Supabase Realtime config script
+  has run and that your API keys are correct in `.env.local`.
+- **AI queue stuck in “processing”** – Verify the service-role key is available
+  to the API route and that the table exists. On errors the queue row will not
+  be updated automatically, so inspect server logs and clear stale entries in
+  `ai_operations_queue` from the Supabase dashboard if required.
+- **OAuth redirect failures** – Confirm `NEXT_PUBLIC_SITE_URL` matches the domain
+  passed to Supabase and that provider redirect URLs include `/auth/callback`.
+- **Comment RLS errors** – Run the latest `fix_canvas_comments_rls_*.sql`
+  migration to align policies with the current comment workflow.
 
 ## Contributing
 
-This project was built as part of the CollabCanvas Challenge. For questions or issues, please open a GitHub issue.
+Issues and pull requests are welcome. Please read
+[docs/development.md](./docs/development.md) for local setup details, coding
+conventions, and guidance on running lint checks before opening a PR.
 
 ## License
 
-MIT License - See LICENSE file for details
+MIT License – see [LICENSE](./LICENSE) for details.

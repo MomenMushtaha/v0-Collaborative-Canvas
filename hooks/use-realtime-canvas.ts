@@ -330,15 +330,38 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
             .from("canvas_objects")
             .insert(
               newObjects.map((object) => ({
-                ...object,
+                id: object.id,
+                canvas_id: object.canvas_id,
+                type: object.type,
+                x: object.x,
+                y: object.y,
+                width: object.width,
+                height: object.height,
+                rotation: object.rotation ?? 0,
+                fill_color: object.fill_color,
+                stroke_color: object.stroke_color,
+                stroke_width: object.stroke_width ?? 1,
+                text_content: object.text_content,
+                font_size: object.font_size,
+                font_family: object.font_family,
+                visible: object.visible ?? true,
+                locked: object.locked ?? false,
+                parent_group: object.parent_group,
+                children_ids: object.children_ids ?? [],
+                z: object.z ?? 0,
+                shape: object.shape,
+                content: object.content,
                 created_by: userId,
               })),
             )
             .select()
 
           if (error) {
+            console.error("[v0] [DB] Insert error:", error)
             throw error
           }
+
+          console.log(`[v0] [DB] Successfully inserted ${newObjects.length} object(s)`)
 
           newObjects.forEach((object) => {
             const rawPersisted = inserted?.find((item) => item.id === object.id)
@@ -349,7 +372,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
             }
           })
         } catch (error) {
-          console.error("[v0] [RECONNECT] Database write failed, queueing operations")
+          console.error("[v0] [RECONNECT] Database write failed, queueing operations", error)
           newObjects.forEach((obj) => {
             operationQueueRef.current.push({
               type: "create",
@@ -358,6 +381,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
             })
           })
           onConnectionChangeRef.current?.(false, operationQueueRef.current.length)
+          return // Return early to prevent processing updates/deletes if inserts failed
         }
       }
 
@@ -423,10 +447,7 @@ export function useRealtimeCanvas({ canvasId, userId, onConnectionChange }: UseR
             updated_at: new Date().toISOString(),
           }
 
-          const { error } = await supabase
-            .from("canvas_objects")
-            .update(updates)
-            .eq("id", obj.id)
+          const { error } = await supabase.from("canvas_objects").update(updates).eq("id", obj.id)
 
           if (error) {
             throw error

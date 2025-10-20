@@ -7,7 +7,7 @@ import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
 import { useMemo, useEffect, useState, useCallback, useRef, type Dispatch, type SetStateAction } from "react"
 import type { CanvasObject } from "@/lib/types"
-import { useAIQueue } from "@/hooks/use-ai-queue"
+import { useAIQueue, type AIQueueItem } from "@/hooks/use-ai-queue"
 import { ConnectionStatus } from "@/components/connection-status"
 import { useHistory } from "@/hooks/use-history"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
@@ -122,15 +122,18 @@ export function CollaborativeCanvas({
     userColor,
   })
 
-  const { queue, isAIWorking, currentOperation, updateQueueItem } = useAIQueue({
-    canvasId,
-    userId,
-  })
+  const { queue, isAIWorking, currentOperation, updateQueueItem, completedOperations, acknowledgeCompletedOperation } =
+    useAIQueue({
+      canvasId,
+      userId,
+    })
 
   const { addCommand, undo, redo, canUndo: historyCanUndo, canRedo: historyCanRedo } = useHistory()
   const [previousObjects, setPreviousObjects] = useState<CanvasObject[]>([])
   const [newTextObjectIds, setNewTextObjectIds] = useState<Set<string>>(new Set()) // Track new text objects
   const objectsRef = useRef<CanvasObject[]>(objects)
+  const [externalAiOperations, setExternalAiOperations] = useState<AIQueueItem[]>([])
+  const processingExternalOperationsRef = useRef(false)
 
   useEffect(() => {
     objectsRef.current = objects
@@ -566,51 +569,141 @@ export function CollaborativeCanvas({
     canRedo?.(historyCanRedo)
   }, [historyCanUndo, historyCanRedo, canUndo, canRedo])
 
-  useEffect(() => {
-    if (aiOperations.length > 0) {
-      console.log("[v0] Processing AI operations:", aiOperations)
-
-      // Process operations sequentially with delays
-      const processOperationsSequentially = async () => {
-        let updatedObjects = [...objects]
-        const failedOperations: string[] = []
-
-        for (let i = 0; i < aiOperations.length; i++) {
-          const operation = aiOperations[i]
-          console.log(`[v0] Processing operation ${i + 1}/${aiOperations.length}:`, operation.type)
-
-          try {
-            const result = applyOperation(updatedObjects, operation, canvasId)
-            if (result.error) {
-              failedOperations.push(`${operation.type}: ${result.error}`)
-              console.warn(`[v0] Operation failed:`, result.error)
-            } else {
-              updatedObjects = ensureCanvasId(result.objects, canvasId)
-              // Sync after each successful operation for visual feedback
-              syncObjects(updatedObjects)
-            }
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Unknown error"
-            failedOperations.push(`${operation.type}: ${errorMsg}`)
-            console.error(`[v0] Operation error:`, error)
-          }
-
-          // Add delay between operations (except for the last one)
-          if (i < aiOperations.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 150))
-          }
-        }
-
-        if (failedOperations.length > 0) {
-          console.warn("[v0] Some operations failed:", failedOperations)
-        }
-
-        onAiOperationsProcessed?.()
+  const processOperations = useCallback(
+    async (
+      operations: any[],
+      {
+        broadcast = true,
+        persist = true,
+        delayBetween = broadcast ? 150 : 0,
+      }: { broadcast?: boolean; persist?: boolean; delayBetween?: number } = {},
+    ) => {
+      if (operations.length === 0) {
+        return
       }
 
-      processOperationsSequentially()
+      let updatedObjects = [...objectsRef.current]
+      const failedOperations: string[] = []
+
+      for (let i = 0; i < operations.length; i++) {
+        const operation = operations[i]
+        console.log(`[v0] Processing operation ${i + 1}/${operations.length}:`, operation.type)
+
+        try {
+          const result = applyOperation(updatedObjects, operation, canvasId)
+          if (result.error) {
+            failedOperations.push(`${operation.type}: ${result.error}`)
+            console.warn(`[v0] Operation failed:`, result.error)
+          } else {
+            updatedObjects = ensureCanvasId(result.objects, canvasId)
+
+            if (broadcast) {
+              await syncObjects(updatedObjects, { broadcast: true, persist, queueOffline: persist })
+              if (delayBetween > 0 && i < operations.length - 1) {
+                await new Promise((resolve) => setTimeout(resolve, delayBetween))
+              }
+            }
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : "Unknown error"
+          failedOperations.push(`${operation.type}: ${errorMsg}`)
+          console.error(`[v0] Operation error:`, error)
+        }
+      }
+
+      if (!broadcast) {
+        await syncObjects(updatedObjects, { broadcast: false, persist, queueOffline: persist })
+      }
+
+      if (failedOperations.length > 0) {
+        console.warn("[v0] Some operations failed:", failedOperations)
+      }
+    },
+    [canvasId, syncObjects],
+  )
+
+  useEffect(() => {
+    if (aiOperations.length === 0) {
+      return
     }
-  }, [aiOperations])
+
+    console.log("[v0] Processing AI operations:", aiOperations)
+
+    let cancelled = false
+
+    const run = async () => {
+      await processOperations(aiOperations)
+      if (!cancelled) {
+        onAiOperationsProcessed?.()
+      }
+    }
+
+    run()
+
+    return () => {
+      cancelled = true
+    }
+  }, [aiOperations, onAiOperationsProcessed, processOperations])
+
+  useEffect(() => {
+    if (completedOperations.length === 0) {
+      return
+    }
+
+    setExternalAiOperations((prev) => {
+      const existingIds = new Set(prev.map((item) => item.id))
+      const additions = completedOperations.filter(
+        (item) =>
+          item.user_id !== userId &&
+          Array.isArray(item.operations) &&
+          item.operations.length > 0 &&
+          !existingIds.has(item.id),
+      )
+
+      if (additions.length === 0) {
+        return prev
+      }
+
+      return [...prev, ...additions]
+    })
+
+    completedOperations.forEach((item) => {
+      acknowledgeCompletedOperation(item.id)
+    })
+  }, [completedOperations, userId, acknowledgeCompletedOperation])
+
+  useEffect(() => {
+    if (processingExternalOperationsRef.current) {
+      return
+    }
+
+    if (externalAiOperations.length === 0) {
+      return
+    }
+
+    const nextOperation = externalAiOperations[0]
+    processingExternalOperationsRef.current = true
+
+    const run = async () => {
+      try {
+        if (Array.isArray(nextOperation.operations) && nextOperation.operations.length > 0) {
+          console.log(
+            "[v0] Applying AI operations from other user:",
+            nextOperation.user_name || nextOperation.user_id,
+            nextOperation.operations.length,
+          )
+          await processOperations(nextOperation.operations, { broadcast: false, persist: false, delayBetween: 0 })
+        }
+      } catch (error) {
+        console.error("[v0] Failed to apply shared AI operations:", error)
+      } finally {
+        setExternalAiOperations((prev) => prev.filter((item) => item.id !== nextOperation.id))
+        processingExternalOperationsRef.current = false
+      }
+    }
+
+    run()
+  }, [externalAiOperations, processOperations])
 
   useEffect(() => {
     onObjectsChange?.(objects)
@@ -905,19 +998,26 @@ function applyOperation(
   try {
     switch (operation.type) {
       case "create":
-        updatedObjects.push({
+        const newObject = {
           ...operation.object,
           id: operation.object.id || crypto.randomUUID(),
           canvas_id: operation.object.canvas_id || operation.canvasId || canvasId,
           fill_color: operation.object.fill_color || operation.object.color || "#3b82f6",
           stroke_color: operation.object.stroke_color || operation.object.color || "#1e40af",
           stroke_width: operation.object.stroke_width || 2,
-        })
+        }
+
+        const existingIndex = updatedObjects.findIndex((obj) => obj.id === newObject.id)
+        if (existingIndex !== -1) {
+          updatedObjects[existingIndex] = { ...updatedObjects[existingIndex], ...newObject }
+        } else {
+          updatedObjects.push(newObject)
+        }
         break
 
       case "createText": {
         const newTextObject: CanvasObject = {
-          id: crypto.randomUUID(),
+          id: operation.id || crypto.randomUUID(),
           canvas_id: operation.canvasId || canvasId,
           type: "text",
           x: operation.x,
@@ -932,7 +1032,12 @@ function applyOperation(
           font_size: operation.fontSize || 16,
           font_family: "Arial",
         }
-        updatedObjects.push(newTextObject)
+        const existingIndex = updatedObjects.findIndex((obj) => obj.id === newTextObject.id)
+        if (existingIndex !== -1) {
+          updatedObjects[existingIndex] = { ...updatedObjects[existingIndex], ...newTextObject }
+        } else {
+          updatedObjects.push(newTextObject)
+        }
         console.log("[v0] Created text object:", operation.text)
         break
       }

@@ -2035,6 +2035,14 @@ Example 7: User says "create 10 circles" then "create 10 squares above them" the
       aiMessage += `\n\nNote: Some operations couldn't be completed:\n${validationErrors.map((e) => `• ${e}`).join("\n")}`
     }
 
+    operations.forEach((operation) => {
+      if (operation?.type === "create" && operation.object) {
+        operation.object.id = operation.object.id || crypto.randomUUID()
+      } else if (operation?.type === "createText") {
+        operation.id = operation.id || crypto.randomUUID()
+      }
+    })
+
     if (queueItemId && canvasId) {
       try {
         const supabase = createServiceRoleClient()

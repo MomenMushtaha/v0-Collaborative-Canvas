@@ -15,9 +15,9 @@ import { saveHistorySnapshot } from "@/lib/history-utils"
 import {
   loadComments,
   createComment,
-  subscribeToComments,
+  subscribeToCommentBroadcasts,
   type Comment,
-  type CommentChange,
+  type CommentBroadcast,
 } from "@/lib/comments-utils"
 import { useToast } from "@/hooks/use-toast"
 import { deleteSession } from "@/lib/session-utils"
@@ -141,7 +141,7 @@ export default function CanvasPage() {
   useEffect(() => {
     if (!user) return
 
-    console.log("[v0] [COMMENTS] Setting up real-time subscription for canvas: default")
+    console.log("[v0] [COMMENTS] Setting up broadcast subscription for canvas: default")
 
     const loadInitialComments = async () => {
       console.log("[v0] [COMMENTS] Loading initial comments...")
@@ -152,30 +152,28 @@ export default function CanvasPage() {
 
     loadInitialComments()
 
-    const unsubscribe = subscribeToComments(supabase, "default", (change: CommentChange) => {
-      console.log("[v0] [COMMENTS] Real-time event received:", change.event, change)
+    const unsubscribe = subscribeToCommentBroadcasts(supabase, "default", (broadcast: CommentBroadcast) => {
+      console.log("[v0] [COMMENTS] Broadcast received:", broadcast.type)
 
       setComments((prev) => {
-        switch (change.event) {
-          case "INSERT": {
-            const newComment = change.new
-            console.log("[v0] [COMMENTS] INSERT event - adding comment:", newComment.id)
+        switch (broadcast.type) {
+          case "comment_added": {
+            const newComment = broadcast.comment
+            console.log("[v0] [COMMENTS] Adding comment:", newComment.id)
 
             // Check if comment already exists to avoid duplicates
             const existingIndex = prev.findIndex((comment) => comment.id === newComment.id)
             if (existingIndex !== -1) {
-              console.log("[v0] [COMMENTS] Comment already exists, updating instead")
-              const updatedComments = [...prev]
-              updatedComments[existingIndex] = newComment
-              return updatedComments
+              console.log("[v0] [COMMENTS] Comment already exists, skipping")
+              return prev
             }
 
             console.log("[v0] [COMMENTS] Adding new comment to list")
             return [newComment, ...prev]
           }
-          case "UPDATE": {
-            const updatedComment = change.new
-            console.log("[v0] [COMMENTS] UPDATE event - updating comment:", updatedComment.id)
+          case "comment_updated": {
+            const updatedComment = broadcast.comment
+            console.log("[v0] [COMMENTS] Updating comment:", updatedComment.id)
 
             const existingIndex = prev.findIndex((comment) => comment.id === updatedComment.id)
             if (existingIndex === -1) {
@@ -188,25 +186,25 @@ export default function CanvasPage() {
             console.log("[v0] [COMMENTS] Comment updated successfully")
             return updatedComments
           }
-          case "DELETE": {
-            const deletedComment = change.old
-            console.log("[v0] [COMMENTS] DELETE event - removing comment:", deletedComment.id)
+          case "comment_deleted": {
+            const commentId = broadcast.commentId
+            console.log("[v0] [COMMENTS] Deleting comment:", commentId)
 
-            const filtered = prev.filter((comment) => comment.id !== deletedComment.id)
+            const filtered = prev.filter((comment) => comment.id !== commentId)
             console.log("[v0] [COMMENTS] Removed comment, new count:", filtered.length)
             return filtered
           }
           default:
-            console.warn("[v0] [COMMENTS] Unknown event type:", change)
+            console.warn("[v0] [COMMENTS] Unknown broadcast type:", broadcast)
             return prev
         }
       })
     })
 
-    console.log("[v0] [COMMENTS] Subscription established, cleanup function created")
+    console.log("[v0] [COMMENTS] Broadcast subscription established")
 
     return () => {
-      console.log("[v0] [COMMENTS] Cleaning up subscription")
+      console.log("[v0] [COMMENTS] Cleaning up broadcast subscription")
       unsubscribe()
     }
   }, [user, supabase])

@@ -39,9 +39,7 @@ export function CommentsPanel({
     comments.map((c) => ({ id: c.id, content: c.content, resolved: c.resolved })),
   )
 
-  const filteredComments = showResolved
-    ? comments.filter((c) => c.resolved) // Only show resolved comments when showResolved is true
-    : comments.filter((c) => !c.resolved)
+  const filteredComments = showResolved ? comments.filter((c) => c.resolved) : comments.filter((c) => !c.resolved)
 
   console.log(
     "[v0] Filtered comments (showResolved=" + showResolved + "):",
@@ -51,15 +49,15 @@ export function CommentsPanel({
   const handleResolve = async (commentId: string) => {
     console.log("[v0] Resolve button clicked for comment:", commentId)
     console.log("[v0] Current userId:", userId)
-    const success = await resolveComment(supabase, commentId, userId)
-    console.log("[v0] Resolve result:", success)
-    if (success) {
+    const updatedComment = await resolveComment(supabase, commentId, userId, canvasId)
+    console.log("[v0] Resolve result:", updatedComment)
+    if (updatedComment) {
       onCommentsChange()
     }
   }
 
   const handleDelete = async (commentId: string) => {
-    const success = await deleteComment(supabase, commentId)
+    const success = await deleteComment(supabase, commentId, canvasId)
     if (success) {
       onCommentsChange()
     }

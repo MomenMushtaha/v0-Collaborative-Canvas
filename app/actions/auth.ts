@@ -4,10 +4,29 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 
+async function getOrigin(): Promise<string> {
+  const headersList = await headers()
+
+  // Try multiple methods to get the origin
+  const origin = headersList.get("x-forwarded-host")
+    ? `https://${headersList.get("x-forwarded-host")}`
+    : headersList.get("origin") ||
+      headersList.get("referer")?.split("/").slice(0, 3).join("/") ||
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      ""
+
+  console.log("[v0] Detected origin:", origin)
+  console.log("[v0] Headers - x-forwarded-host:", headersList.get("x-forwarded-host"))
+  console.log("[v0] Headers - origin:", headersList.get("origin"))
+  console.log("[v0] Headers - referer:", headersList.get("referer"))
+  console.log("[v0] ENV - NEXT_PUBLIC_SITE_URL:", process.env.NEXT_PUBLIC_SITE_URL)
+
+  return origin
+}
+
 export async function signInWithGoogle() {
   const cookieStore = await cookies()
-  const headersList = await headers()
-  const origin = headersList.get("origin") || headersList.get("referer")?.split("/").slice(0, 3).join("/")
+  const origin = await getOrigin()
 
   if (!origin) {
     console.error("[v0] Could not determine origin for OAuth redirect")
@@ -33,12 +52,13 @@ export async function signInWithGoogle() {
     },
   )
 
-  console.log("[v0] Initiating Google OAuth with redirect to:", `${origin}/auth/callback`)
+  const redirectUrl = `${origin}/auth/callback`
+  console.log("[v0] Initiating Google OAuth with redirect to:", redirectUrl)
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: `${origin}/auth/callback`,
+      redirectTo: redirectUrl,
       queryParams: {
         access_type: "offline",
         prompt: "consent",
@@ -52,7 +72,7 @@ export async function signInWithGoogle() {
   }
 
   if (data.url) {
-    console.log("[v0] Redirecting to Google OAuth URL")
+    console.log("[v0] Redirecting to Google OAuth URL:", data.url)
     redirect(data.url)
   }
 
@@ -61,8 +81,7 @@ export async function signInWithGoogle() {
 
 export async function signInWithGitHub() {
   const cookieStore = await cookies()
-  const headersList = await headers()
-  const origin = headersList.get("origin") || headersList.get("referer")?.split("/").slice(0, 3).join("/")
+  const origin = await getOrigin()
 
   if (!origin) {
     console.error("[v0] Could not determine origin for OAuth redirect")
@@ -88,12 +107,13 @@ export async function signInWithGitHub() {
     },
   )
 
-  console.log("[v0] Initiating GitHub OAuth with redirect to:", `${origin}/auth/callback`)
+  const redirectUrl = `${origin}/auth/callback`
+  console.log("[v0] Initiating GitHub OAuth with redirect to:", redirectUrl)
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "github",
     options: {
-      redirectTo: `${origin}/auth/callback`,
+      redirectTo: redirectUrl,
     },
   })
 
@@ -103,7 +123,7 @@ export async function signInWithGitHub() {
   }
 
   if (data.url) {
-    console.log("[v0] Redirecting to GitHub OAuth URL")
+    console.log("[v0] Redirecting to GitHub OAuth URL:", data.url)
     redirect(data.url)
   }
 

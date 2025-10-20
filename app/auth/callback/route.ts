@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
   const origin = requestUrl.origin
 
   console.log("[v0] Auth callback triggered")
+  console.log("[v0] Origin:", origin)
   console.log("[v0] Code present:", !!code)
   console.log("[v0] Error:", error)
   console.log("[v0] Error description:", errorDescription)
@@ -72,8 +73,10 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(`${origin}/?error=session_creation_failed`)
       }
 
-      console.log("[v0] OAuth session created successfully, redirecting to canvas")
-      return NextResponse.redirect(`${origin}/canvas`)
+      const redirectUrl = `${origin}/canvas`
+      console.log("[v0] OAuth session created successfully")
+      console.log("[v0] Redirecting to:", redirectUrl)
+      return NextResponse.redirect(redirectUrl)
     }
   }
 

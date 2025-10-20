@@ -10,7 +10,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { signInWithGoogle, signInWithGitHub } from "@/app/actions/auth"
 
 export default function HomePage() {
   const [email, setEmail] = useState("")
@@ -24,19 +23,10 @@ export default function HomePage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const code = params.get("code")
     const errorParam = params.get("error")
-
-    // If there's a code parameter, redirect to the proper callback route
-    if (code) {
-      console.log("[v0] OAuth code detected on home page, redirecting to callback route")
-      window.location.href = `/auth/callback${window.location.search}`
-      return
-    }
 
     if (errorParam === "already_logged_in") {
       setError("You are already logged in on another device. Please log out from that device first.")
-      // Clear the error from URL
       window.history.replaceState({}, "", "/")
       return
     }
@@ -57,7 +47,6 @@ export default function HomePage() {
       .getUser()
       .then(({ data: { user }, error }) => {
         if (error) {
-          // User is not logged in, stay on login page
           return
         }
         if (user) {
@@ -66,7 +55,6 @@ export default function HomePage() {
       })
       .catch((error) => {
         console.error("[v0] Error checking auth on home page:", error)
-        // Stay on login page
       })
   }, [router, supabase])
 
@@ -97,7 +85,6 @@ export default function HomePage() {
 
       if (existingSession) {
         console.log("[v0] User already has active session on another device, blocking login")
-        // User is already logged in on another device with a valid session
         await supabase.auth.signOut()
         setError(
           "You are already logged in on another device. Please log out from that device first, or wait a few moments and try again.",
@@ -106,7 +93,6 @@ export default function HomePage() {
         return
       }
 
-      // Create new session record
       console.log("[v0] Creating new session record...")
       const sessionCreated = await createSession(supabase, signInData.user.id, signInData.session.access_token)
 
@@ -120,48 +106,6 @@ export default function HomePage() {
 
       console.log("[v0] Session created, redirecting to canvas")
       router.push("/canvas")
-    }
-  }
-
-  const handleGoogleSignIn = async () => {
-    setIsLoading(true)
-    setError("")
-
-    console.log("[v0] Initiating Google sign in...")
-
-    try {
-      const result = await signInWithGoogle()
-      if (result?.error) {
-        console.error("[v0] Google sign in error:", result.error)
-        setError(result.error)
-        setIsLoading(false)
-      }
-      // If successful, the server action will redirect to Google
-    } catch (error) {
-      console.error("[v0] Google sign in exception:", error)
-      setError("Failed to initiate Google sign in")
-      setIsLoading(false)
-    }
-  }
-
-  const handleGitHubSignIn = async () => {
-    setIsLoading(true)
-    setError("")
-
-    console.log("[v0] Initiating GitHub sign in...")
-
-    try {
-      const result = await signInWithGitHub()
-      if (result?.error) {
-        console.error("[v0] GitHub sign in error:", result.error)
-        setError(result.error)
-        setIsLoading(false)
-      }
-      // If successful, the server action will redirect to GitHub
-    } catch (error) {
-      console.error("[v0] GitHub sign in exception:", error)
-      setError("Failed to initiate GitHub sign in")
-      setIsLoading(false)
     }
   }
 
@@ -179,13 +123,11 @@ export default function HomePage() {
       .eq("user_id", (await supabase.auth.getSession()).data.session?.user.id || "")
       .single()
 
-    // Check if email is already registered by attempting to sign in
     const { data: signInCheck } = await supabase.auth.signInWithPassword({
       email,
       password: "dummy-password-check",
     })
 
-    // If sign in attempt doesn't return "Invalid login credentials", email exists
     if (signInCheck?.user) {
       setError("This email is already registered. Please sign in instead or use a different email.")
       setIsLoading(false)
@@ -264,57 +206,6 @@ export default function HomePage() {
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? "Signing in..." : "Sign In"}
                 </Button>
-
-                <div className="relative mt-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t border-muted-foreground" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 mt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGoogleSignIn}
-                    disabled={isLoading}
-                    className="w-full bg-transparent"
-                  >
-                    <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-                      <path
-                        fill="currentColor"
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                      />
-                    </svg>
-                    Google
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGitHubSignIn}
-                    disabled={isLoading}
-                    className="w-full bg-transparent"
-                  >
-                    <svg className="mr-2 h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-6.627-5.373-12-12-12z" />
-                    </svg>
-                    GitHub
-                  </Button>
-                </div>
               </form>
             </TabsContent>
 
@@ -357,57 +248,6 @@ export default function HomePage() {
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? "Signing up..." : "Sign Up"}
                 </Button>
-
-                <div className="relative mt-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t border-muted-foreground" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 mt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGoogleSignIn}
-                    disabled={isLoading}
-                    className="w-full bg-transparent"
-                  >
-                    <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-                      <path
-                        fill="currentColor"
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                      />
-                    </svg>
-                    Google
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGitHubSignIn}
-                    disabled={isLoading}
-                    className="w-full bg-transparent"
-                  >
-                    <svg className="mr-2 h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-                    </svg>
-                    GitHub
-                  </Button>
-                </div>
               </form>
             </TabsContent>
           </Tabs>

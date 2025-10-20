@@ -23,6 +23,7 @@ export interface CanvasObject {
   content?: string // text content for text objects
   children?: string[] // IDs of child objects in a group
   parent_group?: string // ID of parent group if this object is in a group
+  children_ids?: string[]
 }
 
 export interface UserPresence {

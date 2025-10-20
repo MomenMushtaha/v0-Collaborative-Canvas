@@ -13,21 +13,27 @@ A real-time collaborative canvas application with AI-powered design assistance, 
 - **Persistent state** - All changes automatically saved to database
 - **Connection resilience** - Automatic reconnection with operation queuing during network drops
 - **Conflict resolution** - Last-write-wins strategy with real-time broadcast
+- **Anchored comment threads** - Drop comment pins, resolve/discard them, and subscribe to live updates
+- **Canvas version history** - Capture manual or automatic snapshots, preview metadata, and restore with undo safety nets
 
 ### Canvas Functionality
 - **Drawing tools** - Rectangle, Circle, Triangle, Line, and Text layers
 - **Transform operations** - Move, resize, and rotate objects
-- **Multi-select** - Shift-click or drag-select multiple objects
+- **Multi-select & grouping** - Shift/drag select, lasso select, group/ungroup, and "select all of type" shortcuts
 - **Pan & Zoom** - Smooth viewport navigation with constraints
 - **Color customization** - Fill and stroke color picker with presets
 - **Layer management** - Visual layers panel with visibility, lock, and z-index control
-- **Alignment tools** - Align and distribute objects (left, right, top, bottom, center, distribute)
+- **Alignment tools** - Align, distribute, and reorder objects (front/back/forward/backward)
+- **Grid & snapping** - Toggle-able grid overlays with adjustable density and snapping strength
+- **Export utilities** - Export the current viewport or selection to PNG/SVG with background configuration
 
 ### Advanced Features
-- **Undo/Redo** - Full history tracking with Ctrl+Z / Ctrl+Y support
-- **Keyboard shortcuts** - Delete, Select All, Undo, Redo
+- **Undo/Redo** - Full history tracking with Ctrl+Z / Ctrl+Y support and persistent snapshot history
+- **Keyboard shortcuts** - Delete, Select All, Select All of Type, Group/Ungroup, Undo/Redo, Lasso toggle, Comment mode
 - **Style panel** - Context-sensitive styling for selected objects
+- **AI operations queue** - Serialized AI canvas actions with status tracking and replay safety
 - **Performance monitoring** - Real-time FPS tracking and sync latency logging
+- **Session hardening** - Single-session enforcement with reliable logout beacons and Supabase `user_sessions`
 
 ### AI Canvas Agent
 - **Natural language commands** - Create and manipulate objects using chat
@@ -53,22 +59,38 @@ A real-time collaborative canvas application with AI-powered design assistance, 
 app/
 ├── canvas/page.tsx          # Main canvas page
 ├── api/ai-canvas/route.ts   # AI agent API endpoint
+├── api/logout/route.ts      # Session cleanup endpoint
 components/
 ├── collaborative-canvas.tsx # Main canvas orchestrator
-├── toolbar.tsx              # Drawing tools and actions
+├── toolbar.tsx              # Drawing, selection, export, and history actions
+├── history-panel.tsx        # Snapshot browser and restore controls
+├── comments-panel.tsx       # Comment feed and moderation tools
+├── ai-chat.tsx              # AI chat interface
 ├── layers-panel.tsx         # Layer management UI
 ├── style-panel.tsx          # Color and style controls
-├── alignment-toolbar.tsx    # Alignment tools
-├── ai-chat.tsx              # AI chat interface
+├── alignment-toolbar.tsx    # Alignment tools & z-order helpers
+├── presence-panel.tsx       # Connected user list and activity
 ├── connection-status.tsx    # Network status indicator
+components/ui/               # shadcn/ui primitives
 hooks/
 ├── use-canvas.ts            # Canvas rendering and interactions
 ├── use-realtime-canvas.ts   # Real-time sync and reconnection
 ├── use-history.ts           # Undo/redo command history
 ├── use-keyboard-shortcuts.ts # Keyboard event handling
+├── use-ai-queue.ts          # AI queue subscription utilities
+├── use-presence.ts          # Presence tracking & cursor broadcasting
 lib/
 ├── types.ts                 # TypeScript type definitions
 ├── alignment-utils.ts       # Alignment calculation utilities
+├── comments-utils.ts        # Comment persistence helpers
+├── history-utils.ts         # Snapshot persistence helpers
+├── export-utils.tsx         # PNG/SVG export helpers
+├── session-utils.ts         # Single-session enforcement helpers
+├── grid-utils.ts            # Grid spacing & snapping utilities
+├── group-utils.ts           # Grouping helpers
+├── selection-utils.ts       # Selection heuristics
+├── supabase/                # Supabase client factories
+scripts/                     # SQL migrations & maintenance tasks
 \`\`\`
 
 ### Real-Time Architecture
@@ -76,11 +98,13 @@ lib/
 2. **Debounced persistence** - Local updates immediate, database writes debounced (300ms)
 3. **Separate channels** - Objects, cursors, and AI operations use dedicated channels
 4. **Operation queuing** - Operations queued during disconnect and replayed on reconnection
+5. **Comment subscriptions** - Comment inserts stream over `comments:{canvasId}` channels for instant annotations
+6. **AI queue mirroring** - `ai_operations_queue` state mirrored client-side with `useAIQueue`
 
 ### AI Agent Architecture
 1. **Tool-based execution** - AI uses 8 defined tools to manipulate canvas
 2. **Viewport context** - Client sends viewport state for intelligent positioning
-3. **Shared operations queue** - AI operations broadcast to all users via `ai_operations_queue` table
+3. **Shared operations queue** - AI operations broadcast to all users via `ai_operations_queue` table with status transitions
 4. **Natural language processing** - GPT-4o-mini interprets user intent and generates tool calls
 
 ## Setup Instructions
@@ -106,11 +130,16 @@ lib/
 
 3. **Set up Supabase**
    - Create a new Supabase project at [supabase.com](https://supabase.com)
-   - Run the database migrations in `scripts/` folder:
-     - `001_initial_schema.sql` - Creates canvas_objects table
-     - `002_add_ai_operations_queue.sql` - Creates AI operations table
-     - `003_add_text_columns.sql` - Adds text layer support
-   - Enable Row Level Security (RLS) on all tables
+   - Run the database migrations in the `scripts/` folder:
+     - `01-create-tables.sql` – Base `canvas_objects` schema and policies
+     - `05-add-text-columns.sql` – Text layer support for typography tools
+     - `04-create-ai-queue-table.sql` – AI operation queue & cleanup function
+     - `create_canvas_history_table.sql` – Snapshot storage backing the History panel
+     - `create_canvas_comments_table.sql` – Comment pins with resolve/delete policies
+     - `create_user_sessions_table.sql` – Single-session enforcement helpers
+     - `04-enable-realtime.sql` – Realtime replication setup for Supabase (if not already enabled)
+   - Apply any `fix_canvas_comments_rls_*.sql` scripts if you tweak comment policies
+   - Enable Row Level Security (RLS) on all tables (handled by the scripts above)
 
 4. **Configure environment variables**
    
@@ -152,12 +181,47 @@ lib/
 - `text_content`, `font_size`, `font_family` (text) - Text properties
 - `created_at`, `updated_at` (timestamp)
 
+**canvas_history table:**
+- `id` (uuid, primary key)
+- `canvas_id` (text) - Canvas identifier
+- `snapshot` (jsonb) - Serialized `CanvasObject[]`
+- `created_by` (uuid) - Author of the snapshot
+- `created_by_name` (text)
+- `created_at` (timestamp)
+- `description` (text)
+- `object_count` (integer)
+
+**canvas_comments table:**
+- `id` (uuid, primary key)
+- `canvas_id` (text)
+- `x`, `y` (real) - Position of the comment pin
+- `content` (text)
+- `created_by` (uuid)
+- `created_by_name` (text)
+- `created_at`, `updated_at` (timestamp)
+- `resolved` (boolean)
+- `resolved_by` (uuid)
+- `resolved_at` (timestamp)
+
 **ai_operations_queue table:**
 - `id` (uuid, primary key)
 - `canvas_id` (text)
-- `operation_type` (text)
-- `operation_data` (jsonb)
-- `created_at` (timestamp)
+- `user_id` (uuid)
+- `user_name` (text)
+- `status` (text) - `pending`, `processing`, `completed`, or `failed`
+- `prompt` (text)
+- `operations` (jsonb)
+- `error_message` (text)
+- `created_at`, `started_at`, `completed_at` (timestamp)
+
+**user_sessions table:**
+- `id` (uuid, primary key)
+- `user_id` (uuid) - References `auth.users`
+- `session_id` (text) - Supabase access token identifier
+- `device_info` (text)
+- `ip_address` (text)
+- `created_at`, `last_activity` (timestamp)
+- `one_session_per_user` unique constraint ensures a single active session per account
 
 ### OAuth Setup (Optional)
 
@@ -216,6 +280,34 @@ To enable Google and GitHub OAuth authentication:
 2. Use alignment buttons in toolbar:
    - Align: Left, Right, Top, Bottom, Center H, Center V
    - Distribute: Horizontal, Vertical (requires 3+ objects)
+
+### Grid & Snapping
+1. Open the toolbar grid menu (top bar)
+2. Toggle the grid overlay and snapping independently
+3. Adjust the grid size slider to tighten/loosen spacing
+
+### Comments & Reviews
+1. Toggle **Comment Mode** from the toolbar (or press `C`)
+2. Click on the canvas to drop a comment pin and submit feedback
+3. Resolve, delete, or filter comments from the Comments Panel (bottom left)
+4. Use the panel collapse button to reclaim screen space while keeping counts visible
+
+### Version History
+1. Open **Version History** from the toolbar clock icon
+2. Save a snapshot with an optional note (auto-snapshots also run every few minutes)
+3. Browse previous versions, preview metadata, and restore to the canvas
+4. Restores update local undo/redo stacks to ensure safe rollbacks
+
+### Exporting Artwork
+1. Select objects (or keep nothing selected to export everything)
+2. Open the **Export** dropdown in the toolbar
+3. Choose PNG or SVG – exports respect the current viewport and background color
+4. Downloaded files include a timestamped filename
+
+### Session Management & Presence
+1. Users are limited to a single active session; re-authentication elsewhere logs out older clients
+2. A background beacon hits `/api/logout` to clean up `user_sessions` when the tab closes
+3. Presence list (top left) surfaces connected collaborators with color-coded cursors
 
 ### Undo/Redo
 - **Undo**: Ctrl+Z (Cmd+Z on Mac) or toolbar button

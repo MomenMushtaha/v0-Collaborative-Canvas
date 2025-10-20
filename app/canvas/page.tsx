@@ -141,47 +141,74 @@ export default function CanvasPage() {
   useEffect(() => {
     if (!user) return
 
+    console.log("[v0] [COMMENTS] Setting up real-time subscription for canvas: default")
+
     const loadInitialComments = async () => {
+      console.log("[v0] [COMMENTS] Loading initial comments...")
       const loadedComments = await loadComments(supabase, "default")
+      console.log("[v0] [COMMENTS] Loaded", loadedComments.length, "initial comments")
       setComments(loadedComments)
     }
 
     loadInitialComments()
 
     const unsubscribe = subscribeToComments(supabase, "default", (change: CommentChange) => {
+      console.log("[v0] [COMMENTS] Real-time event received:", change.event, change)
+
       setComments((prev) => {
         switch (change.event) {
           case "INSERT": {
             const newComment = change.new
+            console.log("[v0] [COMMENTS] INSERT event - adding comment:", newComment.id)
+
+            // Check if comment already exists to avoid duplicates
             const existingIndex = prev.findIndex((comment) => comment.id === newComment.id)
             if (existingIndex !== -1) {
+              console.log("[v0] [COMMENTS] Comment already exists, updating instead")
               const updatedComments = [...prev]
               updatedComments[existingIndex] = newComment
               return updatedComments
             }
+
+            console.log("[v0] [COMMENTS] Adding new comment to list")
             return [newComment, ...prev]
           }
           case "UPDATE": {
             const updatedComment = change.new
+            console.log("[v0] [COMMENTS] UPDATE event - updating comment:", updatedComment.id)
+
             const existingIndex = prev.findIndex((comment) => comment.id === updatedComment.id)
             if (existingIndex === -1) {
-              return prev
+              console.warn("[v0] [COMMENTS] Comment not found for update, adding it")
+              return [updatedComment, ...prev]
             }
+
             const updatedComments = [...prev]
             updatedComments[existingIndex] = updatedComment
+            console.log("[v0] [COMMENTS] Comment updated successfully")
             return updatedComments
           }
           case "DELETE": {
             const deletedComment = change.old
-            return prev.filter((comment) => comment.id !== deletedComment.id)
+            console.log("[v0] [COMMENTS] DELETE event - removing comment:", deletedComment.id)
+
+            const filtered = prev.filter((comment) => comment.id !== deletedComment.id)
+            console.log("[v0] [COMMENTS] Removed comment, new count:", filtered.length)
+            return filtered
           }
           default:
+            console.warn("[v0] [COMMENTS] Unknown event type:", change)
             return prev
         }
       })
     })
 
-    return unsubscribe
+    console.log("[v0] [COMMENTS] Subscription established, cleanup function created")
+
+    return () => {
+      console.log("[v0] [COMMENTS] Cleaning up subscription")
+      unsubscribe()
+    }
   }, [user, supabase])
 
   useEffect(() => {
@@ -222,21 +249,18 @@ export default function CanvasPage() {
     console.log("[v0] Paste triggered from toolbar")
   }
 
-  const handleQueueOperations = useCallback(
-    (operations: any[], queueItem: AIQueueItem) => {
-      console.log(
-        "[v0] Remote AI operations received:",
-        operations.length,
-        "from queue item",
-        queueItem.id,
-        "by",
-        queueItem.user_name,
-      )
-      setLastQueueItemId(queueItem.id)
-      setAiOperations(operations)
-    },
-    [],
-  )
+  const handleQueueOperations = useCallback((operations: any[], queueItem: AIQueueItem) => {
+    console.log(
+      "[v0] Remote AI operations received:",
+      operations.length,
+      "from queue item",
+      queueItem.id,
+      "by",
+      queueItem.user_name,
+    )
+    setLastQueueItemId(queueItem.id)
+    setAiOperations(operations)
+  }, [])
 
   const { markOperationsProcessed } = useAIQueue({
     canvasId: "default",
@@ -354,7 +378,9 @@ export default function CanvasPage() {
   }
 
   const handleCommentsChange = async () => {
+    console.log("[v0] [COMMENTS] Manual refresh requested")
     const loadedComments = await loadComments(supabase, "default")
+    console.log("[v0] [COMMENTS] Manually loaded", loadedComments.length, "comments")
     setComments(loadedComments)
   }
 

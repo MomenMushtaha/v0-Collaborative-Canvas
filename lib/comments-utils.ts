@@ -143,6 +143,8 @@ export function subscribeToComments(
   canvasId: string,
   callback: (change: CommentChange) => void,
 ) {
+  console.log("[v0] [COMMENTS] Creating subscription channel for canvas:", canvasId)
+
   const channel = supabase
     .channel(`comments:${canvasId}`)
     .on(
@@ -154,6 +156,7 @@ export function subscribeToComments(
         filter: `canvas_id=eq.${canvasId}`,
       },
       (payload) => {
+        console.log("[v0] [COMMENTS] Received INSERT from Supabase:", payload)
         callback({ event: "INSERT", new: payload.new as Comment })
       },
     )
@@ -166,6 +169,7 @@ export function subscribeToComments(
         filter: `canvas_id=eq.${canvasId}`,
       },
       (payload) => {
+        console.log("[v0] [COMMENTS] Received UPDATE from Supabase:", payload)
         callback({ event: "UPDATE", new: payload.new as Comment })
       },
     )
@@ -178,12 +182,28 @@ export function subscribeToComments(
         filter: `canvas_id=eq.${canvasId}`,
       },
       (payload) => {
+        console.log("[v0] [COMMENTS] Received DELETE from Supabase:", payload)
         callback({ event: "DELETE", old: payload.old as Comment })
       },
     )
-    .subscribe()
+    .subscribe((status) => {
+      console.log("[v0] [COMMENTS] Subscription status changed:", status)
+
+      if (status === "SUBSCRIBED") {
+        console.log("[v0] [COMMENTS] ✅ Successfully subscribed to real-time comments")
+      } else if (status === "CHANNEL_ERROR") {
+        console.error("[v0] [COMMENTS] ❌ Channel error - subscription failed")
+      } else if (status === "TIMED_OUT") {
+        console.error("[v0] [COMMENTS] ❌ Subscription timed out")
+      } else if (status === "CLOSED") {
+        console.log("[v0] [COMMENTS] Subscription closed")
+      }
+    })
+
+  console.log("[v0] [COMMENTS] Channel created and subscribing...")
 
   return () => {
+    console.log("[v0] [COMMENTS] Unsubscribing from channel")
     supabase.removeChannel(channel)
   }
 }

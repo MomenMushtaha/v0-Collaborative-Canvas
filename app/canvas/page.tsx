@@ -12,7 +12,13 @@ import type { CanvasObject } from "@/lib/types"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { exportCanvas } from "@/lib/export-utils"
 import { saveHistorySnapshot } from "@/lib/history-utils"
-import { loadComments, createComment, subscribeToComments, type Comment } from "@/lib/comments-utils"
+import {
+  loadComments,
+  createComment,
+  subscribeToComments,
+  type Comment,
+  type CommentChange,
+} from "@/lib/comments-utils"
 import { useToast } from "@/hooks/use-toast"
 import { deleteSession } from "@/lib/session-utils"
 import { useAIQueue, type AIQueueItem } from "@/hooks/use-ai-queue"
@@ -142,12 +148,41 @@ export default function CanvasPage() {
 
     loadInitialComments()
 
-    const unsubscribe = subscribeToComments(supabase, "default", (newComment) => {
-      setComments((prev) => [newComment, ...prev])
+    const unsubscribe = subscribeToComments(supabase, "default", (change: CommentChange) => {
+      setComments((prev) => {
+        switch (change.event) {
+          case "INSERT": {
+            const newComment = change.new
+            const existingIndex = prev.findIndex((comment) => comment.id === newComment.id)
+            if (existingIndex !== -1) {
+              const updatedComments = [...prev]
+              updatedComments[existingIndex] = newComment
+              return updatedComments
+            }
+            return [newComment, ...prev]
+          }
+          case "UPDATE": {
+            const updatedComment = change.new
+            const existingIndex = prev.findIndex((comment) => comment.id === updatedComment.id)
+            if (existingIndex === -1) {
+              return prev
+            }
+            const updatedComments = [...prev]
+            updatedComments[existingIndex] = updatedComment
+            return updatedComments
+          }
+          case "DELETE": {
+            const deletedComment = change.old
+            return prev.filter((comment) => comment.id !== deletedComment.id)
+          }
+          default:
+            return prev
+        }
+      })
     })
 
     return unsubscribe
-  }, [user])
+  }, [user, supabase])
 
   useEffect(() => {
     if (!user || currentObjects.length === 0) return

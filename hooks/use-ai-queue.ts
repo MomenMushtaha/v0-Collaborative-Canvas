@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState } from "react"
 import { createBrowserClient } from "@/lib/supabase/client"
 
 export interface AIQueueItem {
@@ -26,7 +26,6 @@ export function useAIQueue({ canvasId, userId }: UseAIQueueProps) {
   const [queue, setQueue] = useState<AIQueueItem[]>([])
   const [isAIWorking, setIsAIWorking] = useState(false)
   const [currentOperation, setCurrentOperation] = useState<AIQueueItem | null>(null)
-  const [completedOperations, setCompletedOperations] = useState<AIQueueItem[]>([])
 
   useEffect(() => {
     const supabase = createBrowserClient()
@@ -78,15 +77,6 @@ export function useAIQueue({ canvasId, userId }: UseAIQueueProps) {
               setCurrentOperation(updated)
               setIsAIWorking(true)
             } else if (updated.status === "completed" || updated.status === "failed") {
-              if (updated.status === "completed" && Array.isArray(updated.operations) && updated.operations.length > 0) {
-                setCompletedOperations((prev) => {
-                  if (prev.some((item) => item.id === updated.id)) {
-                    return prev
-                  }
-                  return [...prev, updated]
-                })
-              }
-
               setQueue((prev) => prev.filter((item) => item.id !== updated.id))
               setCurrentOperation(null)
               // Check if there are more pending operations
@@ -148,17 +138,11 @@ export function useAIQueue({ canvasId, userId }: UseAIQueueProps) {
     }
   }
 
-  const acknowledgeCompletedOperation = useCallback((id: string) => {
-    setCompletedOperations((prev) => prev.filter((item) => item.id !== id))
-  }, [])
-
   return {
     queue,
     isAIWorking,
     currentOperation,
     addToQueue,
     updateQueueItem,
-    completedOperations,
-    acknowledgeCompletedOperation,
   }
 }

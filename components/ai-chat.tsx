@@ -36,6 +36,90 @@ interface OperationProgress {
   operation: string
 }
 
+function MarkdownText({ content }: { content: string }) {
+  // Split content by lines to handle lists and paragraphs
+  const lines = content.split("\n")
+  const elements: React.ReactNode[] = []
+  let currentList: string[] = []
+  let listType: "ordered" | "unordered" | null = null
+
+  const flushList = () => {
+    if (currentList.length > 0) {
+      const ListTag = listType === "ordered" ? "ol" : "ul"
+      elements.push(
+        <ListTag key={elements.length} className="list-inside space-y-1 my-2">
+          {currentList.map((item, i) => (
+            <li key={i} className="ml-2">
+              {renderInlineMarkdown(item)}
+            </li>
+          ))}
+        </ListTag>,
+      )
+      currentList = []
+      listType = null
+    }
+  }
+
+  const renderInlineMarkdown = (text: string) => {
+    // Handle bold text **text**
+    const parts = text.split(/(\*\*.*?\*\*)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={i} className="font-semibold">
+            {part.slice(2, -2)}
+          </strong>
+        )
+      }
+      return part
+    })
+  }
+
+  lines.forEach((line, index) => {
+    // Check for ordered list (1. item)
+    const orderedMatch = line.match(/^(\d+)\.\s+(.+)$/)
+    if (orderedMatch) {
+      if (listType !== "ordered") {
+        flushList()
+        listType = "ordered"
+      }
+      currentList.push(orderedMatch[2])
+      return
+    }
+
+    // Check for unordered list (- item or * item)
+    const unorderedMatch = line.match(/^[-*]\s+(.+)$/)
+    if (unorderedMatch) {
+      if (listType !== "unordered") {
+        flushList()
+        listType = "unordered"
+      }
+      currentList.push(unorderedMatch[1])
+      return
+    }
+
+    // Not a list item, flush any pending list
+    flushList()
+
+    // Regular paragraph
+    if (line.trim()) {
+      elements.push(
+        <p key={index} className="my-1">
+          {renderInlineMarkdown(line)}
+        </p>,
+      )
+    } else if (elements.length > 0) {
+      // Empty line creates spacing
+      elements.push(<div key={index} className="h-2" />)
+    }
+  })
+
+  // Flush any remaining list
+  flushList()
+
+  return <div className="space-y-1">{elements}</div>
+}
+
 export function AiChat({
   currentObjects,
   selectedObjectIds,
@@ -276,7 +360,7 @@ export function AiChat({
                   : "bg-background border border-border shadow-sm"
               }`}
             >
-              {message.content}
+              {message.role === "assistant" ? <MarkdownText content={message.content} /> : message.content}
             </div>
           </div>
         ))}

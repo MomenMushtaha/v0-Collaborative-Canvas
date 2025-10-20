@@ -1128,9 +1128,457 @@ export async function POST(request: Request) {
           return { success: true, x: finalX, y: finalY, width: cardWidth, height: cardHeight }
         },
       }),
+
+      createDashboard: tool({
+        description:
+          "Create a complete, professional dashboard layout with header, metric cards, charts, and data sections. Use this when the user asks for a dashboard, analytics view, or admin panel.",
+        inputSchema: z.object({
+          title: z.string().optional().describe("Dashboard title (e.g., 'Sales Dashboard', 'Analytics Overview')"),
+          metrics: z
+            .array(
+              z.object({
+                label: z.string().describe("Metric label (e.g., 'Total Revenue', 'Active Users')"),
+                value: z.string().describe("Metric value (e.g., '$45,231', '1,234')"),
+                trend: z.enum(["up", "down", "neutral"]).optional().describe("Trend indicator"),
+                trendValue: z.string().optional().describe("Trend percentage (e.g., '+12%', '-5%')"),
+              }),
+            )
+            .optional()
+            .describe("Array of metric cards to display (2-6 recommended)"),
+          charts: z
+            .array(
+              z.object({
+                type: z.enum(["bar", "line", "pie", "area"]).describe("Type of chart (bar, line, pie, or area chart)"),
+                title: z.string().describe("Chart title"),
+                width: z.enum(["half", "full"]).optional().describe("Chart width (half or full width)"),
+              }),
+            )
+            .optional()
+            .describe("Array of charts to include (1-4 recommended)"),
+          colorScheme: z
+            .enum(["blue", "purple", "green", "orange", "dark"])
+            .optional()
+            .describe("Color scheme for the dashboard"),
+          layout: z.enum(["modern", "classic", "minimal"]).optional().describe("Dashboard layout style"),
+        }),
+        execute: async ({ title, metrics, charts, colorScheme, layout }) => {
+          // ⭐⭐⭐ UPDATED DASHBOARD CREATION LOGIC ⭐⭐⭐
+          // Always create the dashboard immediately with sensible defaults,
+          // unless the user provides specific customization.
+
+          let dashboardTitle = title || "Dashboard"
+          let dashboardMetrics: any[] = []
+          let dashboardCharts: any[] = []
+          const scheme = colorScheme || "blue" // Default color scheme
+          const layoutStyle = layout || "modern" // Default layout
+
+          // Determine dashboard type and set defaults based on title or user input context
+          if (title?.toLowerCase().includes("sales")) {
+            dashboardTitle = title || "Sales Dashboard"
+            dashboardMetrics = metrics || [
+              { label: "Total Revenue", value: "$45,231", trend: "up", trendValue: "+12%" },
+              { label: "Total Orders", value: "1,234", trend: "up", trendValue: "+8%" },
+              { label: "Conversion Rate", value: "3.24%", trend: "down", trendValue: "-2%" },
+              { label: "Avg. Order Value", value: "$127", trend: "neutral" },
+            ]
+            dashboardCharts = charts || [
+              { type: "line", title: "Revenue Over Time", width: "full" },
+              { type: "bar", title: "Sales by Category", width: "half" },
+            ]
+          } else if (title?.toLowerCase().includes("analytics")) {
+            dashboardTitle = title || "Analytics Overview"
+            dashboardMetrics = metrics || [
+              { label: "Total Users", value: "1.5M", trend: "up", trendValue: "+15%" },
+              { label: "Active Users", value: "150K", trend: "up", trendValue: "+10%" },
+              { label: "Page Views", value: "10M", trend: "up", trendValue: "+25%" },
+              { label: "Bounce Rate", value: "45%", trend: "down", trendValue: "-5%" },
+            ]
+            dashboardCharts = charts || [
+              { type: "line", title: "Traffic Over Time", width: "full" },
+              { type: "pie", title: "Traffic Sources", width: "half" },
+            ]
+          } else if (title?.toLowerCase().includes("admin panel") || title?.toLowerCase().includes("admin dashboard")) {
+            dashboardTitle = title || "Admin Panel"
+            dashboardMetrics = metrics || [
+              { label: "Total Users", value: "2.1M", trend: "up", trendValue: "+18%" },
+              { label: "Active Sessions", value: "5K", trend: "up", trendValue: "+7%" },
+              { label: "System Load", value: "65%", trend: "neutral" },
+              { label: "Storage Used", value: "750GB", trend: "up", trendValue: "+5%" },
+            ]
+            dashboardCharts = charts || [
+              { type: "line", title: "User Activity", width: "full" },
+              { type: "bar", title: "User Distribution", width: "half" },
+            ]
+          } else if (title?.toLowerCase().includes("e-commerce")) {
+            dashboardTitle = title || "E-commerce Dashboard"
+            dashboardMetrics = metrics || [
+              { label: "Total Sales", value: "$1.2M", trend: "up", trendValue: "+14%" },
+              { label: "Total Orders", value: "25K", trend: "up", trendValue: "+11%" },
+              { label: "Total Customers", value: "50K", trend: "up", trendValue: "+9%" },
+              { label: "Revenue", value: "$980K", trend: "up", trendValue: "+13%" },
+            ]
+            dashboardCharts = charts || [
+              { type: "line", title: "Sales Trend", width: "full" },
+              { type: "bar", title: "Top Selling Products", width: "half" },
+            ]
+          } else if (!title && !metrics && !charts) {
+            // If the request is just "create a dashboard", ask for clarification
+            validationErrors.push(
+              "Dashboard type is ambiguous. Please specify the type of dashboard (e.g., 'sales dashboard', 'analytics dashboard', 'admin panel', 'e-commerce dashboard').",
+            )
+            return {
+              error:
+                "Dashboard type is ambiguous. Please specify the type of dashboard (e.g., 'sales dashboard', 'analytics dashboard', 'admin panel', 'e-commerce dashboard').",
+            }
+          } else {
+            // Fallback for generic dashboards or if specific types aren't matched
+            dashboardTitle = title || "Dashboard"
+            dashboardMetrics = metrics || [
+              { label: "Metric 1", value: "100", trend: "up", trendValue: "+10%" },
+              { label: "Metric 2", value: "200", trend: "down", trendValue: "-5%" },
+              { label: "Metric 3", value: "300", trend: "neutral" },
+              { label: "Metric 4", value: "400", trend: "up", trendValue: "+15%" },
+            ]
+            dashboardCharts = charts || [
+              { type: "line", title: "Data Trend", width: "full" },
+              { type: "bar", title: "Category Distribution", width: "half" },
+            ]
+          }
+
+          // Color schemes
+          const colorSchemes = {
+            blue: { primary: "#3b82f6", secondary: "#60a5fa", accent: "#2563eb", bg: "#eff6ff" },
+            purple: { primary: "#a855f7", secondary: "#c084fc", accent: "#9333ea", bg: "#faf5ff" },
+            green: { primary: "#22c55e", secondary: "#4ade80", accent: "#16a34a", bg: "#f0fdf4" },
+            orange: { primary: "#f97316", secondary: "#fb923c", accent: "#ea580c", bg: "#fff7ed" },
+            dark: { primary: "#1f2937", secondary: "#374151", accent: "#111827", bg: "#f9fafb" },
+          }
+
+          const colors = colorSchemes[scheme]
+
+          // Calculate layout dimensions
+          const dashboardWidth = usableArea.width * 0.9
+          const startX = usableArea.left + (usableArea.width - dashboardWidth) / 2
+          const startY = usableArea.top + 80
+
+          // Create dashboard header
+          operations.push({
+            type: "createText",
+            text: dashboardTitle,
+            x: startX + 40,
+            y: startY,
+            fontSize: 32,
+            color: "#111827",
+          })
+
+          // Create metric cards
+          const metricCardWidth = (dashboardWidth - (dashboardMetrics.length - 1) * 20) / dashboardMetrics.length
+          const metricCardHeight = 120
+          const metricsY = startY + 80
+
+          dashboardMetrics.forEach((metric, index) => {
+            const cardX = startX + index * (metricCardWidth + 20)
+
+            // Card background
+            operations.push({
+              type: "create",
+              object: {
+                id: crypto.randomUUID(),
+                type: "rectangle",
+                x: cardX,
+                y: metricsY,
+                width: metricCardWidth,
+                height: metricCardHeight,
+                rotation: 0,
+                fill_color: "#ffffff",
+                stroke_color: "#e5e7eb",
+                stroke_width: 1,
+              },
+            })
+
+            // Metric label
+            operations.push({
+              type: "createText",
+              text: metric.label,
+              x: cardX + 20,
+              y: metricsY + 20,
+              fontSize: 14,
+              color: "#6b7280",
+            })
+
+            // Metric value
+            operations.push({
+              type: "createText",
+              text: metric.value,
+              x: cardX + 20,
+              y: metricsY + 50,
+              fontSize: 28,
+              color: "#111827",
+            })
+
+            // Trend indicator
+            if (metric.trend && metric.trendValue) {
+              const trendColor = metric.trend === "up" ? "#22c55e" : metric.trend === "down" ? "#ef4444" : "#6b7280"
+              operations.push({
+                type: "createText",
+                text: metric.trendValue,
+                x: cardX + 20,
+                y: metricsY + 85,
+                fontSize: 14,
+                color: trendColor,
+              })
+            }
+          })
+
+          // Create charts
+          const chartsY = metricsY + metricCardHeight + 40
+          let currentChartX = startX
+          let currentChartY = chartsY
+
+          dashboardCharts.forEach((chart, index) => {
+            const chartWidth = chart.width === "full" ? dashboardWidth : (dashboardWidth - 20) / 2
+            const chartHeight = 300
+
+            // Chart container
+            operations.push({
+              type: "create",
+              object: {
+                id: crypto.randomUUID(),
+                type: "rectangle",
+                x: currentChartX,
+                y: currentChartY,
+                width: chartWidth,
+                height: chartHeight,
+                rotation: 0,
+                fill_color: "#ffffff",
+                stroke_color: "#e5e7eb",
+                stroke_width: 1,
+              },
+            })
+
+            // Chart title
+            operations.push({
+              type: "createText",
+              text: chart.title,
+              x: currentChartX + 20,
+              y: currentChartY + 20,
+              fontSize: 18,
+              color: "#111827",
+            })
+
+            // Chart visualization placeholder
+            const chartContentY = currentChartY + 60
+            const chartContentHeight = chartHeight - 80
+
+            if (chart.type === "bar") {
+              // Create bar chart representation
+              const barCount = 6
+              const barWidth = (chartWidth - 80) / barCount - 10
+              for (let i = 0; i < barCount; i++) {
+                const barHeight = Math.random() * chartContentHeight * 0.7 + chartContentHeight * 0.2
+                operations.push({
+                  type: "create",
+                  object: {
+                    id: crypto.randomUUID(),
+                    type: "rectangle",
+                    x: currentChartX + 40 + i * (barWidth + 10),
+                    y: currentChartY + chartHeight - 40 - barHeight / 2,
+                    width: barWidth,
+                    height: barHeight,
+                    rotation: 0,
+                    fill_color: colors.primary,
+                    stroke_color: colors.primary,
+                    stroke_width: 0,
+                  },
+                })
+              }
+            } else if (chart.type === "line") {
+              const linePoints = 8
+              const pointSpacing = (chartWidth - 80) / (linePoints - 1)
+              const baseY = currentChartY + chartHeight - 60
+
+              // Create line segments connecting data points
+              for (let i = 0; i < linePoints - 1; i++) {
+                const x1 = currentChartX + 40 + i * pointSpacing
+                const y1 = baseY - Math.random() * (chartContentHeight - 60)
+                const x2 = currentChartX + 40 + (i + 1) * pointSpacing
+                const y2 = baseY - Math.random() * (chartContentHeight - 60)
+
+                // Create line segment
+                operations.push({
+                  type: "create",
+                  object: {
+                    id: crypto.randomUUID(),
+                    type: "line",
+                    x: (x1 + x2) / 2,
+                    y: (y1 + y2) / 2,
+                    width: Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2),
+                    height: 0,
+                    rotation: Math.atan2(y2 - y1, x2 - x1),
+                    fill_color: colors.primary,
+                    stroke_color: colors.primary,
+                    stroke_width: 3,
+                  },
+                })
+
+                // Create data point circle
+                operations.push({
+                  type: "create",
+                  object: {
+                    id: crypto.randomUUID(),
+                    type: "circle",
+                    x: x1,
+                    y: y1,
+                    width: 8,
+                    height: 8,
+                    rotation: 0,
+                    fill_color: colors.primary,
+                    stroke_color: "#ffffff",
+                    stroke_width: 2,
+                  },
+                })
+              }
+
+              // Add last data point
+              const lastX = currentChartX + 40 + (linePoints - 1) * pointSpacing
+              const lastY = baseY - Math.random() * (chartContentHeight - 60)
+              operations.push({
+                type: "create",
+                object: {
+                  id: crypto.randomUUID(),
+                  type: "circle",
+                  x: lastX,
+                  y: lastY,
+                  width: 8,
+                  height: 8,
+                  rotation: 0,
+                  fill_color: colors.primary,
+                  stroke_color: "#ffffff",
+                  stroke_width: 2,
+                },
+              })
+            } else if (chart.type === "pie") {
+              // Create pie chart representation
+              operations.push({
+                type: "create",
+                object: {
+                  id: crypto.randomUUID(),
+                  type: "circle",
+                  x: currentChartX + chartWidth / 2,
+                  y: chartContentY + chartContentHeight / 2,
+                  width: Math.min(chartWidth - 80, chartContentHeight - 40),
+                  height: Math.min(chartWidth - 80, chartContentHeight - 40),
+                  rotation: 0,
+                  fill_color: colors.primary,
+                  stroke_color: colors.secondary,
+                  stroke_width: 4,
+                },
+              })
+            } else if (chart.type === "area") {
+              const areaPoints = 8
+              const pointSpacing = (chartWidth - 80) / (areaPoints - 1)
+              const baseY = currentChartY + chartHeight - 60
+
+              // Create area segments
+              for (let i = 0; i < areaPoints - 1; i++) {
+                const x1 = currentChartX + 40 + i * pointSpacing
+                const height1 = Math.random() * (chartContentHeight - 60)
+                const x2 = currentChartX + 40 + (i + 1) * pointSpacing
+                const height2 = Math.random() * (chartContentHeight - 60)
+
+                // Create area segment (trapezoid approximation)
+                const avgHeight = (height1 + height2) / 2
+                operations.push({
+                  type: "create",
+                  object: {
+                    id: crypto.randomUUID(),
+                    type: "rectangle",
+                    x: (x1 + x2) / 2,
+                    y: baseY - avgHeight / 2,
+                    width: pointSpacing,
+                    height: avgHeight,
+                    rotation: 0,
+                    fill_color: colors.bg,
+                    stroke_color: colors.primary,
+                    stroke_width: 0,
+                  },
+                })
+              }
+
+              // Add top line
+              for (let i = 0; i < areaPoints - 1; i++) {
+                const x1 = currentChartX + 40 + i * pointSpacing
+                const y1 = baseY - Math.random() * (chartContentHeight - 60)
+                const x2 = currentChartX + 40 + (i + 1) * pointSpacing
+                const y2 = baseY - Math.random() * (chartContentHeight - 60)
+
+                operations.push({
+                  type: "create",
+                  object: {
+                    id: crypto.randomUUID(),
+                    type: "line",
+                    x: (x1 + x2) / 2,
+                    y: (y1 + y2) / 2,
+                    width: Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2),
+                    height: 0,
+                    rotation: Math.atan2(y2 - y1, x2 - x1),
+                    fill_color: colors.accent,
+                    stroke_color: colors.accent,
+                    stroke_width: 2,
+                  },
+                })
+              }
+            }
+
+            // Update position for next chart
+            if (chart.width === "full") {
+              currentChartX = startX
+              currentChartY += chartHeight + 20
+            } else {
+              if (index % 2 === 0) {
+                currentChartX += chartWidth + 20
+              } else {
+                currentChartX = startX
+                currentChartY += chartHeight + 20
+              }
+            }
+          })
+
+          return {
+            success: true,
+            title: dashboardTitle,
+            metricsCount: dashboardMetrics.length,
+            chartsCount: dashboardCharts.length,
+            colorScheme: scheme,
+            layout: layoutStyle,
+            message: `Created ${dashboardTitle} with ${dashboardMetrics.length} metrics and ${dashboardCharts.length} charts`,
+          }
+        },
+      }),
+      changeColor: tool({
+        description: "Change the color of one or more existing shapes",
+        inputSchema: z.object({
+          shapeIdentifier: z
+            .union([
+              z.number(),
+              z.literal("selected"),
+              z.object({ type: z.enum(["rectangle", "circle", "triangle", "line"]), color: z.string().optional() }),
+            ])
+            .describe(
+              "Identifier for the shape(s) to recolor. Can be an index (0-based, -1 for last), 'selected', or an object specifying shape type and optional current color.",
+            ),
+          newColor: z.string().describe("New color as hex code (e.g., #ff0000 for red)"),
+          applyToAll: z
+            .boolean()
+            .optional()
+            .describe(
+              "If true and shapeIdentifier is a type, apply to ALL shapes of that type. Use this when user says 'all the triangles', 'all circles', etc.",
+            ),
+        }),
+        execute: async ({ shapeIdentifier, newColor, applyToAll }) => {},
+      }),
     }
 
-    //
     const spatialReasoningPrompt = `⭐⭐⭐ SPATIAL REASONING & RELATIVE POSITIONING ⭐⭐⭐
 
 **UNDERSTANDING SPATIAL REFERENCES:**
@@ -1143,7 +1591,7 @@ When the user mentions spatial relationships (e.g., "above the squares", "below 
 **SPATIAL REFERENCE PRIORITY:**
 When user says "create X above Y":
 1. **Y is the reference object** - Find all objects of type Y on the canvas
-2. **Calculate Y's bounding box** - Find the topmost Y position (min Y value)
+2. **Calculate Y's bounding box** - Find the topmost Y value (min Y value)
 3. **Position X above Y** - Place X at (Y's center X, Y's top Y - offset)
 4. **NEVER confuse reference objects** - If user says "above the squares", use squares as reference, NOT circles or triangles
 
@@ -1226,7 +1674,6 @@ Only ask when truly ambiguous:
 - ✅ DO ask when multiple interpretations exist: "above them" when both circles and squares were mentioned
 - ✅ DO ask when spatial relationship is unclear: "near the shapes" without specific direction
 `
-    // </CHANGE>
 
     const systemPrompt = `You are a canvas assistant that helps users create and manipulate shapes on a collaborative canvas.
 
@@ -1251,6 +1698,41 @@ Maintain a mental model of which objects the user is currently working with:
 - When user says "now double the circles" → Working set = all circles
 - When user says "reduce them to half" → Apply to current working set (circles from previous message)
 - When user says "make them red" → Apply to current working set
+
+⭐⭐⭐ DASHBOARD CREATION GUIDELINES ⭐⭐⭐
+
+When a user asks for a dashboard, analytics view, admin panel, or similar:
+
+**USE THE createDashboard TOOL IMMEDIATELY** - Create professional dashboards with sensible defaults
+
+**Default Behavior:**
+- **Always create the dashboard immediately** with default settings unless user specifies otherwise
+- **Default color scheme**: blue (professional and widely accepted)
+- **Default layout**: modern (clean and contemporary)
+- **Default metrics**: Include 4 relevant KPI cards based on dashboard type
+- **Default charts**: Include 2-3 appropriate charts based on dashboard type
+
+**Dashboard Types & Defaults:**
+- **Sales Dashboard**: Revenue, Orders, Conversion Rate, Avg Order Value + Revenue trend line + Sales by category bar chart
+- **Analytics Dashboard**: Total Users, Active Users, Page Views, Bounce Rate + Traffic over time line + Traffic sources pie chart
+- **Admin Panel**: Total Users, Active Sessions, System Load, Storage Used + Activity line chart + User distribution bar chart
+- **E-commerce Dashboard**: Total Sales, Orders, Customers, Revenue + Sales trend + Top products
+
+**Only Ask Questions When:**
+- User request is too vague (e.g., just "create a dashboard" without context)
+- User explicitly asks for customization options
+- You need to clarify the specific business domain or metrics
+
+**Customization (when user requests it):**
+- User can specify different metrics, chart types, colors, or layouts
+- Offer alternatives only if the user asks "what options do I have?"
+- Keep responses concise and create the dashboard quickly
+
+**Example Responses:**
+- User: "create a sales dashboard" → Immediately create with sales-related defaults
+- User: "build an analytics dashboard" → Immediately create with analytics defaults
+- User: "make a dashboard" → Ask: "What type of dashboard? (e.g., sales, analytics, admin, e-commerce)"
+- User: "create a dashboard with custom colors" → Ask about color preference, then create
 
 ${spatialReasoningPrompt}
 
@@ -1395,6 +1877,7 @@ AVAILABLE FUNCTIONS:
 12. createNavigationBar - Create a navigation bar with menu items
 13. createCardLayout - Create a card with media area, text, and button
 14. fetchAndAnalyzeWebsite - Fetch and analyze a website for design inspiration.
+15. createDashboard - Create a complete professional dashboard with metrics, charts, and data sections.
 
 TEXT LAYER RULES:
 - Use createText to add text layers
@@ -1646,7 +2129,6 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
   if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 20000)) {
     return { valid: false, error: "Y position must be a number between 0 and 20000." }
   }
-  // </CHANGE>
 
   if (typeof args.width !== "number" || typeof args.height !== "number") {
     return { valid: false, error: "Dimensions (width, height) must be numbers." }
@@ -1659,7 +2141,6 @@ function validateCreateShape(args: any): { valid: boolean; error?: string } {
   if (args.width > 5000 || args.height > 5000) {
     return { valid: false, error: "Dimensions cannot exceed 5000 pixels." }
   }
-  // </CHANGE>
 
   return { valid: true }
 }
@@ -1681,7 +2162,6 @@ function validateMoveShape(
   if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 20000)) {
     return { valid: false, error: "Y position must be a number between 0 and 20000." }
   }
-  // </CHANGE>
 
   if (args.deltaX !== undefined && typeof args.deltaX !== "number") {
     return { valid: false, error: "deltaX must be a number." }
@@ -1718,7 +2198,6 @@ function validateResizeShape(
   if (args.height !== undefined && (typeof args.height !== "number" || args.height <= 0 || args.height > 5000)) {
     return { valid: false, error: "Height must be a positive number not exceeding 5000." }
   }
-  // </CHANGE>
 
   if (args.scale !== undefined && (typeof args.scale !== "number" || args.scale <= 0 || args.scale > 10)) {
     return { valid: false, error: "Scale must be a positive number between 0 and 10." }
@@ -1812,7 +2291,6 @@ function validateCreateText(args: any): { valid: boolean; error?: string } {
   if (args.y !== undefined && (typeof args.y !== "number" || args.y < 0 || args.y > 20000)) {
     return { valid: false, error: "Y position must be a number between 0 and 20000." }
   }
-  // </CHANGE>
 
   if (args.fontSize !== undefined && (typeof args.fontSize !== "number" || args.fontSize <= 0)) {
     return { valid: false, error: "Font size must be a positive number." }

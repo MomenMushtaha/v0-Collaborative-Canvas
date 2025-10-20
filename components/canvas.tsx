@@ -291,14 +291,11 @@ export function Canvas({
   const commentInputStyle: CSSProperties | undefined = useMemo(() => {
     if (!commentDraft) return undefined
 
-    const scaledZoomX = viewportZoom * canvasMetrics.scaleX
-    const scaledZoomY = viewportZoom * canvasMetrics.scaleY
-
     return {
       left: `${canvasMetrics.offsetX + (viewportX + commentDraft.x * viewportZoom) * canvasMetrics.scaleX}px`,
       top: `${canvasMetrics.offsetY + (viewportY + commentDraft.y * viewportZoom) * canvasMetrics.scaleY}px`,
-      width: `${250 * scaledZoomX}px`,
-      minHeight: `${80 * scaledZoomY}px`,
+      width: `300px`,
+      minHeight: `140px`,
     }
   }, [canvasMetrics, commentDraft, viewportX, viewportY, viewportZoom])
 

@@ -12,7 +12,13 @@ import type { CanvasObject } from "@/lib/types"
 import type { AlignmentType, DistributeType } from "@/lib/alignment-utils"
 import { exportCanvas } from "@/lib/export-utils"
 import { saveHistorySnapshot } from "@/lib/history-utils"
-import { loadComments, createComment, subscribeToComments, type Comment } from "@/lib/comments-utils"
+import {
+  loadComments,
+  createComment,
+  subscribeToComments,
+  type Comment,
+  type CommentRealtimeEvent,
+} from "@/lib/comments-utils"
 import { useToast } from "@/hooks/use-toast"
 import { deleteSession } from "@/lib/session-utils"
 import { useAIQueue, type AIQueueItem } from "@/hooks/use-ai-queue"
@@ -142,8 +148,32 @@ export default function CanvasPage() {
 
     loadInitialComments()
 
-    const unsubscribe = subscribeToComments(supabase, "default", (newComment) => {
-      setComments((prev) => [newComment, ...prev])
+    const unsubscribe = subscribeToComments(supabase, "default", (event: CommentRealtimeEvent) => {
+      setComments((prev) => {
+        switch (event.type) {
+          case "INSERT": {
+            const existingIndex = prev.findIndex((comment) => comment.id === event.comment.id)
+
+            if (existingIndex !== -1) {
+              const updatedComments = [...prev]
+              updatedComments[existingIndex] = event.comment
+              return updatedComments
+            }
+
+            return [event.comment, ...prev]
+          }
+          case "UPDATE": {
+            return prev.map((comment) =>
+              comment.id === event.comment.id ? { ...comment, ...event.comment } : comment,
+            )
+          }
+          case "DELETE": {
+            return prev.filter((comment) => comment.id !== event.comment.id)
+          }
+          default:
+            return prev
+        }
+      })
     })
 
     return unsubscribe

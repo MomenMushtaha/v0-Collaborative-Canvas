@@ -133,7 +133,16 @@ export async function clearResolvedComments(supabase: SupabaseClient, canvasId: 
   return true
 }
 
-export function subscribeToComments(supabase: SupabaseClient, canvasId: string, callback: (comment: Comment) => void) {
+export type CommentRealtimeEvent = {
+  type: "INSERT" | "UPDATE" | "DELETE"
+  comment: Comment
+}
+
+export function subscribeToComments(
+  supabase: SupabaseClient,
+  canvasId: string,
+  callback: (event: CommentRealtimeEvent) => void,
+) {
   const channel = supabase
     .channel(`comments:${canvasId}`)
     .on(
@@ -145,7 +154,40 @@ export function subscribeToComments(supabase: SupabaseClient, canvasId: string, 
         filter: `canvas_id=eq.${canvasId}`,
       },
       (payload) => {
-        callback(payload.new as Comment)
+        callback({
+          type: "INSERT",
+          comment: payload.new as Comment,
+        })
+      },
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "canvas_comments",
+        filter: `canvas_id=eq.${canvasId}`,
+      },
+      (payload) => {
+        callback({
+          type: "UPDATE",
+          comment: payload.new as Comment,
+        })
+      },
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "DELETE",
+        schema: "public",
+        table: "canvas_comments",
+        filter: `canvas_id=eq.${canvasId}`,
+      },
+      (payload) => {
+        callback({
+          type: "DELETE",
+          comment: payload.old as Comment,
+        })
       },
     )
     .subscribe()

@@ -7,7 +7,6 @@ import { useRealtimeCanvas } from "@/hooks/use-realtime-canvas"
 import { usePresence } from "@/hooks/use-presence"
 import { useMemo, useEffect, useState, useCallback, useRef, type Dispatch, type SetStateAction } from "react"
 import type { CanvasObject } from "@/lib/types"
-import { useAIQueue } from "@/hooks/use-ai-queue"
 import { ConnectionStatus } from "@/components/connection-status"
 import { useHistory } from "@/hooks/use-history"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
@@ -120,11 +119,6 @@ export function CollaborativeCanvas({
     userId,
     userName,
     userColor,
-  })
-
-  const { queue, isAIWorking, currentOperation, updateQueueItem } = useAIQueue({
-    canvasId,
-    userId,
   })
 
   const { addCommand, undo, redo, canUndo: historyCanUndo, canRedo: historyCanRedo } = useHistory()
@@ -917,7 +911,7 @@ function applyOperation(
 
       case "createText": {
         const newTextObject: CanvasObject = {
-          id: crypto.randomUUID(),
+          id: operation.id || crypto.randomUUID(),
           canvas_id: operation.canvasId || canvasId,
           type: "text",
           x: operation.x,

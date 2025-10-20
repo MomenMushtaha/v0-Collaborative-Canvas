@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { createBrowserClient } from "@/lib/supabase/client"
 
 export interface AIQueueItem {
@@ -20,12 +20,29 @@ export interface AIQueueItem {
 interface UseAIQueueProps {
   canvasId: string
   userId: string
+  onOperations?: (operations: any[], queueItem: AIQueueItem) => void
 }
 
-export function useAIQueue({ canvasId, userId }: UseAIQueueProps) {
+export function useAIQueue({ canvasId, userId, onOperations }: UseAIQueueProps) {
   const [queue, setQueue] = useState<AIQueueItem[]>([])
   const [isAIWorking, setIsAIWorking] = useState(false)
   const [currentOperation, setCurrentOperation] = useState<AIQueueItem | null>(null)
+  const processedQueueItemsRef = useRef<Set<string>>(new Set())
+  const onOperationsRef = useRef<UseAIQueueProps["onOperations"]>()
+  const currentOperationRef = useRef<AIQueueItem | null>(null)
+
+  useEffect(() => {
+    onOperationsRef.current = onOperations
+  }, [onOperations])
+
+  useEffect(() => {
+    currentOperationRef.current = currentOperation
+  }, [currentOperation])
+
+  const markOperationsProcessed = useCallback((queueItemId?: string | null) => {
+    if (!queueItemId) return
+    processedQueueItemsRef.current.add(queueItemId)
+  }, [])
 
   useEffect(() => {
     const supabase = createBrowserClient()
@@ -85,9 +102,19 @@ export function useAIQueue({ canvasId, userId }: UseAIQueueProps) {
                 return prev
               })
             }
+
+            if (
+              updated.status === "completed" &&
+              Array.isArray(updated.operations) &&
+              updated.operations.length > 0 &&
+              !processedQueueItemsRef.current.has(updated.id)
+            ) {
+              processedQueueItemsRef.current.add(updated.id)
+              onOperationsRef.current?.(updated.operations, updated)
+            }
           } else if (payload.eventType === "DELETE") {
             setQueue((prev) => prev.filter((item) => item.id !== payload.old.id))
-            if (currentOperation?.id === payload.old.id) {
+            if (currentOperationRef.current?.id === payload.old.id) {
               setCurrentOperation(null)
             }
             setQueue((prev) => {
@@ -144,5 +171,6 @@ export function useAIQueue({ canvasId, userId }: UseAIQueueProps) {
     currentOperation,
     addToQueue,
     updateQueueItem,
+    markOperationsProcessed,
   }
 }

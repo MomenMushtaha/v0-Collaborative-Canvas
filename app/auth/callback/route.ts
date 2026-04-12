@@ -11,14 +11,7 @@ export async function GET(request: NextRequest) {
   const errorDescription = requestUrl.searchParams.get("error_description")
   const origin = requestUrl.origin
 
-  console.log("[v0] Auth callback triggered")
-  console.log("[v0] Origin:", origin)
-  console.log("[v0] Code present:", !!code)
-  console.log("[v0] Error:", error)
-  console.log("[v0] Error description:", errorDescription)
-
   if (error) {
-    console.error("[v0] OAuth provider error:", error, errorDescription)
     return NextResponse.redirect(`${origin}/?error=${encodeURIComponent(errorDescription || error)}`)
   }
 
@@ -35,51 +28,38 @@ export async function GET(request: NextRequest) {
           setAll(cookiesToSet) {
             try {
               cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-            } catch (error) {
-              console.error("[v0] Error setting cookies in callback:", error)
+            } catch {
+              // Cookie setting can fail in certain contexts
             }
           },
         },
       },
     )
 
-    console.log("[v0] Exchanging code for session...")
     const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
 
     if (exchangeError) {
-      console.error("[v0] Error exchanging code for session:", exchangeError)
       return NextResponse.redirect(`${origin}/?error=${encodeURIComponent(exchangeError.message)}`)
     }
 
     if (data.user && data.session) {
-      console.log("[v0] Session obtained for user:", data.user.id)
-      console.log("[v0] User email:", data.user.email)
-      console.log("[v0] Auth provider:", data.user.app_metadata.provider)
-
       const existingSession = await checkExistingSession(supabase, data.user.id)
 
       if (existingSession) {
-        console.log("[v0] User already has active session, blocking login")
         await supabase.auth.signOut()
         return NextResponse.redirect(`${origin}/?error=already_logged_in`)
       }
 
-      console.log("[v0] Creating new session record...")
       const sessionCreated = await createSession(supabase, data.user.id, data.session.access_token)
 
       if (!sessionCreated) {
-        console.error("[v0] Failed to create session record")
         await supabase.auth.signOut()
         return NextResponse.redirect(`${origin}/?error=session_creation_failed`)
       }
 
-      const redirectUrl = `${origin}/canvas`
-      console.log("[v0] OAuth session created successfully")
-      console.log("[v0] Redirecting to:", redirectUrl)
-      return NextResponse.redirect(redirectUrl)
+      return NextResponse.redirect(`${origin}/canvas`)
     }
   }
 
-  console.log("[v0] No code or session data, redirecting to home")
   return NextResponse.redirect(`${origin}/?error=no_code`)
 }

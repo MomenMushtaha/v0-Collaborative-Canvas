@@ -7,21 +7,17 @@ import { redirect } from "next/navigation"
 async function getOrigin(): Promise<string> {
   const headersList = await headers()
 
-  // Try multiple methods to get the origin
-  const origin = headersList.get("x-forwarded-host")
-    ? `https://${headersList.get("x-forwarded-host")}`
-    : headersList.get("origin") ||
-      headersList.get("referer")?.split("/").slice(0, 3).join("/") ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      ""
+  const forwardedHost = headersList.get("x-forwarded-host")
+  if (forwardedHost) {
+    return `https://${forwardedHost}`
+  }
 
-  console.log("[v0] Detected origin:", origin)
-  console.log("[v0] Headers - x-forwarded-host:", headersList.get("x-forwarded-host"))
-  console.log("[v0] Headers - origin:", headersList.get("origin"))
-  console.log("[v0] Headers - referer:", headersList.get("referer"))
-  console.log("[v0] ENV - NEXT_PUBLIC_SITE_URL:", process.env.NEXT_PUBLIC_SITE_URL)
+  const origin = headersList.get("origin")
+  if (origin) {
+    return origin
+  }
 
-  return origin
+  return process.env.NEXT_PUBLIC_SITE_URL || ""
 }
 
 export async function signInWithGoogle() {
@@ -29,7 +25,6 @@ export async function signInWithGoogle() {
   const origin = await getOrigin()
 
   if (!origin) {
-    console.error("[v0] Could not determine origin for OAuth redirect")
     return { error: "Could not determine origin" }
   }
 
@@ -45,7 +40,7 @@ export async function signInWithGoogle() {
           try {
             cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
           } catch (error) {
-            console.error("[v0] Error setting cookies:", error)
+            // Cookie setting can fail in certain contexts
           }
         },
       },
@@ -53,7 +48,6 @@ export async function signInWithGoogle() {
   )
 
   const redirectUrl = `${origin}/auth/callback`
-  console.log("[v0] Initiating Google OAuth with redirect to:", redirectUrl)
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
@@ -67,12 +61,10 @@ export async function signInWithGoogle() {
   })
 
   if (error) {
-    console.error("[v0] Google OAuth error:", error)
     return { error: error.message }
   }
 
   if (data.url) {
-    console.log("[v0] Redirecting to Google OAuth URL:", data.url)
     redirect(data.url)
   }
 
@@ -84,7 +76,6 @@ export async function signInWithGitHub() {
   const origin = await getOrigin()
 
   if (!origin) {
-    console.error("[v0] Could not determine origin for OAuth redirect")
     return { error: "Could not determine origin" }
   }
 
@@ -100,7 +91,7 @@ export async function signInWithGitHub() {
           try {
             cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
           } catch (error) {
-            console.error("[v0] Error setting cookies:", error)
+            // Cookie setting can fail in certain contexts
           }
         },
       },
@@ -108,7 +99,6 @@ export async function signInWithGitHub() {
   )
 
   const redirectUrl = `${origin}/auth/callback`
-  console.log("[v0] Initiating GitHub OAuth with redirect to:", redirectUrl)
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "github",
@@ -118,12 +108,10 @@ export async function signInWithGitHub() {
   })
 
   if (error) {
-    console.error("[v0] GitHub OAuth error:", error)
     return { error: error.message }
   }
 
   if (data.url) {
-    console.log("[v0] Redirecting to GitHub OAuth URL:", data.url)
     redirect(data.url)
   }
 

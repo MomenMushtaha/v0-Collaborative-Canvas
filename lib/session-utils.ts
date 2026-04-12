@@ -26,31 +26,31 @@ export function getDeviceInfo(): string {
  * Check if user has an active session
  */
 export async function checkExistingSession(supabase: SupabaseClient, userId: string): Promise<UserSession | null> {
-  console.log("[v0] Checking for existing session for user:", userId)
+  // [v0] Checking for existing session for user:", userId)
 
   const { data, error } = await supabase.from("user_sessions").select("*").eq("user_id", userId).single()
 
   if (error) {
     if (error.code === "PGRST116") {
       // No rows returned - no existing session
-      console.log("[v0] No existing session found")
+      // [v0] No existing session found")
       return null
     }
-    console.error("[v0] Error checking existing session:", error)
+    // console.error("[v0] Error checking existing session:", error)
     return null
   }
 
   if (data) {
     const isValid = await isSessionStillValid(supabase, data.session_id)
     if (!isValid) {
-      console.log("[v0] Found stale session, deleting it")
+      // [v0] Found stale session, deleting it")
       // Session is stale (JWT expired or invalid), delete it
       await supabase.from("user_sessions").delete().eq("id", data.id)
       return null
     }
   }
 
-  console.log("[v0] Found existing session:", data)
+  // [v0] Found existing session:", data)
   return data
 }
 
@@ -63,27 +63,27 @@ async function isSessionStillValid(supabase: SupabaseClient, sessionId: string):
     const { data, error } = await supabase.auth.getSession()
 
     if (error) {
-      console.log("[v0] Error verifying session with Supabase:", error.message)
+      // [v0] Error verifying session with Supabase:", error.message)
       return false
     }
 
     // Check if the session exists and matches the stored session ID
     if (!data.session || data.session.access_token !== sessionId) {
-      console.log("[v0] Session not found in Supabase auth or token mismatch")
+      // [v0] Session not found in Supabase auth or token mismatch")
       return false
     }
 
     // Additional check: verify the session hasn't expired
     const expiresAt = data.session.expires_at
     if (expiresAt && Date.now() / 1000 >= expiresAt) {
-      console.log("[v0] Session has expired")
+      // [v0] Session has expired")
       return false
     }
 
-    console.log("[v0] Session is valid in Supabase auth")
+    // [v0] Session is valid in Supabase auth")
     return true
   } catch (error) {
-    console.error("[v0] Error validating session with Supabase:", error)
+    // console.error("[v0] Error validating session with Supabase:", error)
     return false
   }
 }
@@ -92,7 +92,7 @@ async function isSessionStillValid(supabase: SupabaseClient, sessionId: string):
  * Create a new session record
  */
 export async function createSession(supabase: SupabaseClient, userId: string, sessionId: string): Promise<boolean> {
-  console.log("[v0] Creating new session for user:", userId)
+  // [v0] Creating new session for user:", userId)
 
   const deviceInfo = getDeviceInfo()
 
@@ -109,11 +109,11 @@ export async function createSession(supabase: SupabaseClient, userId: string, se
   })
 
   if (error) {
-    console.error("[v0] Error creating session:", error)
+    // console.error("[v0] Error creating session:", error)
     return false
   }
 
-  console.log("[v0] Session created successfully")
+  // [v0] Session created successfully")
   return true
 }
 
@@ -127,7 +127,7 @@ export async function updateSessionActivity(supabase: SupabaseClient, sessionId:
     .eq("session_id", sessionId)
 
   if (error) {
-    console.error("[v0] Error updating session activity:", error)
+    // console.error("[v0] Error updating session activity:", error)
     return false
   }
 
@@ -138,16 +138,16 @@ export async function updateSessionActivity(supabase: SupabaseClient, sessionId:
  * Delete a session record
  */
 export async function deleteSession(supabase: SupabaseClient, userId: string): Promise<boolean> {
-  console.log("[v0] Deleting session for user:", userId)
+  // [v0] Deleting session for user:", userId)
 
   const { error } = await supabase.from("user_sessions").delete().eq("user_id", userId)
 
   if (error) {
-    console.error("[v0] Error deleting session:", error)
+    // console.error("[v0] Error deleting session:", error)
     return false
   }
 
-  console.log("[v0] Session deleted successfully")
+  // [v0] Session deleted successfully")
   return true
 }
 
@@ -162,12 +162,12 @@ export async function validateSession(
   const existingSession = await checkExistingSession(supabase, userId)
 
   if (!existingSession) {
-    console.log("[v0] No session found for user")
+    // [v0] No session found for user")
     return false
   }
 
   if (existingSession.session_id !== currentSessionId) {
-    console.log("[v0] Session ID mismatch - user logged in elsewhere")
+    // [v0] Session ID mismatch - user logged in elsewhere")
     return false
   }
 

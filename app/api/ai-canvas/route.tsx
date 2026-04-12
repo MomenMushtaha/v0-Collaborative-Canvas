@@ -1,15 +1,58 @@
 import { NextResponse } from "next/server"
+import { createServerClient } from "@supabase/ssr"
 import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import { streamText, tool } from "ai"
 import { z } from "zod"
 import { getObjectsToMove } from "@/lib/group-utils"
+import { cookies } from "next/headers"
 
 export const maxDuration = 30
 
-export async function POST(request: Request) {
-  console.log("[v0] ===== AI Canvas API Route Called =====")
+// Simple in-memory rate limiter: max 20 requests per minute per user
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT_MAX = 20
+const RATE_LIMIT_WINDOW_MS = 60_000
 
+function isRateLimited(userId: string): boolean {
+  const now = Date.now()
+  const entry = rateLimitMap.get(userId)
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(userId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return false
+  }
+
+  entry.count++
+  return entry.count > RATE_LIMIT_MAX
+}
+
+export async function POST(request: Request) {
   try {
+    // Authenticate the request using Supabase session cookies
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+          setAll() {},
+        },
+      },
+    )
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Rate limit per authenticated user
+    if (isRateLimited(user.id)) {
+      return NextResponse.json({ error: "Too many requests. Please try again later." }, { status: 429 })
+    }
+
     const body = await request.json()
     const {
       message,
@@ -18,23 +61,17 @@ export async function POST(request: Request) {
       selectedObjectIds,
       selectedObjects: selectedObjectsPayload,
       canvasId,
-      userId,
       userName,
       viewport,
       usableCanvasDimensions,
     } = body
 
-    console.log("[v0] Message:", message)
-    console.log("[v0] Conversation history:", conversationHistory?.length || 0, "messages")
+    // Use the authenticated user's ID instead of trusting the request body
+    const userId = user.id
+
     const safeCurrentObjects = Array.isArray(currentObjects) ? currentObjects : []
     const safeSelectedIds = Array.isArray(selectedObjectIds) ? selectedObjectIds : []
     const safeSelectedObjects = Array.isArray(selectedObjectsPayload) ? selectedObjectsPayload : []
-
-    console.log("[v0] Current objects count:", safeCurrentObjects.length)
-    console.log("[v0] Selected objects count:", safeSelectedIds.length)
-    console.log("[v0] Canvas ID:", canvasId)
-    console.log("[v0] User:", userName)
-    console.log("[v0] Usable canvas dimensions:", usableCanvasDimensions)
 
     if (!message) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 })
@@ -65,17 +102,17 @@ export async function POST(request: Request) {
           .single()
 
         if (queueError) {
-          console.warn("[v0] Queue management unavailable (table may not exist):", queueError.message)
+          // [v0] Queue management unavailable (table may not exist):", queueError.message)
         } else {
           queueItemId = queueItem.id
-          console.log("[v0] Added to queue with ID:", queueItemId)
+          // [v0] Added to queue with ID:", queueItemId)
         }
       } catch (queueErr) {
-        console.warn("[v0] Queue management error (continuing without queue):", queueErr)
+        // [v0] Queue management error (continuing without queue):", queueErr)
       }
     }
 
-    console.log("[v0] Calling AI SDK with function calling...")
+    // [v0] Calling AI SDK with function calling...")
 
     const canvasContext = safeCurrentObjects.map((obj: any, idx: number) => {
       const objectId = (() => {
@@ -222,8 +259,8 @@ export async function POST(request: Request) {
             centerY: visibleArea.centerY,
           }
 
-    console.log("[v0] Visible area:", visibleArea)
-    console.log("[v0] Usable area:", usableArea)
+    // [v0] Visible area:", visibleArea)
+    // [v0] Usable area:", usableArea)
 
     const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -271,7 +308,7 @@ export async function POST(request: Request) {
         }),
         execute: async ({ url }) => {
           try {
-            console.log("[v0] Fetching website:", url)
+            // [v0] Fetching website:", url)
 
             // Fetch the website HTML
             const response = await fetch(url, {
@@ -334,7 +371,7 @@ export async function POST(request: Request) {
               message: `Analyzed ${url} and created ${inspirationObjects.length} design elements inspired by it.`,
             }
           } catch (error) {
-            console.error("[v0] Error fetching website:", error)
+            // Error fetching website
             return {
               success: false,
               error: `Failed to fetch website: ${error instanceof Error ? error.message : String(error)}`,
@@ -2011,7 +2048,7 @@ Example 7: User says "create 10 circles" then "create 10 squares above them" the
       content: message,
     })
 
-    console.log("[v0] Calling AI SDK with conversation context...")
+    // [v0] Calling AI SDK with conversation context...")
 
     const result = await streamText({
       model: "openai/gpt-4o-mini",
@@ -2047,8 +2084,8 @@ Example 7: User says "create 10 circles" then "create 10 squares above them" the
       return operation
     })
 
-    console.log("[v0] AI SDK response received")
-    console.log("[v0] Operations collected:", operations.length)
+    // [v0] AI SDK response received")
+    // [v0] Operations collected:", operations.length)
 
     let aiMessage = fullText || "I've processed your request!"
 
@@ -2068,11 +2105,11 @@ Example 7: User says "create 10 circles" then "create 10 squares above them" the
           })
           .eq("id", queueItemId)
       } catch (err) {
-        console.warn("[v0] Failed to update queue status:", err)
+        // [v0] Failed to update queue status:", err)
       }
     }
 
-    console.log("[v0] Returning", operations.length, "operations")
+    // [v0] Returning", operations.length, "operations")
     return NextResponse.json({
       message: aiMessage,
       operations,
@@ -2080,17 +2117,8 @@ Example 7: User says "create 10 circles" then "create 10 squares above them" the
       validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
     })
   } catch (error) {
-    console.error("[v0] ===== API ERROR =====")
-    console.error("[v0] Error type:", error?.constructor?.name)
-    console.error("[v0] Error message:", error instanceof Error ? error.message : String(error))
-    console.error("[v0] Error stack:", error instanceof Error ? error.stack : "No stack trace")
-
     return NextResponse.json(
-      {
-        error: "Failed to process request",
-        details: error instanceof Error ? error.message : String(error),
-        type: error?.constructor?.name || "Unknown",
-      },
+      { error: "Failed to process request" },
       { status: 500 },
     )
   }

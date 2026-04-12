@@ -28,10 +28,8 @@ export async function middleware(request: NextRequest) {
   try {
     // Refresh session if expired
     await supabase.auth.getUser()
-  } catch (error) {
-    // Gracefully handle invalid sessions instead of crashing
-    console.warn("[v0] Session invalid or expired in middleware:", error)
-    // Continue with next middleware - the auth check will happen in the page
+  } catch {
+    // Invalid/expired session - the auth check will happen in the page
   }
 
   return supabaseResponse
